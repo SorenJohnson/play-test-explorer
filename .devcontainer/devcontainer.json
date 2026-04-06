@@ -7,7 +7,10 @@
 		"ghcr.io/va-h/devcontainers-features/uv:1": {}
 	},
 
-	"postCreateCommand": "uv sync",
+	"remoteEnv": {
+		"GH_TOKEN": "${localEnv:GH_TOKEN}"
+	},
+	"postCreateCommand": "uv sync && gh auth setup-git",
 
 	"customizations": {
 		"vscode": {
