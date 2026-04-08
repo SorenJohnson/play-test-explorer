@@ -304,7 +304,8 @@ def _expected_pwr_price(state: GameState) -> float:
 
     remaining = state.remaining_events()
     num_adjusts = remaining.get(EventType.PWR_ADJUST, 0)
-    num_bills = remaining.get(EventType.POWER_BILL, 0) + 1  # +1 for end-game
+    # END_GAME also fires a power bill
+    num_bills = remaining.get(EventType.POWER_BILL, 0) + remaining.get(EventType.END_GAME, 0)
 
     if num_bills == 0 or not state.players:
         return float(state.market.price(Resource.PWR))
@@ -334,7 +335,8 @@ def _positive_rate_value(resource: Resource, state: GameState) -> float:
     """
     if resource == Resource.PWR:
         remaining = state.remaining_events()
-        collections = remaining.get(EventType.POWER_BILL, 0) + 1
+        # END_GAME also fires a power bill
+        collections = remaining.get(EventType.POWER_BILL, 0) + remaining.get(EventType.END_GAME, 0)
         avg_price = _expected_pwr_price(state)
         return avg_price * collections
 
@@ -352,12 +354,13 @@ def _negative_rate_cost(resource: Resource, state: GameState) -> float:
     """
     remaining = state.remaining_events()
     if resource == Resource.PWR:
-        collections = remaining.get(EventType.POWER_BILL, 0) + 1
+        collections = remaining.get(EventType.POWER_BILL, 0) + remaining.get(EventType.END_GAME, 0)
         avg_price = _expected_pwr_price(state)
         return avg_price * collections
 
     price = state.market.price(resource)
-    collections = remaining.get(EventType.FUTURES_SETTLEMENT, 0) + 1
+    # END_GAME also fires a futures settlement
+    collections = remaining.get(EventType.FUTURES_SETTLEMENT, 0) + remaining.get(EventType.END_GAME, 0)
     return price * collections
 
 

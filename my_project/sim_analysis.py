@@ -692,8 +692,9 @@ def compute_rate_value_curves(
 ) -> dict:
     """Compute the theoretical value of +1 rate for each resource at each turn."""
     deck = build_event_deck(num_turns, num_players)
-    total_power_bills = deck.count(EventType.POWER_BILL)
-    total_settlements = deck.count(EventType.FUTURES_SETTLEMENT)
+    # END_GAME replaces the last deck slot and fires both events
+    total_power_bills = deck.count(EventType.POWER_BILL) + 1  # +1 for END_GAME
+    total_settlements = deck.count(EventType.FUTURES_SETTLEMENT) + 1
     base_price = PRICE_TRACK[min(market_start_pos, len(PRICE_TRACK) - 1)]
 
     curves = {}

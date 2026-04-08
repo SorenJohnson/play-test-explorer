@@ -172,6 +172,7 @@ class EventType(StrEnum):
     POWER_BILL = "power_bill"
     DEBT_COLLECTION = "debt_collection"
     FUTURES_SETTLEMENT = "futures_settlement"
+    END_GAME = "end_game"
 
 
 def build_event_deck(num_turns: int, num_players: int) -> list[EventType]:
@@ -330,6 +331,9 @@ class GameState:
 
         # Build event deck
         event_deck = build_event_deck(max_turns, num_players)
+        # Force the final event slot to be END_GAME (runs power bill + futures)
+        if event_deck:
+            event_deck[-1] = EventType.END_GAME
 
         # Create players. Assign unique corporations randomly (capped at # of corps).
         corp_pool = list(CORPORATIONS)
@@ -422,17 +426,18 @@ def compute_build_deficit(
 def compute_rate_time_value(resource: Resource, state: GameState) -> float:
     """Compute the time-dependent value of +1 rate of a resource.
 
-    PWR: price × (remaining power bills + 1 for end-game)
-    Others: price × (remaining futures settlements + 1 for end-game)
+    END_GAME event fires both a power bill and a futures settlement, so
+    it counts toward both PWR and non-PWR collection totals.
     """
     remaining = state.remaining_events()
     price = state.market.price(resource)
+    end_game = remaining.get(EventType.END_GAME, 0)
 
     if resource == Resource.PWR:
-        collections = remaining.get(EventType.POWER_BILL, 0) + 1  # +1 for end-game
+        collections = remaining.get(EventType.POWER_BILL, 0) + end_game
         return price * collections
     else:
-        collections = remaining.get(EventType.FUTURES_SETTLEMENT, 0) + 1
+        collections = remaining.get(EventType.FUTURES_SETTLEMENT, 0) + end_game
         return price * collections
 
 
@@ -711,6 +716,10 @@ def execute_event(state: GameState, event: EventType, active_player: Player) -> 
         case EventType.FUTURES_SETTLEMENT:
             do_futures_settlement(state)
             return "futures settlement"
+        case EventType.END_GAME:
+            do_power_bill(state)
+            do_futures_settlement(state)
+            return "END GAME (final power bill + futures settlement)"
 
 
 # --- Pool Swapping ---
@@ -827,9 +836,5 @@ def run_game(
             event = state.event_deck[state.event_idx] if state.event_idx < len(state.event_deck) else EventType.NO_EVENT
             state.event_idx += 1
             run_turn(state, player, player_strategies[i], event)
-
-    # End game: final power bill + final futures settlement
-    do_power_bill(state)
-    do_futures_settlement(state)
 
     return state
