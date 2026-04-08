@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Game Inspector</title>
+  <link rel="stylesheet" href="report.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>Game Inspector</h1>
+      <p class="subtitle" id="game-info">Loading...</p>
+      <a href="compare.html" style="color:#58a6ff; font-size:0.8rem;">← Back to aggregate view</a>
+    </header>
+
+    <section>
+      <h2>Net Worth Over Time</h2>
+      <div class="chart-container wide" style="min-height:300px">
+        <canvas id="networth-chart"></canvas>
+      </div>
+    </section>
+
+    <section>
+      <h2>Market Prices Over Time</h2>
+      <div class="chart-container wide" style="min-height:350px">
+        <canvas id="market-chart"></canvas>
+      </div>
+    </section>
+
+    <section>
+      <h2>Player Rates Over Time</h2>
+      <div id="rate-charts"></div>
+    </section>
+
+    <section>
+      <h2>Turn-by-Turn Log</h2>
+      <div id="turn-log"></div>
+    </section>
+  </div>
+  <script src="game.js"></script>
+</body>
+</html>

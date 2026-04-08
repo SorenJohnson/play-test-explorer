@@ -1,0 +1,178 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #0d1117;
+  color: #c9d1d9;
+  padding: 24px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+header {
+  margin-bottom: 32px;
+}
+
+h1 {
+  font-size: 1.5rem;
+  color: #58a6ff;
+  margin-bottom: 8px;
+}
+
+h2 {
+  font-size: 1.1rem;
+  color: #58a6ff;
+  margin-bottom: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #21262d;
+}
+
+#config-summary {
+  font-size: 0.8rem;
+  color: #8b949e;
+}
+
+section {
+  margin-bottom: 32px;
+}
+
+/* Stat cards */
+.stat-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.stat-card {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.stat-card .label {
+  font-size: 0.75rem;
+  color: #8b949e;
+  margin-bottom: 4px;
+}
+
+.stat-card .value {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: #c9d1d9;
+}
+
+.stat-card .value.positive { color: #3fb950; }
+.stat-card .value.negative { color: #f85149; }
+
+.positive { color: #3fb950; }
+.negative { color: #f85149; }
+
+.contract-btn {
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 6px 12px;
+  color: #c9d1d9;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.contract-btn:hover {
+  border-color: #58a6ff;
+  background: #161b22;
+}
+
+/* Charts */
+.chart-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.chart-container {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 16px;
+  position: relative;
+}
+
+.chart-container.wide {
+  max-height: 400px;
+}
+
+/* Table */
+.table-scroll {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+th {
+  text-align: left;
+  padding: 8px;
+  border-bottom: 1px solid #30363d;
+  color: #8b949e;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+th:hover { color: #58a6ff; }
+
+td {
+  padding: 8px;
+  border-bottom: 1px solid #21262d;
+}
+
+tr:hover { background: #161b22; }
+
+tr.clickable { cursor: pointer; }
+tr.clickable:hover { background: #1f2937; }
+
+/* Game detail */
+#game-detail-content {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 16px;
+  font-size: 0.8rem;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.detail-section h3 {
+  font-size: 0.85rem;
+  color: #58a6ff;
+  margin-bottom: 8px;
+}
+
+.action-log {
+  max-height: 300px;
+  overflow-y: auto;
+  font-family: monospace;
+  font-size: 0.7rem;
+  line-height: 1.6;
+}
+
+.action-log .build { color: #58a6ff; }
+.action-log .sell { color: #3fb950; }
+.action-log .contract { color: #f0883e; }
+
+@media (max-width: 768px) {
+  .chart-row { grid-template-columns: 1fr; }
+  .detail-grid { grid-template-columns: 1fr; }
+}

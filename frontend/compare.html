@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Contract Economics Analysis</title>
+  <link rel="stylesheet" href="report.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@sgratzl/chartjs-chart-boxplot@4.4.3/build/index.umd.min.js"></script>
+  <script src="https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
+  <script src="https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"></script>
+  <script src="https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>Contract Economics</h1>
+      <p class="subtitle">What do contracts really cost? Data from 2,500 simulated 3-player games across 5 scenarios.</p>
+    </header>
+
+    <!-- Strategy overview (compact) -->
+    <section>
+      <h2>Strategy Performance</h2>
+      <div class="chart-container wide" style="min-height:350px">
+        <canvas id="strategy-nw-chart"></canvas>
+      </div>
+    </section>
+
+    <!-- Contract cost box plots -->
+    <section>
+      <h2>Contract Cost — Gross vs Net</h2>
+      <p class="subtitle">Gross = total invested to build rate infrastructure. Net = gross minus revenue already earned from selling. $50 reward line for reference.</p>
+      <div class="chart-container wide" style="min-height:550px">
+        <canvas id="contract-cost-chart"></canvas>
+      </div>
+    </section>
+
+    <!-- Contract cost by strategy -->
+    <section>
+      <h2>Contract Cost by Strategy</h2>
+      <p class="subtitle">Do smart players pay less for the same contracts?</p>
+      <div class="table-scroll">
+        <table id="strategy-contract-table">
+          <thead>
+            <tr>
+              <th>Contract</th>
+              <th>Fulfilled</th>
+              <th>Gross Cost</th>
+              <th>Net Cost</th>
+              <th>Smart</th>
+              <th>Greedy</th>
+              <th>Random</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Build paths to contracts -->
+    <section>
+      <h2>Build Paths — What Buildings Lead to Each Contract?</h2>
+      <p class="subtitle">Click a contract to see which buildings players typically built before fulfilling it.</p>
+      <div id="contract-selector"></div>
+      <div id="build-path-detail"></div>
+    </section>
+
+    <!-- Resource flow network -->
+    <section>
+      <h2>Resource Flow — Path to Contracts</h2>
+      <p class="subtitle">How resources flow from build costs through buildings to contract-eligible rates. Edge width = frequency in simulations. Click a node for details.</p>
+      <div id="flow-network" style="height:500px; background:#161b22; border:1px solid #30363d; border-radius:8px;"></div>
+      <div id="flow-detail" style="margin-top:8px;"></div>
+    </section>
+
+    <!-- Game browser -->
+    <section>
+      <h2>Browse Individual Games</h2>
+      <p class="subtitle">Filter and click to inspect a specific game's turn-by-turn history.</p>
+      <div id="game-filters" style="margin-bottom:12px; display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
+        <label style="font-size:0.8rem;">
+          Scenario:
+          <select id="filter-scenario" style="background:#21262d; border:1px solid #30363d; color:#c9d1d9; padding:4px 8px; border-radius:4px;"></select>
+        </label>
+        <label style="font-size:0.8rem;">
+          Sort by:
+          <select id="filter-sort" style="background:#21262d; border:1px solid #30363d; color:#c9d1d9; padding:4px 8px; border-radius:4px;">
+            <option value="nw_desc">Net worth (high → low)</option>
+            <option value="nw_asc">Net worth (low → high)</option>
+            <option value="contracts_desc">Contracts (most)</option>
+            <option value="contracts_asc">Contracts (fewest)</option>
+          </select>
+        </label>
+        <span id="game-count" style="font-size:0.75rem; color:#8b949e;"></span>
+      </div>
+      <div class="table-scroll">
+        <table id="game-browser-table">
+          <thead>
+            <tr>
+              <th>Game</th>
+              <th>P1 NW</th>
+              <th>P2 NW</th>
+              <th>P3 NW</th>
+              <th>Contracts</th>
+              <th>Turns</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Final market prices -->
+    <section>
+      <h2>Final Market Prices</h2>
+      <div class="chart-container wide" style="min-height:300px">
+        <canvas id="market-chart"></canvas>
+      </div>
+    </section>
+  </div>
+  <script src="compare.js"></script>
+</body>
+</html>

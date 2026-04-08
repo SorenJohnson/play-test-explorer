@@ -5,8 +5,8 @@ __pycache__/
 *.egg-info/
 dist/
 build/
-data/*
-!data/.gitkeep
-*results.json
-*data.json
+my_project/data/*
+!my_project/data/.gitkeep
+!my_project/data/*.csv
+!my_project/data/*.md
 .DS_Store

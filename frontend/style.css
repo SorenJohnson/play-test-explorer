@@ -1,0 +1,154 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #0d1117;
+  color: #c9d1d9;
+  overflow: hidden;
+}
+
+#app {
+  display: flex;
+  height: 100vh;
+}
+
+#sidebar {
+  width: 300px;
+  min-width: 300px;
+  background: #161b22;
+  padding: 16px;
+  overflow-y: auto;
+  border-right: 1px solid #30363d;
+}
+
+h1 {
+  font-size: 1.2rem;
+  color: #58a6ff;
+  margin-bottom: 4px;
+}
+
+.subtitle {
+  font-size: 0.8rem;
+  color: #8b949e;
+  margin-bottom: 16px;
+}
+
+h2 {
+  font-size: 0.9rem;
+  color: #58a6ff;
+  margin: 16px 0 8px;
+}
+
+#controls {
+  margin-bottom: 12px;
+}
+
+#controls label {
+  display: block;
+  font-size: 0.8rem;
+  cursor: pointer;
+  margin-bottom: 6px;
+}
+
+#controls input[type="checkbox"] {
+  margin-right: 6px;
+}
+
+#info-panel {
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 12px;
+  margin-bottom: 12px;
+  min-height: 60px;
+  font-size: 0.8rem;
+  line-height: 1.6;
+}
+
+.hint {
+  color: #484f58;
+  font-style: italic;
+}
+
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px 0;
+}
+
+.detail-label {
+  color: #8b949e;
+}
+
+.detail-value {
+  color: #c9d1d9;
+  font-weight: 600;
+}
+
+.building-list {
+  margin-top: 8px;
+  border-top: 1px solid #30363d;
+  padding-top: 8px;
+}
+
+.building-item {
+  font-size: 0.75rem;
+  padding: 3px 0;
+  color: #8b949e;
+}
+
+.building-item strong {
+  color: #c9d1d9;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+
+th {
+  text-align: left;
+  padding: 4px 6px;
+  border-bottom: 1px solid #30363d;
+  color: #8b949e;
+  font-weight: 500;
+}
+
+td {
+  padding: 4px 6px;
+  border-bottom: 1px solid #21262d;
+}
+
+.resource-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+#cy {
+  flex: 1;
+  background: #0d1117;
+}
+
+#tooltip {
+  display: none;
+  position: absolute;
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 0.75rem;
+  pointer-events: none;
+  z-index: 1000;
+  max-width: 280px;
+  line-height: 1.5;
+  color: #c9d1d9;
+}
