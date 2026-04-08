@@ -87,6 +87,26 @@ section {
   background: #161b22;
 }
 
+.view-toggle {
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 4px 12px;
+  color: #c9d1d9;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.view-toggle:hover {
+  border-color: #58a6ff;
+}
+
+.view-toggle.active {
+  background: #1f6feb;
+  border-color: #58a6ff;
+  color: #fff;
+}
+
 /* Charts */
 .chart-row {
   display: grid;

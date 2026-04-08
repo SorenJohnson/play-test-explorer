@@ -507,39 +507,77 @@ function renderMarketDynamics() {
     },
   });
 
-  // Table: per-resource buy/sell flow stats
-  const tbody = document.querySelector("#market-dynamics-table tbody");
-  const sorted = Object.entries(data).sort(
-    (a, b) => b[1].avg_final_price - a[1].avg_final_price
-  );
+  // Compute totals for normalization
+  let totalGames = 0;
+  let totalPlayerGames = 0;
+  for (const s of allData) {
+    const games = s.data.games || [];
+    totalGames += games.length;
+    for (const g of games) {
+      totalPlayerGames += (g.players || []).length;
+    }
+  }
 
-  tbody.innerHTML = sorted
-    .map(([r, s]) => {
-      const delta = (s.avg_final_price - s.avg_starting_price).toFixed(1);
-      const deltaClass = delta >= 0 ? "positive" : "negative";
-      const deltaSign = delta >= 0 ? "+" : "";
-      const dot = `<span class="resource-dot" style="background:${RESOURCE_COLORS[r] || "#888"}"></span>`;
-      // Market Impact: positive means market added cash to players (sells > buys)
-      const marketImpact = s.total_sell_revenue - s.total_buy_cost;
-      const impactClass = marketImpact >= 0 ? "positive" : "negative";
-      const impactSign = marketImpact >= 0 ? "+" : "";
-      const futuresPaid = s.futures_debt || 0;
-      return `<tr>
-        <td>${dot}<strong>${r}</strong></td>
-        <td>$${s.avg_starting_price}</td>
-        <td>$${s.avg_final_price}</td>
-        <td class="${deltaClass}">${deltaSign}${delta}</td>
-        <td>${s.total_bought.toLocaleString()}</td>
-        <td>${s.total_sold.toLocaleString()}</td>
-        <td>${s.net_flow > 0 ? "+" : ""}${s.net_flow.toLocaleString()}</td>
-        <td>$${s.total_buy_cost.toLocaleString()}</td>
-        <td>$${s.total_sell_revenue.toLocaleString()}</td>
-        <td>${futuresPaid > 0 ? `<span class="negative">$${futuresPaid.toLocaleString()}</span>` : "-"}</td>
-        <td class="${impactClass}">${impactSign}$${marketImpact.toLocaleString()}</td>
-      </tr>`;
-    })
-    .join("");
+  // Render the table for a given view mode
+  function renderTable(view) {
+    const tbody = document.querySelector("#market-dynamics-table tbody");
+    const sorted = Object.entries(data).sort(
+      (a, b) => b[1].avg_final_price - a[1].avg_final_price
+    );
 
+    let divisor = 1;
+    let valFmt = (v) => v.toLocaleString();
+    let cashFmt = (v) => "$" + Math.round(v).toLocaleString();
+    if (view === "per-game") {
+      divisor = totalGames || 1;
+      valFmt = (v) => (v / divisor).toFixed(1);
+      cashFmt = (v) => "$" + (v / divisor).toFixed(1);
+    } else if (view === "per-player-game") {
+      divisor = totalPlayerGames || 1;
+      valFmt = (v) => (v / divisor).toFixed(2);
+      cashFmt = (v) => "$" + (v / divisor).toFixed(2);
+    }
+
+    tbody.innerHTML = sorted
+      .map(([r, s]) => {
+        const delta = (s.avg_final_price - s.avg_starting_price).toFixed(1);
+        const deltaClass = delta >= 0 ? "positive" : "negative";
+        const deltaSign = delta >= 0 ? "+" : "";
+        const dot = `<span class="resource-dot" style="background:${RESOURCE_COLORS[r] || "#888"}"></span>`;
+        const marketImpact = s.total_sell_revenue - s.total_buy_cost;
+        const impactClass = marketImpact >= 0 ? "positive" : "negative";
+        const impactSign = marketImpact >= 0 ? "+" : "";
+        const futuresPaid = s.futures_debt || 0;
+        const netFlow = s.net_flow;
+        const netSign = netFlow > 0 ? "+" : "";
+        return `<tr>
+          <td>${dot}<strong>${r}</strong></td>
+          <td>$${s.avg_starting_price}</td>
+          <td>$${s.avg_final_price}</td>
+          <td class="${deltaClass}">${deltaSign}${delta}</td>
+          <td>${valFmt(s.total_bought)}</td>
+          <td>${valFmt(s.total_sold)}</td>
+          <td>${netSign}${valFmt(netFlow)}</td>
+          <td>${cashFmt(s.total_buy_cost)}</td>
+          <td>${cashFmt(s.total_sell_revenue)}</td>
+          <td>${futuresPaid > 0 ? `<span class="negative">${cashFmt(futuresPaid)}</span>` : "-"}</td>
+          <td class="${impactClass}">${impactSign}${cashFmt(marketImpact)}</td>
+        </tr>`;
+      })
+      .join("");
+  }
+
+  // Initial render
+  renderTable("totals");
+
+  // Wire up view toggles
+  document.querySelectorAll(".view-toggle").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".view-toggle").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      renderTable(btn.dataset.view);
+    });
+  });
 }
 
 function renderCorporationTable() {
