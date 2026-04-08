@@ -33,8 +33,8 @@
       <p class="subtitle">
         How each resource's market price moved over the game, and the buy/sell pressure driving it.
         Includes power bill earnings/debt for PWR (PWR isn't market-traded; bills convert positive PWR to cash and negative PWR to debt).
-        <strong>Futures Paid</strong> = debt incurred at futures settlements when negative rates are forcibly bought.
-        <strong>Market Impact</strong> = net cash flow ($ Sold − $ Bought).
+        <strong>Futures Paid</strong> = debt incurred at futures settlements (already included in $ Bought).
+        <strong>Net Cash Flow</strong> = $ Sold − $ Bought (includes market trades, power bills, and futures debt).
       </p>
       <div style="margin:12px 0; display:flex; gap:12px; align-items:center;">
         <label style="font-size:0.8rem;">View:</label>
@@ -59,7 +59,7 @@
               <th>$ Bought</th>
               <th>$ Sold</th>
               <th>Futures Paid</th>
-              <th>Market Impact</th>
+              <th>Net Cash Flow</th>
             </tr>
           </thead>
           <tbody></tbody>
