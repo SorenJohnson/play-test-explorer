@@ -16227,6 +16227,13 @@
             "futures_units": 0,
             "futures_cost": 0.0
           }
+        },
+        "totals": {
+          "net_worth": 534937,
+          "money": 762746,
+          "debt": 457359,
+          "contracts_fulfilled": 4591,
+          "contract_value": 229550
         }
       },
       "winners": {
@@ -16304,6 +16311,13 @@
             "futures_units": 0,
             "futures_cost": 0.0
           }
+        },
+        "totals": {
+          "net_worth": 406119,
+          "money": 373832,
+          "debt": 67563,
+          "contracts_fulfilled": 1997,
+          "contract_value": 99850
         }
       },
       "losers": {
@@ -16381,6 +16395,13 @@
             "futures_units": 0,
             "futures_cost": 0.0
           }
+        },
+        "totals": {
+          "net_worth": -38189,
+          "money": 168898,
+          "debt": 259887,
+          "contracts_fulfilled": 1056,
+          "contract_value": 52800
         }
       },
       "smart": {
@@ -16458,6 +16479,13 @@
             "futures_units": 4467,
             "futures_cost": 24851.0
           }
+        },
+        "totals": {
+          "net_worth": 302952,
+          "money": 301680,
+          "debt": 81528,
+          "contracts_fulfilled": 1656,
+          "contract_value": 82800
         }
       },
       "greedy": {
@@ -16535,6 +16563,13 @@
             "futures_units": 0,
             "futures_cost": 0.0
           }
+        },
+        "totals": {
+          "net_worth": 153471,
+          "money": 201549,
+          "debt": 84028,
+          "contracts_fulfilled": 719,
+          "contract_value": 35950
         }
       },
       "random": {
@@ -16612,6 +16647,13 @@
             "futures_units": 0,
             "futures_cost": 0.0
           }
+        },
+        "totals": {
+          "net_worth": 78514,
+          "money": 259517,
+          "debt": 291803,
+          "contracts_fulfilled": 2216,
+          "contract_value": 110800
         }
       }
     }

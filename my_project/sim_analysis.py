@@ -382,6 +382,14 @@ def _segment_player_flows(sim_files: list[Path]) -> dict:
                 "futures_units": 0,
                 "futures_cost": 0.0,
             }),
+            # Per-player totals aggregated across resources + contracts
+            "totals": {
+                "net_worth": 0,
+                "money": 0,
+                "debt": 0,
+                "contracts_fulfilled": 0,
+                "contract_value": 0,  # contracts × $50 (before debt payoff)
+            },
         }
         for seg in segment_keys
     }
@@ -414,6 +422,9 @@ def _segment_player_flows(sim_files: list[Path]) -> dict:
                 if strat in segment_keys:
                     segments.append(strat)
 
+                contracts = p.get("contracts_fulfilled", 0)
+                money = p.get("money", 0)
+                debt = p.get("debt", 0)
                 for seg in segments:
                     out[seg]["player_count"] += 1
                     seg_res = out[seg]["resources"]
@@ -429,6 +440,13 @@ def _segment_player_flows(sim_files: list[Path]) -> dict:
                         seg_res[r]["futures_units"] += v
                     for r, v in flows.get("futures_cost", {}).items():
                         seg_res[r]["futures_cost"] += v
+                    # Totals
+                    t = out[seg]["totals"]
+                    t["net_worth"] += nw
+                    t["money"] += money
+                    t["debt"] += debt
+                    t["contracts_fulfilled"] += contracts
+                    t["contract_value"] += contracts * 50
 
     # Convert defaultdicts to plain dicts
     return {
@@ -438,6 +456,7 @@ def _segment_player_flows(sim_files: list[Path]) -> dict:
                 r: {k: round(v, 2) if isinstance(v, float) else v for k, v in stats.items()}
                 for r, stats in s["resources"].items()
             },
+            "totals": s["totals"],
         }
         for seg, s in out.items()
     }

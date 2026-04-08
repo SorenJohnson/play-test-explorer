@@ -567,6 +567,85 @@ function renderMarketDynamics() {
     }
   }
 
+  function renderSegmentSummary(segment, divisor, unitLabel) {
+    const el = document.getElementById("segment-summary");
+    if (!el) return;
+    const seg = segments[segment];
+    if (!seg || !seg.totals) {
+      el.innerHTML = "";
+      return;
+    }
+    const t = seg.totals;
+    const pc = seg.player_count || 1;
+    const d = divisor || pc;
+    const fmt = (v) => "$" + (v / d).toFixed(1);
+    const fmtN = (v) => (v / d).toFixed(2);
+
+    // Compute cash components from segment resource flows
+    const segRes = seg.resources || {};
+    let totalSold = 0, totalBought = 0, totalFutures = 0;
+    let pwrSold = 0, pwrBought = 0;
+    for (const [r, stats] of Object.entries(segRes)) {
+      totalSold += stats.sell_revenue || 0;
+      totalBought += stats.buy_cost || 0;
+      totalFutures += stats.futures_cost || 0;
+      if (r === "PWR") {
+        pwrSold = stats.sell_revenue || 0;
+        pwrBought = stats.buy_cost || 0;
+      }
+    }
+    const marketNonPwrSold = totalSold - pwrSold;
+    const marketNonPwrBought = totalBought - pwrBought;
+    const pwrNet = pwrSold - pwrBought;
+
+    el.innerHTML = `
+      <div style="background:#161b22; border:1px solid #30363d; border-radius:6px; padding:16px;">
+        <h3 style="color:#58a6ff; margin-bottom:8px; font-size:0.95rem;">
+          Player Income Breakdown — ${segment} (${pc.toLocaleString()} player-games)
+        </h3>
+        <p style="color:#8b949e; font-size:0.75rem; margin-bottom:12px;">
+          Where does a typical ${segment} player's money come from? (${unitLabel})
+        </p>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:16px; font-size:0.8rem;">
+          <div>
+            <div class="detail-label">Final Net Worth</div>
+            <div class="detail-value ${t.net_worth >= 0 ? "positive" : "negative"}" style="font-size:1.1rem; font-weight:700;">
+              ${fmt(t.net_worth)}
+            </div>
+          </div>
+          <div>
+            <div class="detail-label">= Money</div>
+            <div class="detail-value">${fmt(t.money)}</div>
+          </div>
+          <div>
+            <div class="detail-label">− Debt</div>
+            <div class="detail-value negative">${fmt(t.debt)}</div>
+          </div>
+          <div>
+            <div class="detail-label">+ Contract Value</div>
+            <div class="detail-value positive">${fmt(t.contract_value)}</div>
+            <div style="color:#8b949e; font-size:0.7rem;">${fmtN(t.contracts_fulfilled)} contracts</div>
+          </div>
+          <div>
+            <div class="detail-label">Market Sales (non-PWR)</div>
+            <div class="detail-value positive">${fmt(marketNonPwrSold)}</div>
+          </div>
+          <div>
+            <div class="detail-label">Market Buys (non-PWR)</div>
+            <div class="detail-value negative">${fmt(marketNonPwrBought)}</div>
+          </div>
+          <div>
+            <div class="detail-label">PWR Net (power bills)</div>
+            <div class="detail-value ${pwrNet >= 0 ? "positive" : "negative"}">${pwrNet >= 0 ? "+" : ""}${fmt(pwrNet)}</div>
+          </div>
+          <div>
+            <div class="detail-label">Futures Debt</div>
+            <div class="detail-value negative">${fmt(totalFutures)}</div>
+          </div>
+        </div>
+      </div>`;
+  }
+
   // Render the table for a given view mode + segment
   function renderTable(view, segment) {
     const tbody = document.querySelector("#market-dynamics-table tbody");
@@ -683,6 +762,11 @@ function renderMarketDynamics() {
     </tr>`);
 
     tbody.innerHTML = rowsHtml.join("");
+
+    // Render the segment summary panel (always per-player-game so it's readable)
+    if (segments[segment]) {
+      renderSegmentSummary(segment, segments[segment].player_count || 1, "per player-game");
+    }
   }
 
   // Initial render
