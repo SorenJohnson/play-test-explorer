@@ -13635,13 +13635,13 @@
     "PWR": [
       {
         "turn": 1,
-        "value": 16,
-        "remaining_collections": 4
+        "value": 12,
+        "remaining_collections": 3
       },
       {
         "turn": 2,
-        "value": 12,
-        "remaining_collections": 3
+        "value": 8,
+        "remaining_collections": 2
       },
       {
         "turn": 3,
@@ -13655,8 +13655,8 @@
       },
       {
         "turn": 5,
-        "value": 8,
-        "remaining_collections": 2
+        "value": 4,
+        "remaining_collections": 1
       },
       {
         "turn": 6,
@@ -13677,13 +13677,13 @@
     "H2O": [
       {
         "turn": 1,
-        "value": 20,
-        "remaining_collections": 5
+        "value": 16,
+        "remaining_collections": 4
       },
       {
         "turn": 2,
-        "value": 16,
-        "remaining_collections": 4
+        "value": 12,
+        "remaining_collections": 3
       },
       {
         "turn": 3,
@@ -13697,8 +13697,8 @@
       },
       {
         "turn": 5,
-        "value": 12,
-        "remaining_collections": 3
+        "value": 8,
+        "remaining_collections": 2
       },
       {
         "turn": 6,
@@ -13719,13 +13719,13 @@
     "FE": [
       {
         "turn": 1,
-        "value": 20,
-        "remaining_collections": 5
+        "value": 16,
+        "remaining_collections": 4
       },
       {
         "turn": 2,
-        "value": 16,
-        "remaining_collections": 4
+        "value": 12,
+        "remaining_collections": 3
       },
       {
         "turn": 3,
@@ -13739,8 +13739,8 @@
       },
       {
         "turn": 5,
-        "value": 12,
-        "remaining_collections": 3
+        "value": 8,
+        "remaining_collections": 2
       },
       {
         "turn": 6,
@@ -13761,13 +13761,13 @@
     "C": [
       {
         "turn": 1,
-        "value": 20,
-        "remaining_collections": 5
+        "value": 16,
+        "remaining_collections": 4
       },
       {
         "turn": 2,
-        "value": 16,
-        "remaining_collections": 4
+        "value": 12,
+        "remaining_collections": 3
       },
       {
         "turn": 3,
@@ -13781,8 +13781,8 @@
       },
       {
         "turn": 5,
-        "value": 12,
-        "remaining_collections": 3
+        "value": 8,
+        "remaining_collections": 2
       },
       {
         "turn": 6,
@@ -13803,13 +13803,13 @@
     "SI": [
       {
         "turn": 1,
-        "value": 20,
-        "remaining_collections": 5
+        "value": 16,
+        "remaining_collections": 4
       },
       {
         "turn": 2,
-        "value": 16,
-        "remaining_collections": 4
+        "value": 12,
+        "remaining_collections": 3
       },
       {
         "turn": 3,
@@ -13823,8 +13823,8 @@
       },
       {
         "turn": 5,
-        "value": 12,
-        "remaining_collections": 3
+        "value": 8,
+        "remaining_collections": 2
       },
       {
         "turn": 6,
@@ -13845,13 +13845,13 @@
     "O2": [
       {
         "turn": 1,
-        "value": 20,
-        "remaining_collections": 5
+        "value": 16,
+        "remaining_collections": 4
       },
       {
         "turn": 2,
-        "value": 16,
-        "remaining_collections": 4
+        "value": 12,
+        "remaining_collections": 3
       },
       {
         "turn": 3,
@@ -13865,8 +13865,8 @@
       },
       {
         "turn": 5,
-        "value": 12,
-        "remaining_collections": 3
+        "value": 8,
+        "remaining_collections": 2
       },
       {
         "turn": 6,
@@ -13887,13 +13887,13 @@
     "FOOD": [
       {
         "turn": 1,
-        "value": 20,
-        "remaining_collections": 5
+        "value": 16,
+        "remaining_collections": 4
       },
       {
         "turn": 2,
-        "value": 16,
-        "remaining_collections": 4
+        "value": 12,
+        "remaining_collections": 3
       },
       {
         "turn": 3,
@@ -13907,8 +13907,8 @@
       },
       {
         "turn": 5,
-        "value": 12,
-        "remaining_collections": 3
+        "value": 8,
+        "remaining_collections": 2
       },
       {
         "turn": 6,
@@ -13929,13 +13929,13 @@
     "GLS": [
       {
         "turn": 1,
-        "value": 20,
-        "remaining_collections": 5
+        "value": 16,
+        "remaining_collections": 4
       },
       {
         "turn": 2,
-        "value": 16,
-        "remaining_collections": 4
+        "value": 12,
+        "remaining_collections": 3
       },
       {
         "turn": 3,
@@ -13949,8 +13949,8 @@
       },
       {
         "turn": 5,
-        "value": 12,
-        "remaining_collections": 3
+        "value": 8,
+        "remaining_collections": 2
       },
       {
         "turn": 6,
@@ -13971,13 +13971,13 @@
     "ELX": [
       {
         "turn": 1,
-        "value": 20,
-        "remaining_collections": 5
+        "value": 16,
+        "remaining_collections": 4
       },
       {
         "turn": 2,
-        "value": 16,
-        "remaining_collections": 4
+        "value": 12,
+        "remaining_collections": 3
       },
       {
         "turn": 3,
@@ -13991,8 +13991,8 @@
       },
       {
         "turn": 5,
-        "value": 12,
-        "remaining_collections": 3
+        "value": 8,
+        "remaining_collections": 2
       },
       {
         "turn": 6,
@@ -15471,6 +15471,309 @@
       "ELX": 2862,
       "GLS": 2553,
       "H2O": 2516
+    }
+  },
+  "corporations": {
+    "Yoshimi Robotics": {
+      "games": 2500,
+      "wins": 786,
+      "win_rate": 0.314,
+      "avg_net_worth": 53.2,
+      "median_net_worth": 67,
+      "avg_contracts": 0.73,
+      "by_strategy": {
+        "greedy": {
+          "games": 680,
+          "win_rate": 0.274,
+          "avg_net_worth": 55.0
+        },
+        "smart": {
+          "games": 833,
+          "win_rate": 0.444,
+          "avg_net_worth": 106.3
+        },
+        "random": {
+          "games": 987,
+          "win_rate": 0.233,
+          "avg_net_worth": 7.1
+        }
+      }
+    },
+    "Seneca Development": {
+      "games": 2500,
+      "wins": 948,
+      "win_rate": 0.379,
+      "avg_net_worth": 87.9,
+      "median_net_worth": 84,
+      "avg_contracts": 0.59,
+      "by_strategy": {
+        "greedy": {
+          "games": 650,
+          "win_rate": 0.312,
+          "avg_net_worth": 82.0
+        },
+        "smart": {
+          "games": 885,
+          "win_rate": 0.525,
+          "avg_net_worth": 139.8
+        },
+        "random": {
+          "games": 965,
+          "win_rate": 0.29,
+          "avg_net_worth": 44.3
+        }
+      }
+    },
+    "Reclamation Inc.": {
+      "games": 2500,
+      "wins": 776,
+      "win_rate": 0.31,
+      "avg_net_worth": 74.0,
+      "median_net_worth": 70,
+      "avg_contracts": 0.52,
+      "by_strategy": {
+        "greedy": {
+          "games": 670,
+          "win_rate": 0.296,
+          "avg_net_worth": 78.8
+        },
+        "random": {
+          "games": 1048,
+          "win_rate": 0.233,
+          "avg_net_worth": 32.1
+        },
+        "smart": {
+          "games": 782,
+          "win_rate": 0.427,
+          "avg_net_worth": 126.2
+        }
+      }
+    }
+  },
+  "building_value": {
+    "Iron Mine": {
+      "times_built": 8221,
+      "games_built_in": 2437,
+      "games_winner_built": 1369,
+      "win_rate": 0.562,
+      "avg_builder_net_worth": 49.2,
+      "avg_market_cost": 0.4
+    },
+    "Water Pump": {
+      "times_built": 7755,
+      "games_built_in": 2452,
+      "games_winner_built": 1496,
+      "win_rate": 0.61,
+      "avg_builder_net_worth": 59.1,
+      "avg_market_cost": 1.0
+    },
+    "Ice Condensor": {
+      "times_built": 6320,
+      "games_built_in": 2458,
+      "games_winner_built": 1522,
+      "win_rate": 0.619,
+      "avg_builder_net_worth": 73.9,
+      "avg_market_cost": 2.6
+    },
+    "Geothermal Plant": {
+      "times_built": 6272,
+      "games_built_in": 2458,
+      "games_winner_built": 1732,
+      "win_rate": 0.705,
+      "avg_builder_net_worth": 91.3,
+      "avg_market_cost": 2.4
+    },
+    "Wind Turbine": {
+      "times_built": 6266,
+      "games_built_in": 2446,
+      "games_winner_built": 1667,
+      "win_rate": 0.682,
+      "avg_builder_net_worth": 87.5,
+      "avg_market_cost": 1.8
+    },
+    "Solar Panel": {
+      "times_built": 6045,
+      "games_built_in": 2434,
+      "games_winner_built": 1590,
+      "win_rate": 0.653,
+      "avg_builder_net_worth": 83.1,
+      "avg_market_cost": 2.5
+    },
+    "Electrolysis Reactor": {
+      "times_built": 5398,
+      "games_built_in": 2343,
+      "games_winner_built": 1381,
+      "win_rate": 0.589,
+      "avg_builder_net_worth": 76.8,
+      "avg_market_cost": 2.1
+    },
+    "Dry Ice Condensor": {
+      "times_built": 5266,
+      "games_built_in": 2391,
+      "games_winner_built": 1506,
+      "win_rate": 0.63,
+      "avg_builder_net_worth": 84.6,
+      "avg_market_cost": 3.1
+    },
+    "Silicon Quarry": {
+      "times_built": 5149,
+      "games_built_in": 2320,
+      "games_winner_built": 1077,
+      "win_rate": 0.464,
+      "avg_builder_net_worth": 52.5,
+      "avg_market_cost": 0.9
+    },
+    "Underground Farm": {
+      "times_built": 4923,
+      "games_built_in": 2390,
+      "games_winner_built": 1277,
+      "win_rate": 0.534,
+      "avg_builder_net_worth": 66.3,
+      "avg_market_cost": 1.2
+    },
+    "Deep Iron Mine": {
+      "times_built": 4616,
+      "games_built_in": 2366,
+      "games_winner_built": 1082,
+      "win_rate": 0.457,
+      "avg_builder_net_worth": 53.6,
+      "avg_market_cost": 3.3
+    },
+    "Hydroponic Farm": {
+      "times_built": 4513,
+      "games_built_in": 2270,
+      "games_winner_built": 1263,
+      "win_rate": 0.556,
+      "avg_builder_net_worth": 78.5,
+      "avg_market_cost": 1.2
+    },
+    "Deep Water Pump": {
+      "times_built": 4437,
+      "games_built_in": 2334,
+      "games_winner_built": 1104,
+      "win_rate": 0.473,
+      "avg_builder_net_worth": 61.9,
+      "avg_market_cost": 3.8
+    },
+    "Carbon Quarry": {
+      "times_built": 4377,
+      "games_built_in": 2151,
+      "games_winner_built": 903,
+      "win_rate": 0.42,
+      "avg_builder_net_worth": 48.1,
+      "avg_market_cost": 0.8
+    },
+    "Greenhouse Farm": {
+      "times_built": 4351,
+      "games_built_in": 2322,
+      "games_winner_built": 1173,
+      "win_rate": 0.505,
+      "avg_builder_net_worth": 72.9,
+      "avg_market_cost": 3.1
+    },
+    "Glass Kiln": {
+      "times_built": 3357,
+      "games_built_in": 2067,
+      "games_winner_built": 894,
+      "win_rate": 0.433,
+      "avg_builder_net_worth": 61.1,
+      "avg_market_cost": 2.0
+    },
+    "Wind Array": {
+      "times_built": 3038,
+      "games_built_in": 2103,
+      "games_winner_built": 1082,
+      "win_rate": 0.515,
+      "avg_builder_net_worth": 97.2,
+      "avg_market_cost": 3.3
+    },
+    "Elemental Quarry": {
+      "times_built": 2976,
+      "games_built_in": 2057,
+      "games_winner_built": 775,
+      "win_rate": 0.377,
+      "avg_builder_net_worth": 58.3,
+      "avg_market_cost": 2.1
+    },
+    "Solar Array": {
+      "times_built": 2863,
+      "games_built_in": 2059,
+      "games_winner_built": 1017,
+      "win_rate": 0.494,
+      "avg_builder_net_worth": 95.0,
+      "avg_market_cost": 4.6
+    },
+    "Electronics Plant": {
+      "times_built": 2755,
+      "games_built_in": 1789,
+      "games_winner_built": 665,
+      "win_rate": 0.372,
+      "avg_builder_net_worth": 44.0,
+      "avg_market_cost": 2.2
+    },
+    "Wide Carbon Quarry": {
+      "times_built": 2541,
+      "games_built_in": 1900,
+      "games_winner_built": 619,
+      "win_rate": 0.326,
+      "avg_builder_net_worth": 49.6,
+      "avg_market_cost": 3.9
+    },
+    "Wide Silicon Quarry": {
+      "times_built": 2320,
+      "games_built_in": 1756,
+      "games_winner_built": 578,
+      "win_rate": 0.329,
+      "avg_builder_net_worth": 57.3,
+      "avg_market_cost": 3.6
+    },
+    "Electronics Factory": {
+      "times_built": 2295,
+      "games_built_in": 1722,
+      "games_winner_built": 589,
+      "win_rate": 0.342,
+      "avg_builder_net_worth": 47.5,
+      "avg_market_cost": 4.2
+    },
+    "Glass Factory": {
+      "times_built": 2183,
+      "games_built_in": 1681,
+      "games_winner_built": 595,
+      "win_rate": 0.354,
+      "avg_builder_net_worth": 58.0,
+      "avg_market_cost": 3.3
+    },
+    "Oxygen Recycler": {
+      "times_built": 2142,
+      "games_built_in": 1674,
+      "games_winner_built": 593,
+      "win_rate": 0.354,
+      "avg_builder_net_worth": 50.8,
+      "avg_market_cost": 2.9
+    },
+    "Domed Dry Ice Condensor": {
+      "times_built": 1632,
+      "games_built_in": 1632,
+      "games_winner_built": 662,
+      "win_rate": 0.406,
+      "avg_builder_net_worth": 86.6,
+      "avg_market_cost": 9.0
+    },
+    "Geothermal Borehole": {
+      "times_built": 1474,
+      "games_built_in": 1474,
+      "games_winner_built": 635,
+      "win_rate": 0.431,
+      "avg_builder_net_worth": 106.6,
+      "avg_market_cost": 4.1
+    },
+    "Domed Ice Condenser": {
+      "times_built": 1425,
+      "games_built_in": 1425,
+      "games_winner_built": 448,
+      "win_rate": 0.314,
+      "avg_builder_net_worth": 71.8,
+      "avg_market_cost": 7.2
     }
   }
 }

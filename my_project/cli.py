@@ -6,6 +6,8 @@ import json
 from my_project.cost_analysis import export_analysis
 from my_project.export import export_network
 from my_project.sim_analysis import (
+    analyze_building_value,
+    analyze_corporations,
     analyze_sim_building_costs,
     analyze_sim_contracts,
     compute_rate_value_curves,
@@ -120,6 +122,8 @@ def cmd_analyze() -> None:
         data["sim_building_costs"] = analyze_sim_building_costs(sim_files)
         data["rate_value_curves"] = compute_rate_value_curves()
         data["resource_flows"] = compute_resource_flows(sim_files)
+        data["corporations"] = analyze_corporations(sim_files)
+        data["building_value"] = analyze_building_value(sim_files)
         source = "full" if full_files else "publish"
         print(f"Analyzed {len(sim_files)} simulation files (from {source} data)")
 

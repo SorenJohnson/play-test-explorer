@@ -187,6 +187,148 @@ def analyze_sim_building_costs(sim_files: list[Path]) -> dict:
     return results
 
 
+def analyze_corporations(sim_files: list[Path]) -> dict:
+    """Compute win rate and performance stats per corporation.
+
+    A "win" = highest net worth in a game. Ties count for all tied players.
+    """
+    stats: dict[str, dict] = defaultdict(lambda: {
+        "games": 0,
+        "wins": 0,
+        "net_worths": [],
+        "contracts": 0,
+        "by_strategy": defaultdict(lambda: {"games": 0, "wins": 0, "net_worths": []}),
+    })
+
+    for f in sim_files:
+        with open(f) as fh:
+            data = json.load(fh)
+
+        for game in data["games"]:
+            players = game.get("players", [])
+            if not players:
+                continue
+
+            winning_nw = max(p["net_worth"] for p in players)
+
+            for p in players:
+                corp = p.get("corporation", "")
+                if not corp:
+                    continue
+                s = stats[corp]
+                s["games"] += 1
+                s["net_worths"].append(p["net_worth"])
+                s["contracts"] += p.get("contracts_fulfilled", 0)
+                if p["net_worth"] == winning_nw:
+                    s["wins"] += 1
+
+                strat = p.get("strategy", "unknown")
+                ss = s["by_strategy"][strat]
+                ss["games"] += 1
+                ss["net_worths"].append(p["net_worth"])
+                if p["net_worth"] == winning_nw:
+                    ss["wins"] += 1
+
+    results = {}
+    for corp, s in stats.items():
+        n = s["games"]
+        nws = sorted(s["net_worths"])
+        results[corp] = {
+            "games": n,
+            "wins": s["wins"],
+            "win_rate": round(s["wins"] / n, 3) if n else 0,
+            "avg_net_worth": round(sum(nws) / n, 1) if n else 0,
+            "median_net_worth": nws[n // 2] if n else 0,
+            "avg_contracts": round(s["contracts"] / n, 2) if n else 0,
+            "by_strategy": {
+                strat: {
+                    "games": ss["games"],
+                    "win_rate": round(ss["wins"] / ss["games"], 3) if ss["games"] else 0,
+                    "avg_net_worth": round(sum(ss["net_worths"]) / ss["games"], 1) if ss["games"] else 0,
+                }
+                for strat, ss in s["by_strategy"].items()
+            },
+        }
+    return results
+
+
+def analyze_building_value(sim_files: list[Path]) -> dict:
+    """Compute win rate and value metrics per building.
+
+    - times_built: total across all games
+    - win_rate: games_where_winner_built_it / games_where_anyone_built_it
+    - avg_builder_net_worth: avg final NW of players who built it
+    - avg_market_cost: avg $ paid at market when this building was built
+    """
+    # Building → stats
+    total_count: dict[str, int] = defaultdict(int)
+    market_cost_total: dict[str, float] = defaultdict(float)
+    builder_nws: dict[str, list[int]] = defaultdict(list)
+
+    # For win rate: track games_built and games_winner_built per building
+    games_built: dict[str, int] = defaultdict(int)
+    games_winner_built: dict[str, int] = defaultdict(int)
+
+    for f in sim_files:
+        with open(f) as fh:
+            data = json.load(fh)
+
+        for game in data["games"]:
+            players = game.get("players", [])
+            if not players:
+                continue
+
+            winning_nw = max(p["net_worth"] for p in players)
+
+            # Collect all builds in this game (from action history)
+            built_by_player: dict[str, set[str]] = defaultdict(set)
+            for turn in game.get("action_history", []):
+                player_name = turn["player"]
+                for action in turn.get("actions", []):
+                    if action["type"] != "build":
+                        continue
+                    buildings = action.get("buildings", [])
+                    money = action.get("money_spent", 0)
+                    per_building = money / len(buildings) if buildings else 0
+                    for bname in buildings:
+                        total_count[bname] += 1
+                        market_cost_total[bname] += per_building
+                        built_by_player[player_name].add(bname)
+
+            # Track game-level stats per building
+            all_built_this_game: set[str] = set()
+            winner_built_this_game: set[str] = set()
+            for i, p in enumerate(players):
+                player_name = f"Player_{i+1}"
+                player_builds = built_by_player.get(player_name, set())
+                all_built_this_game.update(player_builds)
+                for b in player_builds:
+                    builder_nws[b].append(p["net_worth"])
+                if p["net_worth"] == winning_nw:
+                    winner_built_this_game.update(player_builds)
+
+            for b in all_built_this_game:
+                games_built[b] += 1
+            for b in winner_built_this_game:
+                games_winner_built[b] += 1
+
+    results = {}
+    for bname in sorted(total_count.keys(), key=lambda b: -total_count[b]):
+        count = total_count[bname]
+        gb = games_built[bname]
+        gw = games_winner_built[bname]
+        nws = builder_nws[bname]
+        results[bname] = {
+            "times_built": count,
+            "games_built_in": gb,
+            "games_winner_built": gw,
+            "win_rate": round(gw / gb, 3) if gb else 0,
+            "avg_builder_net_worth": round(sum(nws) / len(nws), 1) if nws else 0,
+            "avg_market_cost": round(market_cost_total[bname] / count, 1) if count else 0,
+        }
+    return results
+
+
 def compute_resource_flows(sim_files: list[Path]) -> dict:
     """Compute resource-to-resource flow data from simulation action histories.
 

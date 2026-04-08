@@ -27,6 +27,8 @@ async function init() {
 
   renderStrategyChart();
   if (analysisData) {
+    renderCorporationTable();
+    renderBuildingValueTable();
     renderContractCostChart();
     renderStrategyContractTable();
     renderContractSelector();
@@ -518,6 +520,111 @@ function renderGameBrowser() {
   scenarioSelect.addEventListener("change", refresh);
   sortSelect.addEventListener("change", refresh);
   refresh();
+}
+
+// Starting rates per corporation (mirrors simulation.py CORPORATIONS)
+const CORP_STARTING_RATES = {
+  "Seneca Development": { PWR: 2, FE: 1, FOOD: -1 },
+  "Yoshimi Robotics": { PWR: -2, FE: 2 },
+  "Reclamation Inc.": { PWR: 1, SI: 1, C: 1, H2O: -1 },
+};
+
+function renderCorporationTable() {
+  const data = analysisData.corporations;
+  if (!data) return;
+
+  const tbody = document.querySelector("#corporation-table tbody");
+  const sorted = Object.entries(data).sort((a, b) => b[1].win_rate - a[1].win_rate);
+
+  tbody.innerHTML = sorted
+    .map(([name, s]) => {
+      const rates = CORP_STARTING_RATES[name] || {};
+      const rateStr = Object.entries(rates)
+        .map(([r, v]) => {
+          const sign = v > 0 ? "+" : "";
+          const color = v > 0 ? "#3fb950" : "#f85149";
+          return `<span style="color:${color}">${sign}${v} ${r}</span>`;
+        })
+        .join(" ");
+      return `<tr>
+        <td><strong>${name}</strong></td>
+        <td>${rateStr}</td>
+        <td>${s.games}</td>
+        <td>${s.wins}</td>
+        <td><strong>${(s.win_rate * 100).toFixed(1)}%</strong></td>
+        <td>$${s.avg_net_worth}</td>
+        <td>$${s.median_net_worth}</td>
+        <td>${s.avg_contracts}</td>
+      </tr>`;
+    })
+    .join("");
+}
+
+function renderBuildingValueTable() {
+  const data = analysisData.building_value;
+  if (!data) return;
+
+  const table = document.getElementById("building-value-table");
+  const tbody = table.querySelector("tbody");
+  const entries = Object.entries(data);
+
+  let currentSort = { col: 4, asc: false }; // default: win_rate desc
+
+  function getSortValue(name, s, colIdx) {
+    switch (colIdx) {
+      case 0: return name;
+      case 1: return s.times_built;
+      case 2: return s.games_built_in;
+      case 3: return s.games_winner_built;
+      case 4: return s.win_rate;
+      case 5: return s.avg_builder_net_worth;
+      case 6: return s.avg_market_cost;
+      default: return 0;
+    }
+  }
+
+  function renderRows() {
+    const sorted = [...entries].sort((a, b) => {
+      const va = getSortValue(a[0], a[1], currentSort.col);
+      const vb = getSortValue(b[0], b[1], currentSort.col);
+      if (typeof va === "string") return currentSort.asc ? va.localeCompare(vb) : vb.localeCompare(va);
+      return currentSort.asc ? va - vb : vb - va;
+    });
+
+    tbody.innerHTML = sorted
+      .map(([name, s]) => {
+        const winPct = (s.win_rate * 100).toFixed(1);
+        return `<tr>
+          <td>${name}</td>
+          <td>${s.times_built}</td>
+          <td>${s.games_built_in}</td>
+          <td>${s.games_winner_built}</td>
+          <td><strong>${winPct}%</strong></td>
+          <td>$${s.avg_builder_net_worth}</td>
+          <td>$${s.avg_market_cost}</td>
+        </tr>`;
+      })
+      .join("");
+  }
+
+  // Sortable headers
+  table.querySelectorAll("thead th").forEach((th, idx) => {
+    th.style.cursor = "pointer";
+    th.addEventListener("click", () => {
+      if (currentSort.col === idx) {
+        currentSort.asc = !currentSort.asc;
+      } else {
+        currentSort = { col: idx, asc: false };
+      }
+      table.querySelectorAll("thead th").forEach((h) => {
+        h.textContent = h.textContent.replace(/ [▲▼]$/, "");
+      });
+      th.textContent += currentSort.asc ? " ▲" : " ▼";
+      renderRows();
+    });
+  });
+
+  renderRows();
 }
 
 init();
