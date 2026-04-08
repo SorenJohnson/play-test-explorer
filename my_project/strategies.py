@@ -258,52 +258,63 @@ def _score_contract(state: GameState, player: Player, contract) -> float | None:
 
 # --- Time-dependent rate valuation ---
 
-def _time_dependent_rate_value(
-    resource: Resource,
-    state: GameState,
-) -> float:
-    """Value of +1 rate based on remaining events that will 'collect' on it.
+def _positive_rate_value(resource: Resource, state: GameState) -> float:
+    """Value of +1 positive rate.
 
-    PWR: valued by remaining power bills (+ end-game power bill equivalent)
-    Other resources: valued by remaining futures settlements (+ end-game settlement)
+    - PWR: earns at every power bill (including end-game). Passive income.
+    - Other: only realized by selling (one-shot at current market price).
+      We assume a single sell at current price.
     """
-    remaining = state.remaining_events()
     price = state.market.price(resource)
-
     if resource == Resource.PWR:
-        # Power bills pay rate × price. +1 for mandatory end-game power bill
-        collections = remaining.get(EventType.POWER_BILL, 0) + 1
+        remaining = state.remaining_events()
+        collections = remaining.get(EventType.POWER_BILL, 0) + 1  # +1 for end-game
         return price * collections
     else:
-        # Futures settlements charge for negative rates at market price
-        # +1 for mandatory end-game futures settlement
+        return float(price)  # one-shot sell value
+
+
+def _negative_rate_cost(resource: Resource, state: GameState) -> float:
+    """Cost of -1 negative rate.
+
+    - PWR: charged at every power bill (including end-game). Persistent debt.
+    - Other: charged at every futures settlement (including end-game).
+    """
+    price = state.market.price(resource)
+    remaining = state.remaining_events()
+    if resource == Resource.PWR:
+        collections = remaining.get(EventType.POWER_BILL, 0) + 1
+    else:
         collections = remaining.get(EventType.FUTURES_SETTLEMENT, 0) + 1
-        return price * collections
+    return price * collections
 
 
 def _smart_score_build_value(cards, state: GameState, player: Player) -> float:
-    """Value of rates gained, using time-dependent valuation."""
+    """Value of rates gained from building these cards.
+
+    Positive rates valued by sell/power-bill potential.
+    Negative rates valued by settlement/power-bill cost.
+    """
     value = 0.0
     for card in cards:
         for ra in card.rates:
-            rv = _time_dependent_rate_value(ra.resource, state)
             if ra.amount > 0:
-                value += rv * ra.amount
+                value += _positive_rate_value(ra.resource, state) * ra.amount
             else:
-                value -= rv * abs(ra.amount)
+                value -= _negative_rate_cost(ra.resource, state) * abs(ra.amount)
     return value
 
 
 def _smart_score_contract(state: GameState, player: Player, contract) -> float | None:
-    """Score contract using time-dependent rate values."""
+    """Score contract: $50 reward minus value of positive rates spent."""
     for req in contract.requirements:
         if player.rate(req.resource) < req.amount:
             return None
 
     rates_lost_value = 0.0
     for req in contract.requirements:
-        rv = _time_dependent_rate_value(req.resource, state)
-        rates_lost_value += rv * req.amount
+        # Rates spent on a contract are positive rates going away
+        rates_lost_value += _positive_rate_value(req.resource, state) * req.amount
 
     return contract.reward - rates_lost_value
 
@@ -312,11 +323,10 @@ def _smart_score_card(card, player: Player, state: GameState) -> float:
     """Score a card for pool swap using time-dependent values."""
     build_value = 0.0
     for ra in card.rates:
-        rv = _time_dependent_rate_value(ra.resource, state)
         if ra.amount > 0:
-            build_value += rv * ra.amount
+            build_value += _positive_rate_value(ra.resource, state) * ra.amount
         else:
-            build_value -= rv * abs(ra.amount)
+            build_value -= _negative_rate_cost(ra.resource, state) * abs(ra.amount)
 
     build_cost = 0.0
     for ra in card.costs:
