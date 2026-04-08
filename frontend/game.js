@@ -28,8 +28,9 @@ async function init() {
 
   const strategies = gameData.players.map((p) => `${p.strategy}`).join(", ");
   const netWorths = gameData.players.map((p) => `$${p.net_worth}`).join(", ");
+  const turnsPerPlayer = Math.floor(gameData.turn_count / gameData.players.length);
   document.getElementById("game-info").textContent =
-    `Game #${gameId + 1} | Players: ${strategies} | Final net worth: ${netWorths} | ${gameData.turn_count} turns`;
+    `Game #${gameId + 1} | Players: ${strategies} | Final net worth: ${netWorths} | ${turnsPerPlayer} turns/player`;
 
   renderNetWorthChart();
   renderMarketChart();

@@ -8,7 +8,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from my_project.models import Card, Contract, Resource
-from my_project.simulation import GameState, run_game
+from my_project.simulation import (
+    DEFAULT_MARKET_POS,
+    DEFAULT_MAX_TURNS,
+    DEFAULT_START_MONEY,
+    GameState,
+    run_game,
+)
 from my_project.strategies import greedy_strategy, random_strategy, smart_greedy_strategy
 
 STRATEGIES = {
@@ -22,10 +28,10 @@ STRATEGIES = {
 class SimulationConfig:
     num_simulations: int = 100
     num_players: int = 1
-    start_money: int = 20
-    start_market_pos: int = 10
+    start_money: int = DEFAULT_START_MONEY
+    start_market_pos: int = DEFAULT_MARKET_POS
     randomize_market: bool = True
-    max_turns: int = 8
+    max_turns: int = DEFAULT_MAX_TURNS
     strategy: str = "greedy"
     player_strategies: list[str] | None = None  # per-player override, e.g. ["greedy", "random", "random"]
 

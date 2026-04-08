@@ -7,7 +7,14 @@ from collections import defaultdict
 from pathlib import Path
 
 from my_project.models import Resource
-from my_project.simulation import EventType, PRICE_TRACK, build_event_deck
+from my_project.simulation import (
+    DEFAULT_MARKET_POS,
+    DEFAULT_MAX_TURNS,
+    DEFAULT_NUM_PLAYERS,
+    EventType,
+    PRICE_TRACK,
+    build_event_deck,
+)
 
 
 def analyze_sim_contracts(sim_files: list[Path]) -> dict:
@@ -262,9 +269,9 @@ def compute_resource_flows(sim_files: list[Path]) -> dict:
 
 
 def compute_rate_value_curves(
-    num_turns: int = 8,
-    num_players: int = 3,
-    market_start_pos: int = 10,
+    num_turns: int = DEFAULT_MAX_TURNS,
+    num_players: int = DEFAULT_NUM_PLAYERS,
+    market_start_pos: int = DEFAULT_MARKET_POS,
 ) -> dict:
     """Compute the theoretical value of +1 rate for each resource at each turn."""
     deck = build_event_deck(num_turns, num_players)

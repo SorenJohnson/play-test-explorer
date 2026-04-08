@@ -19,6 +19,11 @@ from my_project.models import Card, Contract, Resource, ResourceAmount
 
 PRICE_TRACK = [1, 1, 1, 2, 2, 2, 3, 3, 4, 4, 5, 5, 6, 7, 8, 9, 10]
 
+DEFAULT_MAX_TURNS = 8
+DEFAULT_NUM_PLAYERS = 3
+DEFAULT_START_MONEY = 20
+DEFAULT_MARKET_POS = 10
+
 
 @dataclass
 class Market:
@@ -248,7 +253,7 @@ class GameState:
     turn: int = 0
     event_idx: int = 0
     history: list[TurnRecord] = field(default_factory=list)
-    max_turns: int = 8
+    max_turns: int = DEFAULT_MAX_TURNS
 
     def remaining_events(self) -> dict[EventType, int]:
         """Count remaining events from current position in event deck."""
@@ -263,10 +268,10 @@ class GameState:
         all_cards: list[Card],
         all_contracts: list[Contract],
         num_players: int = 1,
-        start_money: int = 20,
-        start_market_pos: int = 10,
+        start_money: int = DEFAULT_START_MONEY,
+        start_market_pos: int = DEFAULT_MARKET_POS,
         randomize_market: bool = False,
-        max_turns: int = 8,
+        max_turns: int = DEFAULT_MAX_TURNS,
         corporation_rates: list[dict[Resource, int]] | None = None,
     ) -> GameState:
         market = Market.create(start_market_pos)
@@ -703,10 +708,10 @@ def run_game(
     all_contracts: list[Contract],
     strategy=None,
     num_players: int = 1,
-    start_money: int = 20,
-    start_market_pos: int = 10,
+    start_money: int = DEFAULT_START_MONEY,
+    start_market_pos: int = DEFAULT_MARKET_POS,
     randomize_market: bool = False,
-    max_turns: int = 8,
+    max_turns: int = DEFAULT_MAX_TURNS,
     corporation_rates: list[dict[Resource, int]] | None = None,
     strategies: list | None = None,
 ) -> GameState:
