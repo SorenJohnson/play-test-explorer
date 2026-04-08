@@ -1,5 +1,4 @@
 import argparse
-import sys
 from pathlib import Path
 
 import json
@@ -18,11 +17,21 @@ from my_project.parsing import parse_cards, parse_contracts
 
 
 DATA_DIR = Path(__file__).parent / "data"
+FULL_DIR = Path("frontend/data/full")
+PUBLISH_DIR = Path("frontend/data")
+
+SCENARIOS = [
+    {"name": "sim_3random", "strategies": ["random", "random", "random"]},
+    {"name": "sim_1smart", "strategies": ["smart", "random", "random"]},
+    {"name": "sim_smart_greedy_random", "strategies": ["smart", "greedy", "random"]},
+    {"name": "sim_3greedy", "strategies": ["greedy", "greedy", "greedy"]},
+    {"name": "sim_3smart", "strategies": ["smart", "smart", "smart"]},
+]
 
 
 def cmd_network() -> None:
     """Generate the resource network JSON."""
-    output_path = Path("frontend/data/network.json")
+    output_path = PUBLISH_DIR / "network.json"
     cards = parse_cards(DATA_DIR / "Cards.csv")
     contracts = parse_contracts(DATA_DIR / "Contracts.csv")
     net = build_network(cards, contracts)
@@ -31,7 +40,7 @@ def cmd_network() -> None:
 
 
 def cmd_simulate(args: argparse.Namespace) -> None:
-    """Run Monte Carlo simulation."""
+    """Run a single Monte Carlo simulation."""
     cards = parse_cards(DATA_DIR / "Cards.csv")
     contracts = parse_contracts(DATA_DIR / "Contracts.csv")
 
@@ -68,17 +77,116 @@ def cmd_simulate(args: argparse.Namespace) -> None:
         print(f"    {name:25s} {count:4d}x ({count/config.num_simulations:.1f}/game)")
 
 
+def cmd_simulate_all(args: argparse.Namespace) -> None:
+    """Run all standard scenarios and save full results."""
+    cards = parse_cards(DATA_DIR / "Cards.csv")
+    contracts = parse_contracts(DATA_DIR / "Contracts.csv")
+    FULL_DIR.mkdir(parents=True, exist_ok=True)
+
+    for scenario in SCENARIOS:
+        config = SimulationConfig(
+            num_simulations=args.runs,
+            num_players=3,
+            start_money=20,
+            start_market_pos=10,
+            randomize_market=True,
+            max_turns=15,
+            strategy="greedy",
+            player_strategies=scenario["strategies"],
+        )
+
+        strat_desc = ", ".join(scenario["strategies"])
+        print(f"Running {scenario['name']} ({strat_desc})...")
+
+        results = run_monte_carlo(cards, contracts, config)
+        output = FULL_DIR / f"{scenario['name']}.json"
+        export_results(results, output)
+
+        print(f"  → {output} | avg NW: ${results.avg_net_worth:.0f}, contracts: {results.avg_contracts:.1f}")
+
+    print(f"\nAll scenarios complete. Full data in {FULL_DIR}/")
+    print("Run 'analyze' to generate analysis, then 'publish' to create trimmed files.")
+
+
+def cmd_analyze() -> None:
+    """Analyze simulation data and export analysis.json."""
+    data = export_analysis()
+
+    # Look for full data first, fall back to publish data
+    full_files = list(FULL_DIR.glob("sim_*.json"))
+    publish_files = list(PUBLISH_DIR.glob("sim_*.json"))
+    sim_files = full_files if full_files else publish_files
+
+    if sim_files:
+        data["sim_contract_costs"] = analyze_sim_contracts(sim_files)
+        data["sim_building_costs"] = analyze_sim_building_costs(sim_files)
+        data["rate_value_curves"] = compute_rate_value_curves()
+        data["resource_flows"] = compute_resource_flows(sim_files)
+        source = "full" if full_files else "publish"
+        print(f"Analyzed {len(sim_files)} simulation files (from {source} data)")
+
+    output = PUBLISH_DIR / "analysis.json"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with open(output, "w") as f:
+        json.dump(data, f, indent=2)
+    print(f"Analysis exported to {output}")
+
+    if "sim_contract_costs" in data:
+        print(f"\nContract true costs (from cost accounting ledger):")
+        for label, stats in sorted(data["sim_contract_costs"].items(),
+                                   key=lambda x: x[1]["true_cost"]["mean"]):
+            tc = stats["true_cost"]
+            print(f"  {label:<35s}  n={stats['count']:>4d}  "
+                  f"avg=${tc['mean']:<8.1f}  med=${tc['median']:<8.1f}  "
+                  f"range=[${tc['min']:.0f}-${tc['max']:.0f}]")
+
+
+def cmd_publish(args: argparse.Namespace) -> None:
+    """Create trimmed simulation files for GitHub Pages deployment."""
+    full_files = list(FULL_DIR.glob("sim_*.json"))
+    if not full_files:
+        print(f"No full data found in {FULL_DIR}/. Run 'simulate-all' first.")
+        return
+
+    keep = args.games
+    PUBLISH_DIR.mkdir(parents=True, exist_ok=True)
+
+    for f in full_files:
+        with open(f) as fh:
+            data = json.load(fh)
+
+        games = data["games"]
+        n = len(games)
+
+        if n > keep:
+            # Sort by player 0 net worth to sample across the distribution
+            games.sort(key=lambda g: g["players"][0]["net_worth"])
+            indices = [int(i * (n - 1) / (keep - 1)) for i in range(keep)]
+            sampled = [games[i] for i in indices]
+            for i, g in enumerate(sampled):
+                g["game_id"] = i
+            data["games"] = sampled
+
+        out = PUBLISH_DIR / f.name
+        with open(out, "w") as fh:
+            json.dump(data, fh)
+
+        orig_mb = f.stat().st_size / 1024 / 1024
+        new_mb = out.stat().st_size / 1024 / 1024
+        print(f"  {f.name}: {orig_mb:.1f}MB → {out.name}: {new_mb:.1f}MB ({len(data['games'])} games)")
+
+    print(f"\nPublish-ready files in {PUBLISH_DIR}/")
+    print("Commit and push to deploy.")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Board game analysis tools")
     sub = parser.add_subparsers(dest="command")
 
-    # network subcommand
+    # network
     sub.add_parser("network", help="Generate resource network JSON")
 
-    # analyze subcommand
-    sub.add_parser("analyze", help="Analyze contract and resource costs")
-
-    # simulate subcommand
+    # simulate (single run)
     sim = sub.add_parser("simulate", help="Run Monte Carlo simulation")
     sim.add_argument("-n", "--runs", type=int, default=100, help="Number of simulations")
     sim.add_argument("-p", "--players", type=int, default=1, help="Number of players")
@@ -92,41 +200,32 @@ def main() -> None:
                      help="Per-player strategies, e.g. --player-strategies greedy random random")
     sim.add_argument("-o", "--output", default="frontend/data/simulation.json")
 
+    # simulate-all (all standard scenarios)
+    sim_all = sub.add_parser("simulate-all", help="Run all standard scenarios (full data)")
+    sim_all.add_argument("-n", "--runs", type=int, default=500, help="Simulations per scenario")
+
+    # analyze
+    sub.add_parser("analyze", help="Generate analysis.json from simulation data")
+
+    # publish
+    pub = sub.add_parser("publish", help="Create trimmed sim files for deployment")
+    pub.add_argument("-g", "--games", type=int, default=50, help="Games to keep per scenario")
+
     args = parser.parse_args()
 
-    if args.command == "network":
-        cmd_network()
-    elif args.command == "simulate":
-        cmd_simulate(args)
-    elif args.command == "analyze":
-        # Static analysis from card data
-        data = export_analysis()
-
-        # Real costs from simulation data
-        sim_files = list(Path("frontend/data").glob("sim_*.json"))
-        if sim_files:
-            data["sim_contract_costs"] = analyze_sim_contracts(sim_files)
-            data["sim_building_costs"] = analyze_sim_building_costs(sim_files)
-            data["rate_value_curves"] = compute_rate_value_curves()
-            data["resource_flows"] = compute_resource_flows(sim_files)
-            print(f"Analyzed {len(sim_files)} simulation files")
-
-        output = Path("frontend/data/analysis.json")
-        output.parent.mkdir(parents=True, exist_ok=True)
-        with open(output, "w") as f:
-            json.dump(data, f, indent=2)
-        print(f"Analysis exported to {output}")
-
-        if "sim_contract_costs" in data:
-            print(f"\nContract true costs (from cost accounting ledger):")
-            for label, stats in sorted(data["sim_contract_costs"].items(),
-                                       key=lambda x: x[1]["true_cost"]["mean"]):
-                tc = stats["true_cost"]
-                print(f"  {label:<35s}  n={stats['count']:>4d}  "
-                      f"avg=${tc['mean']:<8.1f}  med=${tc['median']:<8.1f}  "
-                      f"range=[${tc['min']:.0f}-${tc['max']:.0f}]")
-    else:
-        parser.print_help()
+    match args.command:
+        case "network":
+            cmd_network()
+        case "simulate":
+            cmd_simulate(args)
+        case "simulate-all":
+            cmd_simulate_all(args)
+        case "analyze":
+            cmd_analyze()
+        case "publish":
+            cmd_publish(args)
+        case _:
+            parser.print_help()
 
 
 if __name__ == "__main__":

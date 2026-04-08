@@ -9,4 +9,5 @@ my_project/data/*
 !my_project/data/.gitkeep
 !my_project/data/*.csv
 !my_project/data/*.md
+frontend/data/full/
 .DS_Store
