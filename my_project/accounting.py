@@ -211,14 +211,14 @@ class CostLedger:
         settleable = min(available_positive, total_neg)
 
         # Cost to close: proportional cost basis of the consumed resource
-        # The account's current rate reflects all changes already
         # The "positive side" = rate + total_negative (since rate is net)
         positive_rate = account.rate + cap_table.total_negative()
-        if positive_rate > 0:
-            cost_per_unit = account.cost_basis / positive_rate
-        else:
-            cost_per_unit = 0
+        if positive_rate < 0.01:
+            # Near-zero positive rate — just retire shares, no meaningful cost to transfer
+            cap_table.retire_proportionally(settleable)
+            return
 
+        cost_per_unit = account.cost_basis / positive_rate
         total_closing_cost = cost_per_unit * settleable
 
         # Retire shares proportionally and charge owners
@@ -234,17 +234,25 @@ class CostLedger:
             proportion = shares / (total_retired if total_retired > 0 else 1)
             self._inherit_liabilities(resource, owner, proportion)
 
-        # Reduce the consumed resource's balance proportionally
-        if positive_rate > 0:
-            balance_reduction = account.balance * (settleable / positive_rate)
-            account.balance -= balance_reduction
+        # Reduce the consumed resource's balance proportionally (capped to avoid overshoot)
+        proportion_consumed = min(settleable / positive_rate, 1.0)
+        account.balance -= account.balance * proportion_consumed
 
     def _inherit_liabilities(
-        self, from_resource: Resource, to_resource: Resource, proportion: float
+        self, from_resource: Resource, to_resource: Resource, proportion: float,
+        _visited: set[Resource] | None = None,
     ) -> None:
-        """Transfer a proportion of from_resource's liabilities to to_resource."""
+        """Transfer a proportion of from_resource's liabilities to to_resource.
+
+        Prevents circular dependencies by tracking visited resources.
+        """
+        if _visited is None:
+            _visited = set()
+        _visited.add(from_resource)
+        _visited.add(to_resource)
+
         for r in Resource:
-            if r == from_resource:
+            if r in _visited:
                 continue
             cap = self.cap_tables[r]
             for ns in list(cap.negative_shares):

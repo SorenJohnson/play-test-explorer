@@ -134,9 +134,12 @@ def random_strategy(state: GameState, player: Player) -> Action:
                     options.append(Action(ActionType.CONTRACT, contract_card=i, contract_idx=ci))
 
     if not options:
-        # No legal action — discard a random card (sell with no match, just to use the card)
-        # This ensures cards cycle back to the deck
-        return Action(ActionType.SELL, sell_card=random.randrange(len(player.hand)))
+        # No legal action — discard a non-contract card to cycle it
+        non_contract = [i for i, c in enumerate(player.hand) if not c.can_fulfill_contract]
+        if non_contract:
+            return Action(ActionType.SELL, sell_card=random.choice(non_contract))
+        # Only contract cards left and can't afford any — pass
+        return Action(ActionType.PASS)
 
     return random.choice(options)
 
@@ -201,10 +204,6 @@ def greedy_strategy(state: GameState, player: Player) -> Action:
                 if contract_score is not None and contract_score > best_score:
                     best_score = contract_score
                     best_action = Action(ActionType.CONTRACT, contract_card=i, contract_idx=ci)
-
-    # If no action scored well, sell the least valuable card to cycle it
-    if best_score <= -900 and player.hand:
-        return Action(ActionType.SELL, sell_card=0)
 
     return best_action
 
@@ -422,10 +421,6 @@ def smart_greedy_strategy(state: GameState, player: Player) -> Action:
                 if contract_score is not None and contract_score > best_score:
                     best_score = contract_score
                     best_action = Action(ActionType.CONTRACT, contract_card=i, contract_idx=ci)
-
-    # If no action scored well, sell the least valuable card to cycle it
-    if best_score <= -900 and player.hand:
-        return Action(ActionType.SELL, sell_card=0)
 
     return best_action
 
