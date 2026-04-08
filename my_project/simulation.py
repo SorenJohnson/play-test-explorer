@@ -223,8 +223,10 @@ class TurnRecord:
     event: str
     money_before: int
     money_after: int
-    market_snapshot: dict[str, int]
-    rates_snapshot: dict[str, int]
+    debt: int = 0
+    contracts_fulfilled: int = 0
+    market_snapshot: dict[str, int] = field(default_factory=dict)
+    rates_snapshot: dict[str, int] = field(default_factory=dict)
     actions: list[ActionRecord] = field(default_factory=list)
 
 
@@ -682,6 +684,8 @@ def run_turn(state: GameState, player: Player, strategy, event: EventType) -> No
         event=event_detail,
         money_before=money_before,
         money_after=player.money,
+        debt=player.debt,
+        contracts_fulfilled=player.contracts_fulfilled,
         market_snapshot=state.market.snapshot(),
         rates_snapshot={r.value: v for r, v in player.rates.items()},
         actions=action_records,

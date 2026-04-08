@@ -54,21 +54,43 @@ function renderNetWorthChart() {
   let playerIdx = 0;
   for (const [player, turns] of Object.entries(playerTurns)) {
     const strategy = gameData.players[playerIdx]?.strategy || "unknown";
-    const label = `${player} (${strategy})`;
-    const data = turns.map((t) => ({
-      x: t.turn,
-      y: t.money_after - (gameData.players[playerIdx]?.debt || 0),
-    }));
+    const color = PLAYER_COLORS[playerIdx % PLAYER_COLORS.length];
 
-    // Track running money (money_after is what we have)
+    // Money (solid line)
     datasets.push({
-      label,
+      label: `${player} (${strategy}) — Money`,
       data: turns.map((t) => ({ x: t.turn, y: t.money_after })),
-      borderColor: PLAYER_COLORS[playerIdx % PLAYER_COLORS.length],
-      backgroundColor: PLAYER_COLORS[playerIdx % PLAYER_COLORS.length] + "33",
+      borderColor: color,
+      backgroundColor: "transparent",
       tension: 0.2,
-      fill: false,
+      borderWidth: 2,
     });
+
+    // Debt (dashed line)
+    datasets.push({
+      label: `${player} — Debt`,
+      data: turns.map((t) => ({ x: t.turn, y: -(t.debt || 0) })),
+      borderColor: color,
+      backgroundColor: "transparent",
+      tension: 0.2,
+      borderWidth: 1,
+      borderDash: [5, 5],
+    });
+
+    // Net worth (thick line with fill)
+    datasets.push({
+      label: `${player} — Net Worth`,
+      data: turns.map((t) => ({
+        x: t.turn,
+        y: t.money_after - (t.debt || 0) + (t.contracts || 0) * 50,
+      })),
+      borderColor: color,
+      backgroundColor: color + "22",
+      tension: 0.2,
+      borderWidth: 3,
+      fill: true,
+    });
+
     playerIdx++;
   }
 
@@ -77,16 +99,16 @@ function renderNetWorthChart() {
     data: { datasets },
     options: {
       responsive: true,
-      plugins: { legend: { labels: { color: "#8b949e" } } },
+      plugins: { legend: { labels: { color: "#8b949e", font: { size: 10 } } } },
       scales: {
         x: {
           type: "linear",
           title: { display: true, text: "Turn", color: "#8b949e" },
-          ticks: { color: "#8b949e", stepSize: 1 },
+          ticks: { color: "#8b949e", stepSize: 3 },
           grid: { color: "#21262d" },
         },
         y: {
-          title: { display: true, text: "Money ($)", color: "#8b949e" },
+          title: { display: true, text: "$", color: "#8b949e" },
           ticks: { color: "#8b949e" },
           grid: { color: "#21262d" },
         },
@@ -246,8 +268,14 @@ function renderTurnLog() {
         cellHtml += `<div style="color:#a371f7; font-size:0.7rem">⚡ ${turn.event}</div>`;
       }
 
-      // Money
-      cellHtml += `<div style="color:#8b949e; font-size:0.7rem">$${turn.money_before} → $${turn.money_after}</div>`;
+      // Money & Debt
+      const debt = turn.debt || 0;
+      const contracts = turn.contracts || 0;
+      const nw = turn.money_after - debt + contracts * 50;
+      cellHtml += `<div style="color:#8b949e; font-size:0.7rem">$${turn.money_before} → $${turn.money_after}`;
+      if (debt > 0) cellHtml += ` | <span style="color:#f85149">debt: $${debt}</span>`;
+      if (contracts > 0) cellHtml += ` | <span style="color:#f0883e">${contracts}×📋</span>`;
+      cellHtml += ` | NW: $${nw}</div>`;
 
       html += `<td style="vertical-align:top; font-size:0.75rem; line-height:1.6">${cellHtml}</td>`;
     }

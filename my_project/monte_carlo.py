@@ -99,6 +99,8 @@ def _summarize_game(state: GameState) -> GameSummary:
             "event": rec.event,
             "money_before": rec.money_before,
             "money_after": rec.money_after,
+            "debt": rec.debt,
+            "contracts": rec.contracts_fulfilled,
             "market": rec.market_snapshot,
             "rates": rec.rates_snapshot,
         })
