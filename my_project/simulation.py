@@ -600,16 +600,30 @@ def do_debt_collection(state: GameState) -> None:
 
 
 def do_futures_settlement(state: GameState) -> None:
-    """Players with negative resources buy at market rate (as debt)."""
+    """Players with negative resources buy at market rate (as debt).
+
+    All players pay the price at the start of settlement. Then the market
+    rises by the total negative rates across all players for each resource.
+    """
+    # Snapshot prices before any market shifts
+    starting_prices = {r: state.market.price(r) for r in Resource if r != Resource.PWR}
+    total_negatives: dict[Resource, int] = {r: 0 for r in starting_prices}
+
+    # All players pay debt at the snapshot price
     for player in state.players:
-        for r in Resource:
-            if r == Resource.PWR:
-                continue  # PWR handled by power bill
+        for r in starting_prices:
             rate = player.rate(r)
             if rate < 0:
-                cost = state.market.buy(r, abs(rate))
+                shortage = abs(rate)
+                cost = starting_prices[r] * shortage
                 player.debt += cost
                 player.ledger.record_event_cost(r, cost, rate)
+                total_negatives[r] += shortage
+
+    # Market rises by total negative rates per resource (no buying, just adjust)
+    for r, total in total_negatives.items():
+        if total > 0:
+            state.market.adjust(r, total)
 
 
 def execute_event(state: GameState, event: EventType, active_player: Player) -> str:
