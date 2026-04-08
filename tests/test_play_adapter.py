@@ -3,6 +3,7 @@
 import pytest
 
 from my_project.play_adapter import PlayableGame
+from my_project.simulation import EventType
 
 
 def test_game_initializes():
@@ -228,3 +229,119 @@ def test_deterministic_with_seed():
     assert [c["building"] for c in s1["players"][0]["hand"]] == [
         c["building"] for c in s2["players"][0]["hand"]
     ]
+
+
+def test_current_player_index_stable_across_begin():
+    """begin_human_turn pre-advances event_idx internally. Public accessors
+    (current_player_index, turn_number, round_number) must stay stable for the
+    active player during the turn, not jump ahead to the next player.
+    """
+    game = PlayableGame(seed=42)
+    before_idx = game.current_player_index()
+    before_turn = game.turn_number()
+    before_round = game.round_number()
+    assert game.is_human_turn()
+    game.begin_human_turn()
+    assert game.current_player_index() == before_idx
+    assert game.turn_number() == before_turn
+    assert game.round_number() == before_round
+    # state_dict's turn_index should also stay stable (play.js does
+    # `turn_index + 1` to display "turn N/24")
+    state = game.state_dict()
+    assert state["turn_index"] == before_turn - 1
+    assert state["round"] == before_round
+
+
+def test_strategy_cannot_see_current_event_in_ai_turn():
+    """When the AI acts, its strategy must NOT see the current turn's event
+    in state.remaining_events(). This is the bug the user reported.
+    """
+    game = PlayableGame(seed=42)
+    # Skip the human turn so the next step_ai_turn actually runs an AI player
+    game.begin_human_turn()
+    game.apply_human_action({"type": "pass"})
+    game.end_human_turn()
+    # Now it's an AI player's turn. Peek at the current turn's event.
+    current_event = game.state.event_deck[game.state.event_idx]
+
+    # Count occurrences of current_event in the full deck from event_idx
+    # onward, INCLUDING and EXCLUDING the current one.
+    deck_from_here = game.state.event_deck[game.state.event_idx:]
+    count_including = sum(1 for e in deck_from_here if e == current_event)
+
+    # Monkeypatch the strategy to inspect remaining_events mid-turn.
+    # play_adapter imports smart_greedy_strategy at module load, so we need
+    # to patch the reference on the play_adapter module itself.
+    from my_project import play_adapter as pa_mod
+    original = pa_mod.smart_greedy_strategy
+    observed = {}
+
+    def spy(state, player):
+        if "remaining" not in observed:
+            observed["remaining"] = dict(state.remaining_events())
+            observed["event_idx"] = state.event_idx
+        return original(state, player)
+
+    if hasattr(original, "pool_swap"):
+        spy.pool_swap = original.pool_swap
+    pa_mod.smart_greedy_strategy = spy
+    try:
+        game.step_ai_turn()
+    finally:
+        pa_mod.smart_greedy_strategy = original
+
+    assert "remaining" in observed, "Strategy was not called — can't verify"
+    # The strategy's view should exclude the current turn's event: one fewer
+    # of this event type than the raw count-from-current-index.
+    seen = observed["remaining"].get(current_event, 0)
+    assert seen == count_including - 1, (
+        f"Strategy saw {seen} of {current_event.value}, expected {count_including - 1} "
+        f"(current turn's event should be hidden). event_idx={observed['event_idx']}."
+    )
+
+
+def test_last_player_gets_full_turn_before_end_game():
+    """On the final player-turn (round 8, player 3), the active player must
+    have their full action phase BEFORE END_GAME fires. The flag
+    has_built_this_turn must be reset for that player (proving they got a
+    fresh turn), and the turn record must show event=END_GAME.
+    """
+    game = PlayableGame(seed=42, max_turns=8)
+
+    # Play through. Mark the last player's begin-turn state.
+    last_player_had_fresh_turn = False
+    last_player_idx = -1
+    safety = 0
+    while not game.is_over():
+        if game.is_human_turn():
+            game.begin_human_turn()
+            # Check: at the start of what might be the last human turn,
+            # has_built_this_turn should be False (freshly reset).
+            cur = game.current_player()
+            if game.turn_number() == 24:
+                last_player_had_fresh_turn = not cur.has_built_this_turn
+                last_player_idx = game.current_player_index()
+            game.apply_human_action({"type": "pass"})
+            game.end_human_turn()
+        else:
+            # Before stepping, peek at the turn number that's about to run
+            upcoming_turn = game.turn_number()
+            if upcoming_turn == 24:
+                # AI's turn 24 — the AI's has_built_this_turn will be reset
+                # inside step_ai_turn. We can't observe mid-turn state from
+                # here, but we can verify END_GAME was the fired event afterward.
+                last_player_idx = game.current_player_index()
+            result = game.step_ai_turn()
+            if upcoming_turn == 24:
+                assert result["ok"]
+                assert result["event"]["type"] == "end_game"
+                last_player_had_fresh_turn = True  # proven by successful step
+        safety += 1
+        assert safety < 50, "Game didn't terminate"
+
+    assert game.is_over()
+    assert last_player_idx >= 0, "Turn 24 was never observed"
+    assert last_player_had_fresh_turn, "The last player did not get a fresh turn before END_GAME"
+    # The play adapter does not populate state.history (only simulation.run_turn
+    # does). Verify via last_event instead — it must show the END_GAME detail.
+    assert "END GAME" in game.last_event

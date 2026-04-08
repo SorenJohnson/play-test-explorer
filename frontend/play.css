@@ -482,3 +482,113 @@ body {
   color: #3fb950;
   font-weight: 700;
 }
+.endgame-buttons {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin-top: 20px;
+}
+.endgame-buttons .primary-btn {
+  margin-left: 0;
+}
+.secondary-btn {
+  background: #21262d;
+  color: #c9d1d9;
+  border: 1px solid #30363d;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+.secondary-btn:hover {
+  background: #30363d;
+}
+
+/* New-game config modal */
+#new-game-modal {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+#new-game-panel {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 28px;
+  width: 92%;
+  max-width: 460px;
+}
+#new-game-panel h2 {
+  color: #58a6ff;
+  font-size: 1.3rem;
+  margin: 0 0 16px;
+  border: none;
+  padding: 0;
+}
+.new-game-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+.form-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.form-row > label {
+  width: 80px;
+  color: #8b949e;
+  font-size: 0.85rem;
+  padding-top: 6px;
+}
+.form-row select,
+.form-row input[type="number"],
+.form-row input[type="text"] {
+  background: #21262d;
+  border: 1px solid #30363d;
+  color: #c9d1d9;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-family: inherit;
+}
+#ng-seats-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+.seat-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  color: #c9d1d9;
+}
+.seat-row > span {
+  width: 60px;
+  color: #8b949e;
+}
+.seat-row select {
+  flex: 1;
+  background: #21262d;
+  border: 1px solid #30363d;
+  color: #c9d1d9;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+.new-game-buttons {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+.new-game-buttons .primary-btn {
+  margin-left: 0;
+}

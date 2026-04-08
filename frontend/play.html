@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="report.css">
   <link rel="stylesheet" href="play.css">
   <script src="https://cdn.jsdelivr.net/pyodide/v0.27.0/full/pyodide.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 </head>
 <body>
   <div id="app">
@@ -57,6 +58,14 @@
       <section id="market-section">
         <h2>Market</h2>
         <div id="market-grid"></div>
+        <details id="market-history-details" style="margin-top:12px;">
+          <summary style="cursor:pointer; color:#8b949e; font-size:0.85rem;">
+            Market price history — click to expand
+          </summary>
+          <div class="chart-container" style="min-height:260px; margin-top:8px;">
+            <canvas id="play-market-chart"></canvas>
+          </div>
+        </details>
       </section>
 
       <!-- Human player panel -->
@@ -112,7 +121,43 @@
       <div id="endgame-panel">
         <h2>Game Over</h2>
         <div id="endgame-results"></div>
-        <button id="play-again-btn" class="primary-btn">Play Again</button>
+        <div class="endgame-buttons">
+          <button id="play-again-btn" class="primary-btn">New Game</button>
+          <button id="endgame-dismiss-btn" class="secondary-btn">Review Game</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- New game config modal -->
+    <div id="new-game-modal" style="display:none;">
+      <div id="new-game-panel">
+        <h2>New Game</h2>
+        <div class="new-game-form">
+          <div class="form-row">
+            <label for="ng-num-seats">Players</label>
+            <select id="ng-num-seats">
+              <option value="2">2</option>
+              <option value="3" selected>3</option>
+              <option value="4">4</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label>Seats</label>
+            <div id="ng-seats-list"></div>
+          </div>
+          <div class="form-row">
+            <label for="ng-rounds">Rounds</label>
+            <input type="number" id="ng-rounds" value="8" min="2" max="20">
+          </div>
+          <div class="form-row">
+            <label for="ng-seed">Seed</label>
+            <input type="text" id="ng-seed" placeholder="random">
+          </div>
+        </div>
+        <div class="new-game-buttons">
+          <button id="ng-start-btn" class="primary-btn">Start Game</button>
+          <button id="ng-cancel-btn" class="secondary-btn" style="display:none;">Cancel</button>
+        </div>
       </div>
     </div>
   </div>

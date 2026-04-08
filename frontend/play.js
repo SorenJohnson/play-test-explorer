@@ -20,6 +20,21 @@ let game = null;              // Pyodide proxy to PlayableGame instance
 let currentState = null;      // most recent state_dict result
 let currentLegal = null;      // most recent legal_human_actions result
 const turnLog = [];           // array of {turn, player, text, isHuman}
+let marketChart = null;       // Chart.js instance for the price-history chart
+
+// Returns the player index whose hand/stats should fill the "You" panel.
+// During a human turn, that's the active player. Otherwise we fall back to
+// the first human seat so the panel still has data to render.
+function activeHumanIndex(s) {
+  const humans = s.human_indices || [s.human_index ?? 0];
+  if (
+    s.current_player_index >= 0 &&
+    humans.includes(s.current_player_index)
+  ) {
+    return s.current_player_index;
+  }
+  return humans[0] ?? 0;
+}
 
 // --- Hand selection state ---
 // selectedBuildIdxs: set of card indices to build together (one build action)
@@ -49,12 +64,12 @@ async function boot() {
   `);
 
   setLoadingDetail("Ready.");
-  startNewGame();
-
   document.getElementById("loading").style.display = "none";
-  document.getElementById("game-root").style.display = "block";
 
   wireButtons();
+  // Show config screen instead of auto-starting. The game-root stays hidden
+  // until the user clicks Start in the modal.
+  showNewGameModal({ initial: true });
 }
 
 function setLoadingDetail(text) {
@@ -89,18 +104,39 @@ async function loadPythonSources() {
 
 // --- Game lifecycle ---
 
-function startNewGame(seed = null) {
-  if (seed === null) seed = Math.floor(Math.random() * 1_000_000);
+// Last-used config so the New Game modal pre-fills with the previous settings.
+let lastGameConfig = {
+  seats: ["human", "smart", "smart"],
+  rounds: 8,
+  seed: null,
+};
+
+function startNewGame(config = null) {
+  const cfg = config || lastGameConfig;
+  lastGameConfig = cfg;
+  const seed = cfg.seed === null || cfg.seed === undefined
+    ? Math.floor(Math.random() * 1_000_000)
+    : cfg.seed;
   // Destroy prior game if any
   if (game) {
     try { game.destroy(); } catch {}
     game = null;
   }
-  pyodide.runPython(`game = PlayableGame(seed=${seed}, num_players=3, human_index=0)`);
+  // Build the seats list as a Python literal. Each entry is a quoted string.
+  const seatsLiteral = "[" + cfg.seats.map((s) => `"${s}"`).join(", ") + "]";
+  pyodide.runPython(
+    `game = PlayableGame(seed=${seed}, seats=${seatsLiteral}, max_turns=${cfg.rounds})`
+  );
   game = pyodide.globals.get("game");
   turnLog.length = 0;
   clearSelection();
+  if (marketChart) {
+    marketChart.destroy();
+    marketChart = null;
+  }
   document.getElementById("endgame-overlay").style.display = "none";
+  document.getElementById("new-game-modal").style.display = "none";
+  document.getElementById("game-root").style.display = "block";
   if (game.is_human_turn()) {
     // begin_human_turn resets has_built_this_turn. Must call BEFORE refreshState
     // so the rendered state reflects the fresh turn, not stale flags.
@@ -109,6 +145,69 @@ function startNewGame(seed = null) {
   } else {
     advanceUntilHuman();
   }
+}
+
+// --- New game modal ---
+
+function showNewGameModal({ initial = false } = {}) {
+  const modal = document.getElementById("new-game-modal");
+  const cancelBtn = document.getElementById("ng-cancel-btn");
+  // Cancel is only available if a game is already in progress.
+  cancelBtn.style.display = initial ? "none" : "inline-block";
+  populateNewGameForm(lastGameConfig);
+  modal.style.display = "flex";
+}
+
+function hideNewGameModal() {
+  document.getElementById("new-game-modal").style.display = "none";
+}
+
+function populateNewGameForm(cfg) {
+  const numSeatsSelect = document.getElementById("ng-num-seats");
+  numSeatsSelect.value = String(cfg.seats.length);
+  document.getElementById("ng-rounds").value = String(cfg.rounds);
+  document.getElementById("ng-seed").value = cfg.seed === null ? "" : String(cfg.seed);
+  renderSeatRows(cfg.seats);
+  numSeatsSelect.onchange = () => {
+    const n = parseInt(numSeatsSelect.value, 10);
+    const current = readSeatRows();
+    const next = Array.from({ length: n }, (_, i) =>
+      current[i] || (i === 0 ? "human" : "smart")
+    );
+    renderSeatRows(next);
+  };
+}
+
+function renderSeatRows(seats) {
+  const wrap = document.getElementById("ng-seats-list");
+  wrap.innerHTML = seats
+    .map(
+      (s, i) => `
+    <div class="seat-row">
+      <span>P${i + 1}</span>
+      <select data-seat-idx="${i}">
+        <option value="human" ${s === "human" ? "selected" : ""}>Human</option>
+        <option value="smart" ${s === "smart" ? "selected" : ""}>Smart AI</option>
+        <option value="greedy" ${s === "greedy" ? "selected" : ""}>Greedy AI</option>
+        <option value="random" ${s === "random" ? "selected" : ""}>Random AI</option>
+      </select>
+    </div>`
+    )
+    .join("");
+}
+
+function readSeatRows() {
+  return Array.from(document.querySelectorAll("#ng-seats-list select")).map(
+    (sel) => sel.value
+  );
+}
+
+function readNewGameConfig() {
+  const seats = readSeatRows();
+  const rounds = parseInt(document.getElementById("ng-rounds").value, 10) || 8;
+  const seedRaw = document.getElementById("ng-seed").value.trim();
+  const seed = seedRaw === "" ? null : parseInt(seedRaw, 10);
+  return { seats, rounds, seed: Number.isNaN(seed) ? null : seed };
 }
 
 function clearSelection() {
@@ -164,11 +263,12 @@ function renderStatusBar() {
   document.getElementById("turn-indicator").textContent = `${s.turn_index + 1} / ${s.total_turns}`;
   document.getElementById("seed-display").textContent = s.seed;
   const activeIdx = s.current_player_index;
+  const humans = s.human_indices || [s.human_index ?? 0];
   let activeLabel;
   if (activeIdx < 0) {
     activeLabel = "Game Over";
-  } else if (activeIdx === s.human_index) {
-    activeLabel = "YOU";
+  } else if (humans.includes(activeIdx)) {
+    activeLabel = humans.length > 1 ? `${s.players[activeIdx].name} (You)` : "YOU";
   } else {
     activeLabel = s.players[activeIdx].name;
   }
@@ -178,8 +278,11 @@ function renderStatusBar() {
 function renderOpponents() {
   const s = currentState;
   const el = document.getElementById("opponents-strip");
-  const opponents = s.players.filter((p) => !p.is_human);
-  el.innerHTML = opponents.map((p, i) => {
+  const youIdx = activeHumanIndex(s);
+  // In multi-human, the other humans are also "opponents" to whichever human
+  // is currently in the seat — show everyone except the active human.
+  const opponents = s.players.filter((_, i) => i !== youIdx);
+  el.innerHTML = opponents.map((p) => {
     const playerIdx = s.players.indexOf(p);
     const isActive = playerIdx === s.current_player_index;
     const rateChips = RESOURCE_ORDER.map((r) => {
@@ -231,13 +334,65 @@ function renderMarket() {
         <div class="resource-price">$${price}</div>
       </div>`;
   }).join("");
+  renderMarketHistoryChart();
+}
+
+function renderMarketHistoryChart() {
+  const history = currentState?.market_history || [];
+  if (history.length === 0) return;
+  const labels = history.map((h) => `T${h.turn}`);
+  const datasets = RESOURCE_ORDER.map((r) => ({
+    label: r,
+    data: history.map((h) => h.market[r] ?? null),
+    borderColor: RESOURCE_COLORS[r],
+    backgroundColor: "transparent",
+    borderWidth: 2,
+    tension: 0.2,
+    pointRadius: 0,
+  }));
+
+  if (marketChart) {
+    marketChart.data.labels = labels;
+    marketChart.data.datasets.forEach((d, i) => { d.data = datasets[i].data; });
+    marketChart.update("none");
+    return;
+  }
+
+  const canvas = document.getElementById("play-market-chart");
+  if (!canvas) return;
+  marketChart = new Chart(canvas, {
+    type: "line",
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: "#8b949e", font: { size: 11 } } },
+      },
+      scales: {
+        x: {
+          title: { display: true, text: "Turn", color: "#8b949e" },
+          ticks: { color: "#8b949e", maxTicksLimit: 12 },
+          grid: { color: "#21262d" },
+        },
+        y: {
+          title: { display: true, text: "Price ($)", color: "#8b949e" },
+          ticks: { color: "#8b949e" },
+          grid: { color: "#21262d" },
+        },
+      },
+    },
+  });
 }
 
 function renderPlayer() {
   const s = currentState;
-  const p = s.players[s.human_index];
+  const youIdx = activeHumanIndex(s);
+  const p = s.players[youIdx];
+  const humans = s.human_indices || [s.human_index ?? 0];
+  const youPrefix = humans.length > 1 ? `${p.name} (You)` : "You";
   document.getElementById("player-heading").textContent =
-    `You — ${p.corporation || "No corporation"}`;
+    `${youPrefix} — ${p.corporation || "No corporation"}`;
 
   const rateCells = RESOURCE_ORDER.map((r) => {
     const v = p.rates[r] || 0;
@@ -285,7 +440,7 @@ function renderPlayer() {
 function renderContracts() {
   const s = currentState;
   const el = document.getElementById("contracts-grid");
-  const p = s.players[s.human_index];
+  const p = s.players[activeHumanIndex(s)];
   const canFulfillSet = new Set(
     (currentLegal?.can_contract || []).map((c) => c.contract_idx)
   );
@@ -324,7 +479,8 @@ function renderPool() {
   const s = currentState;
   const el = document.getElementById("pool-grid");
   const hintEl = document.getElementById("pool-hint");
-  const isHumanTurn = s.current_player_index === s.human_index && !s.is_over;
+  const humans = s.human_indices || [s.human_index ?? 0];
+  const isHumanTurn = humans.includes(s.current_player_index) && !s.is_over;
   const canSwap = s.can_pool_swap && isHumanTurn;
 
   if (!canSwap && pendingPoolSwapIdx !== null) {
@@ -358,12 +514,16 @@ function renderPool() {
     const costText = card.costs && card.costs.length
       ? card.costs.map((c) => `${c.amount} ${c.resource}`).join(", ")
       : "free";
+    const sellText = card.can_sell && card.can_sell.length
+      ? card.can_sell.join("/")
+      : "—";
 
     return `
       <div class="${classes.join(" ")}" data-pool-idx="${i}">
         <div class="pool-card-name">${card.building}</div>
         <div class="pool-card-line">Cost: ${costText}</div>
         <div class="pool-card-line">Rates: ${rateText}</div>
+        <div class="pool-card-line">Sell: ${sellText}</div>
       </div>`;
   }).join("");
 
@@ -385,7 +545,7 @@ function renderPool() {
 
 function renderHand() {
   const s = currentState;
-  const p = s.players[s.human_index];
+  const p = s.players[activeHumanIndex(s)];
   const el = document.getElementById("hand-grid");
 
   const affordableSingleIdxs = new Set(
@@ -509,7 +669,8 @@ function renderHand() {
 
 function renderActionBar() {
   const s = currentState;
-  const isHuman = s.current_player_index === s.human_index && !s.is_over;
+  const humans = s.human_indices || [s.human_index ?? 0];
+  const isHuman = humans.includes(s.current_player_index) && !s.is_over;
   const legal = currentLegal || {};
 
   const buildBtn = document.getElementById("build-btn");
@@ -597,8 +758,23 @@ function wireButtons() {
   document.getElementById("sell-btn").addEventListener("click", onSell);
   document.getElementById("contract-btn").addEventListener("click", onContract);
   document.getElementById("pass-btn").addEventListener("click", onPass);
-  document.getElementById("new-game-btn").addEventListener("click", () => startNewGame());
-  document.getElementById("play-again-btn").addEventListener("click", () => startNewGame());
+  document.getElementById("new-game-btn").addEventListener("click", () => {
+    showNewGameModal({ initial: false });
+  });
+  document.getElementById("play-again-btn").addEventListener("click", () => {
+    showNewGameModal({ initial: false });
+  });
+  document.getElementById("endgame-dismiss-btn").addEventListener("click", () => {
+    document.getElementById("endgame-overlay").style.display = "none";
+  });
+  document.getElementById("ng-start-btn").addEventListener("click", () => {
+    const cfg = readNewGameConfig();
+    if (!cfg.seats.length) return;
+    startNewGame(cfg);
+  });
+  document.getElementById("ng-cancel-btn").addEventListener("click", () => {
+    hideNewGameModal();
+  });
 }
 
 function onBuild() {

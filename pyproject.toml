@@ -18,3 +18,9 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["my_project"]
+
+[dependency-groups]
+dev = [
+    "matplotlib>=3.10.8",
+    "pandas>=2.3.3",
+]

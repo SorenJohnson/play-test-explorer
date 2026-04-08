@@ -45,30 +45,86 @@ from my_project.simulation import (
     execute_sell,
     swap_pool_card,
 )
-from my_project.strategies import smart_greedy_strategy
+from my_project.strategies import (
+    greedy_strategy,
+    random_strategy,
+    smart_greedy_strategy,
+)
 
 
 # Default asset paths (can be overridden when constructing PlayableGame)
 DEFAULT_DATA_DIR = Path(__file__).parent / "data"
 
+# Maps a seat string from the UI config to the *attribute name* of the strategy
+# function on this module. We resolve via globals() at call time so that tests
+# which monkey-patch e.g. `play_adapter.smart_greedy_strategy` are honored.
+# "human" is handled separately and never appears here.
+STRATEGY_NAMES = {
+    "smart": "smart_greedy_strategy",
+    "greedy": "greedy_strategy",
+    "random": "random_strategy",
+}
+
+
+def _resolve_strategy(seat: str):
+    return globals()[STRATEGY_NAMES[seat]]
+
 
 @dataclass
 class PlayableGame:
-    """Stepwise game driver for a single human vs multiple AI players."""
+    """Stepwise game driver for one or more humans vs AI players.
+
+    `seats` is the canonical config: a list whose length defines the number of
+    players, with each entry either "human" or one of `STRATEGY_MAP` keys
+    ("smart" / "greedy" / "random"). When `seats` is omitted, the legacy
+    `num_players` + `human_index` shorthand builds a 1-human / N-1-smart layout.
+    """
 
     seed: int = 0
     num_players: int = 3
     human_index: int = 0
+    seats: list[str] | None = None
     max_turns: int = DEFAULT_MAX_TURNS
     data_dir: Path = field(default_factory=lambda: DEFAULT_DATA_DIR)
 
     state: GameState = field(init=False)
+    _human_indices: set[int] = field(default_factory=set, init=False)
     last_event: str = field(default="", init=False)
     last_ai_actions: list[dict] = field(default_factory=list, init=False)
     human_turn_in_progress: bool = field(default=False, init=False)
+    # One snapshot per completed player-turn so the UI can plot market drift.
+    # Entry shape: {"turn": int (1-indexed player-turn), "market": {res_str: price}}.
+    market_history: list[dict] = field(default_factory=list, init=False)
     _turn_action_records: list = field(default_factory=list, init=False)
+    # Event hiding: when a turn begins we pre-advance event_idx past the current
+    # event and stash the event here. This prevents state.remaining_events()
+    # from revealing the current turn's event to the strategy or UI during the
+    # action phase, matching simulation.run_game's pattern. Cleared when the
+    # event fires at end of turn.
+    _pending_event: EventType | None = field(default=None, init=False)
+    # When a turn is in progress, event_idx has been pre-advanced, so
+    # `event_idx % num_players` would point at the NEXT player. This field
+    # records the index of the player whose turn is currently in progress.
+    # -1 means no turn is in progress (use event_idx-based calculation).
+    _active_player_idx: int = field(default=-1, init=False)
 
     def __post_init__(self) -> None:
+        # Resolve seats first; if omitted, derive from legacy num_players + human_index.
+        if self.seats is None:
+            self.seats = [
+                "human" if i == self.human_index else "smart"
+                for i in range(self.num_players)
+            ]
+        else:
+            self.num_players = len(self.seats)
+        for s in self.seats:
+            if s != "human" and s not in STRATEGY_NAMES:
+                raise ValueError(f"Unknown seat type: {s!r}")
+        self._human_indices = {i for i, s in enumerate(self.seats) if s == "human"}
+        # human_index is kept as the *first* human seat for any caller still using it.
+        if self._human_indices:
+            self.human_index = min(self._human_indices)
+
         random.seed(self.seed)
         cards = parse_cards(self.data_dir / "Cards.csv")
         contracts = parse_contracts(self.data_dir / "Contracts.csv")
@@ -78,30 +134,61 @@ class PlayableGame:
             num_players=self.num_players,
             start_money=DEFAULT_START_MONEY,
             max_turns=self.max_turns,
+            randomize_market=True,
         )
+        # Seed history with the starting market so the UI chart has a turn-0 anchor.
+        self._snapshot_market(turn=0)
+
+    def _snapshot_market(self, turn: int) -> None:
+        self.market_history.append({
+            "turn": turn,
+            "market": {r.value: self.state.market.price(r) for r in Resource},
+        })
 
     # --- Status queries ---
 
+    def _turn_in_progress(self) -> bool:
+        """True if a turn's event has been pre-advanced but not yet fired.
+
+        During this period event_idx is one ahead of the player whose turn is
+        active, so callers need to compensate.
+        """
+        return self._active_player_idx >= 0
+
     def is_over(self) -> bool:
+        # If a turn is in progress, event_idx has been pre-advanced so
+        # comparing against len(event_deck) would incorrectly report "over"
+        # on the final turn. Treat the game as not-over while a turn is in
+        # progress; it becomes over after the turn finishes.
+        if self._turn_in_progress():
+            return False
         return self.state.event_idx >= len(self.state.event_deck)
 
     def current_player_index(self) -> int:
         """Index of the player whose turn is now active (0-based)."""
+        if self._turn_in_progress():
+            return self._active_player_idx
         return self.state.event_idx % self.num_players
 
     def is_human_turn(self) -> bool:
-        return self.current_player_index() == self.human_index and not self.is_over()
+        return self.current_player_index() in self._human_indices and not self.is_over()
 
     def current_player(self) -> Player:
         return self.state.players[self.current_player_index()]
 
     def turn_number(self) -> int:
         """1-indexed player turn number (out of max_turns * num_players)."""
+        # Subtract one during active turn because event_idx was pre-advanced.
+        if self._turn_in_progress():
+            return self.state.event_idx
         return self.state.event_idx + 1
 
     def round_number(self) -> int:
         """1-indexed round (1..max_turns). Each round is num_players player-turns."""
-        return (self.state.event_idx // self.num_players) + 1
+        effective_idx = (
+            self.state.event_idx - 1 if self._turn_in_progress() else self.state.event_idx
+        )
+        return (effective_idx // self.num_players) + 1
 
     # --- Human turn control ---
 
@@ -114,8 +201,15 @@ class PlayableGame:
         self.state.turn += 1
         self.human_turn_in_progress = True
         self._turn_action_records = []
+        # Record which player is acting before we advance event_idx
+        self._active_player_idx = self.state.event_idx % self.num_players
         # Reset per-turn state (rule: one build action per turn)
-        self.current_player().has_built_this_turn = False
+        self.state.players[self._active_player_idx].has_built_this_turn = False
+        # Pre-advance event_idx and stash the current turn's event so that
+        # state.remaining_events() does NOT reveal it to the UI or any helper
+        # that inspects remaining events during the action phase.
+        self._pending_event = self.state.event_deck[self.state.event_idx]
+        self.state.event_idx += 1
 
     def end_human_turn(self) -> dict:
         """Complete the human turn: draw back to hand size, fire the event.
@@ -132,13 +226,16 @@ class PlayableGame:
         if needed > 0:
             player.hand.extend(self.state.deck.draw(needed))
 
-        # Execute the event for this player-turn slot
-        event = self.state.event_deck[self.state.event_idx]
+        # Fire the pre-stashed event. event_idx was already advanced in
+        # begin_human_turn; do NOT advance it again here.
+        event = self._pending_event
         event_detail = execute_event(self.state, event, player)
-        self.state.event_idx += 1
+        self._pending_event = None
         self.last_event = event_detail
 
         self.human_turn_in_progress = False
+        self._active_player_idx = -1
+        self._snapshot_market(turn=self.state.turn)
         return {"type": event.value, "detail": event_detail}
 
     def apply_human_action(self, action: dict) -> dict:
@@ -241,8 +338,14 @@ class PlayableGame:
         if self.is_human_turn():
             return {"ok": False, "reason": "It's the human's turn"}
 
-        player = self.current_player()
+        # Record active player and pre-advance event_idx BEFORE the action
+        # phase runs, so the strategy's remaining_events() call does not
+        # include the current turn's event (matching simulation.run_game).
+        acting_player_idx = self.state.event_idx % self.num_players
+        self._active_player_idx = acting_player_idx
+        player = self.state.players[acting_player_idx]
         event = self.state.event_deck[self.state.event_idx]
+        self.state.event_idx += 1
 
         # Snapshot hand-before so we can diff action records into a log
         actions_log: list[dict] = []
@@ -250,8 +353,11 @@ class PlayableGame:
         # Reset per-turn state (rule: one build action per turn)
         player.has_built_this_turn = False
 
+        # Look up this seat's strategy. seats is fully populated by __post_init__.
+        strategy_fn = _resolve_strategy(self.seats[acting_player_idx])
+
         # Pool swap phase
-        swap_fn = getattr(smart_greedy_strategy, "pool_swap", None)
+        swap_fn = getattr(strategy_fn, "pool_swap", None)
         if swap_fn:
             swap_fn(self.state, player)
 
@@ -260,7 +366,7 @@ class PlayableGame:
         actions_taken = 0
         max_actions = 10  # mirrors MAX_ACTIONS_PER_TURN
         while player.hand and actions_taken < max_actions:
-            action = smart_greedy_strategy(self.state, player)
+            action = strategy_fn(self.state, player)
             if action.action_type == ActionType.PASS:
                 break
             record = self._execute_ai_action(player, action)
@@ -273,23 +379,21 @@ class PlayableGame:
         if needed > 0:
             player.hand.extend(self.state.deck.draw(needed))
 
-        # Event
+        # Event. event_idx was already advanced above; do NOT advance it again.
         event_detail = execute_event(self.state, event, player)
-        self.state.event_idx += 1
         self.last_event = event_detail
         self.last_ai_actions = actions_log
 
+        # End of turn: clear the active-turn marker.
+        self._active_player_idx = -1
+        self._snapshot_market(turn=self.state.turn)
+
         return {
             "ok": True,
-            "player_index": self.current_player_index_before_increment(),
+            "player_index": acting_player_idx,
             "actions": actions_log,
             "event": {"type": event.value, "detail": event_detail},
         }
-
-    def current_player_index_before_increment(self) -> int:
-        # event_idx was just incremented for the previous turn — this returns
-        # the index of the player who just acted.
-        return (self.state.event_idx - 1) % self.num_players
 
     def _execute_ai_action(self, player: Player, action: Action):
         if action.action_type == ActionType.BUILD and action.build_cards:
@@ -311,27 +415,43 @@ class PlayableGame:
         s = self.state
         cur_idx = self.current_player_index() if not self.is_over() else -1
         human_already_built = (
-            cur_idx == self.human_index
-            and s.players[self.human_index].has_built_this_turn
+            cur_idx in self._human_indices
+            and s.players[cur_idx].has_built_this_turn
         )
+        # turn_index is the 0-indexed position of the CURRENT player-turn.
+        # During an active turn, event_idx has been pre-advanced, so we use
+        # turn_number()-1 to get the correct 0-indexed position.
+        turn_index = self.turn_number() - 1
+        # Hand reveal: show the active human's hand only. In hot-seat play this
+        # keeps other humans' hands hidden until it's their turn.
         return {
             "seed": self.seed,
             "round": self.round_number(),
             "max_rounds": self.max_turns,
-            "turn_index": self.state.event_idx,
+            "turn_index": turn_index,
             "total_turns": len(s.event_deck),
             "is_over": self.is_over(),
             "current_player_index": cur_idx,
             "human_index": self.human_index,
+            "human_indices": sorted(self._human_indices),
+            "seats": list(self.seats),
             "human_already_built": human_already_built,
             "can_pool_swap": self.can_pool_swap(),
             "market": {r.value: s.market.price(r) for r in Resource},
             "market_positions": {r.value: s.market.positions[r] for r in Resource},
-            "players": [_player_dict(p, i == self.human_index) for i, p in enumerate(s.players)],
+            "players": [
+                _player_dict(
+                    p,
+                    is_human=(i in self._human_indices),
+                    reveal_hand=(i == cur_idx and i in self._human_indices),
+                )
+                for i, p in enumerate(s.players)
+            ],
             "available_contracts": [_contract_dict(c) for c in s.available_contracts],
             "pool": [_card_dict(c) for c in s.pool],
             "last_event": self.last_event,
             "last_ai_actions": self.last_ai_actions,
+            "market_history": list(self.market_history),
         }
 
     # --- Legal action enumeration (for UI hinting) ---
@@ -458,7 +578,7 @@ def _contract_dict(contract: Contract) -> dict:
     }
 
 
-def _player_dict(player: Player, is_human: bool) -> dict:
+def _player_dict(player: Player, is_human: bool, reveal_hand: bool = False) -> dict:
     return {
         "name": player.name,
         "corporation": player.corporation,
@@ -469,7 +589,7 @@ def _player_dict(player: Player, is_human: bool) -> dict:
         "buildings_played": list(player.buildings_played),
         "contracts_fulfilled": player.contracts_fulfilled,
         "hand_size": len(player.hand),
-        "hand": [_card_dict(c) for c in player.hand] if is_human else [],
+        "hand": [_card_dict(c) for c in player.hand] if reveal_hand else [],
         "is_human": is_human,
     }
 
