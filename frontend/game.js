@@ -29,11 +29,15 @@ async function init() {
     return;
   }
 
-  const strategies = gameData.players.map((p) => `${p.strategy}`).join(", ");
-  const netWorths = gameData.players.map((p) => `$${p.net_worth}`).join(", ");
   const turnsPerPlayer = Math.floor(gameData.turn_count / gameData.players.length);
-  document.getElementById("game-info").textContent =
-    `Game #${gameId + 1} | Players: ${strategies} | Final net worth: ${netWorths} | ${turnsPerPlayer} turns/player`;
+  const playerSummaries = gameData.players
+    .map((p, i) => {
+      const corp = p.corporation ? ` [${p.corporation}]` : "";
+      return `P${i + 1} ${p.strategy}${corp}: $${p.net_worth}`;
+    })
+    .join(" · ");
+  document.getElementById("game-info").innerHTML =
+    `Game #${gameId + 1} | ${turnsPerPlayer} turns/player<br>${playerSummaries}`;
 
   renderNetWorthChart();
   renderMarketChart();
@@ -241,8 +245,17 @@ function renderTurnLog() {
 
   let html = '<div class="table-scroll"><table><thead><tr><th>Round</th>';
   for (let p = 0; p < numPlayers; p++) {
-    const strat = gameData.players[p]?.strategy || "?";
-    html += `<th>Player ${p + 1} (${strat})</th>`;
+    const player = gameData.players[p];
+    const strat = player?.strategy || "?";
+    const corp = player?.corporation || "";
+    const startRates = player?.starting_rates || {};
+    const startStr = Object.entries(startRates)
+      .map(([r, v]) => `${v > 0 ? "+" : ""}${v}${r}`)
+      .join(" ");
+    const corpLine = corp
+      ? `<div style="font-size:0.65rem; color:#8b949e; font-weight:normal">${corp}<br>${startStr}</div>`
+      : "";
+    html += `<th>Player ${p + 1} (${strat})${corpLine}</th>`;
   }
   html += "</tr></thead><tbody>";
 

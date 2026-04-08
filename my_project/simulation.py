@@ -38,6 +38,14 @@ FUTURES_SETTLEMENT_RANGE = (3, 4)
 PWR_ADJUST_FRACTION = 0.5  # fraction of remaining slots
 
 
+# Corporations (name, starting rates)
+CORPORATIONS: list[tuple[str, dict[str, int]]] = [
+    ("Seneca Development", {"PWR": 2, "FE": 1, "FOOD": -1}),
+    ("Yoshimi Robotics", {"PWR": -2, "FE": 2}),
+    ("Reclamation Inc.", {"PWR": 1, "SI": 1, "C": 1, "H2O": -1}),
+]
+
+
 @dataclass
 class Market:
     """Tracks price position (index into PRICE_TRACK) for each resource."""
@@ -95,6 +103,8 @@ class Player:
     contracts_fulfilled: int = 0
     hand_size: int = HAND_SIZE
     ledger: CostLedger = field(default_factory=CostLedger.create)
+    corporation: str = ""
+    starting_rates: dict[str, int] = field(default_factory=dict)
 
     def net_worth(self) -> int:
         return self.money - self.debt + self.contracts_fulfilled * CONTRACT_REWARD
@@ -302,13 +312,28 @@ class GameState:
         # Build event deck
         event_deck = build_event_deck(max_turns, num_players)
 
-        # Create players
+        # Create players. Assign unique corporations randomly (capped at # of corps).
+        corp_pool = list(CORPORATIONS)
+        random.shuffle(corp_pool)
         players = []
         for i in range(num_players):
             p = Player(name=f"Player_{i+1}", money=start_money)
+
+            # Assign corporation if explicit rates not provided
             if corporation_rates and i < len(corporation_rates):
                 for r, v in corporation_rates[i].items():
                     p.rates[r] = v
+            elif i < len(corp_pool):
+                corp_name, corp_rates = corp_pool[i]
+                p.corporation = corp_name
+                p.starting_rates = dict(corp_rates)
+                for r_str, v in corp_rates.items():
+                    res = Resource(r_str)
+                    p.rates[res] = v
+                    # Sync to ledger so contract/build cost tracking is consistent.
+                    # Starting rates have zero cost basis (free from corporation).
+                    p.ledger.accounts[res].rate = v
+
             hand = deck.draw(p.hand_size)
             p.hand = hand
             players.append(p)

@@ -48,6 +48,8 @@ class GameSummary:
     final_market: dict[str, int]
     turn_count: int
     action_history: list[dict]  # condensed history
+    corporations: list[str] = field(default_factory=list)
+    starting_rates: list[dict[str, int]] = field(default_factory=list)
 
 
 @dataclass
@@ -73,6 +75,8 @@ def _summarize_game(state: GameState) -> GameSummary:
     buildings = [list(p.buildings_played) for p in state.players]
     rates = [{r.value: v for r, v in p.rates.items()} for p in state.players]
     final_market = state.market.snapshot()
+    corporations = [p.corporation for p in state.players]
+    starting_rates = [dict(p.starting_rates) for p in state.players]
 
     # Action history with structured action data
     actions = []
@@ -121,6 +125,8 @@ def _summarize_game(state: GameState) -> GameSummary:
         final_market=final_market,
         turn_count=state.turn,
         action_history=actions,
+        corporations=corporations,
+        starting_rates=starting_rates,
     )
 
 
@@ -206,6 +212,8 @@ def results_to_dict(results: MonteCarloResults) -> dict:
         for p in range(num_players):
             players_data.append({
                 "strategy": player_strats[p] if p < len(player_strats) else "unknown",
+                "corporation": g.corporations[p] if p < len(g.corporations) else "",
+                "starting_rates": g.starting_rates[p] if p < len(g.starting_rates) else {},
                 "net_worth": g.final_net_worth[p] if p < len(g.final_net_worth) else 0,
                 "money": g.final_money[p] if p < len(g.final_money) else 0,
                 "debt": g.final_debt[p] if p < len(g.final_debt) else 0,
