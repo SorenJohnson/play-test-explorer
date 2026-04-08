@@ -57,6 +57,8 @@ class GameSummary:
     bills_units_owed: dict[str, int] = field(default_factory=dict)
     futures_units_bought: dict[str, int] = field(default_factory=dict)
     futures_debt_per_resource: dict[str, int] = field(default_factory=dict)
+    # Per-player flows: list[player_idx] -> {resource: amount}
+    player_flows: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -84,6 +86,17 @@ def _summarize_game(state: GameState) -> GameSummary:
     final_market = state.market.snapshot()
     corporations = [p.corporation for p in state.players]
     starting_rates = [dict(p.starting_rates) for p in state.players]
+    player_flows = [
+        {
+            "bought_units": {r.value: v for r, v in p.flow_bought_units.items() if v > 0},
+            "sold_units": {r.value: v for r, v in p.flow_sold_units.items() if v > 0},
+            "buy_cost": {r.value: round(v, 2) for r, v in p.flow_buy_cost.items() if v > 0},
+            "sell_revenue": {r.value: v for r, v in p.flow_sell_revenue.items() if v > 0},
+            "futures_units": {r.value: v for r, v in p.flow_futures_units.items() if v > 0},
+            "futures_cost": {r.value: v for r, v in p.flow_futures_cost.items() if v > 0},
+        }
+        for p in state.players
+    ]
 
     # Action history with structured action data
     actions = []
@@ -141,6 +154,7 @@ def _summarize_game(state: GameState) -> GameSummary:
         bills_units_owed={r.value: v for r, v in state.bills_units_owed.items()},
         futures_units_bought={r.value: v for r, v in state.futures_units_bought.items()},
         futures_debt_per_resource={r.value: v for r, v in state.futures_debt_per_resource.items()},
+        player_flows=player_flows,
     )
 
 
@@ -234,6 +248,7 @@ def results_to_dict(results: MonteCarloResults) -> dict:
                 "contracts_fulfilled": g.contracts_fulfilled[p] if p < len(g.contracts_fulfilled) else 0,
                 "buildings_played": g.buildings_played[p] if p < len(g.buildings_played) else [],
                 "final_rates": g.final_rates[p] if p < len(g.final_rates) else {},
+                "flows": g.player_flows[p] if p < len(g.player_flows) else {},
             })
         game_summaries.append({
             "game_id": i,

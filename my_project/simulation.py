@@ -105,6 +105,13 @@ class Player:
     ledger: CostLedger = field(default_factory=CostLedger.create)
     corporation: str = ""
     starting_rates: dict[str, int] = field(default_factory=dict)
+    # Per-player resource flows (units and cash)
+    flow_bought_units: dict[Resource, int] = field(default_factory=lambda: {r: 0 for r in Resource})
+    flow_sold_units: dict[Resource, int] = field(default_factory=lambda: {r: 0 for r in Resource})
+    flow_buy_cost: dict[Resource, float] = field(default_factory=lambda: {r: 0.0 for r in Resource})
+    flow_sell_revenue: dict[Resource, int] = field(default_factory=lambda: {r: 0 for r in Resource})
+    flow_futures_units: dict[Resource, int] = field(default_factory=lambda: {r: 0 for r in Resource})
+    flow_futures_cost: dict[Resource, int] = field(default_factory=lambda: {r: 0 for r in Resource})
 
     def net_worth(self) -> int:
         return self.money - self.debt + self.contracts_fulfilled * CONTRACT_REWARD
@@ -459,6 +466,9 @@ def execute_build(
         total_cost += spent
         costs_paid[resource.value] = amount
         cost_detail.append(f"{amount} {resource.value}=${spent}")
+        # Per-player flow tracking
+        player.flow_bought_units[resource] += amount
+        player.flow_buy_cost[resource] += spent
 
     player.money -= total_cost
 
@@ -538,6 +548,9 @@ def execute_sell(state: GameState, player: Player, card_idx: int) -> ActionRecor
     revenue = state.market.sell(best_resource, rate)
     player.money += revenue
     player.ledger.record_sell(best_resource, revenue)
+    # Per-player flow tracking
+    player.flow_sold_units[best_resource] += rate
+    player.flow_sell_revenue[best_resource] += revenue
     state.deck.discard.append(player.hand.pop(card_idx))
     return ActionRecord(
         action_type="sell",
@@ -624,6 +637,9 @@ def do_power_bill(state: GameState) -> None:
             player.money += earning
             state.pwr_total_earned += earning
             state.bills_units_earned[Resource.PWR] += pwr_rate
+            # Per-player: power bill earnings count as "sold" PWR
+            player.flow_sold_units[Resource.PWR] += pwr_rate
+            player.flow_sell_revenue[Resource.PWR] += earning
         elif pwr_rate < 0:
             shortage = abs(pwr_rate)
             cost = shortage * pwr_price
@@ -631,6 +647,9 @@ def do_power_bill(state: GameState) -> None:
             state.pwr_total_debt += cost
             state.bills_units_owed[Resource.PWR] += shortage
             player.ledger.record_event_cost(Resource.PWR, cost, pwr_rate)
+            # Per-player: power bill debt counts as "bought" PWR
+            player.flow_bought_units[Resource.PWR] += shortage
+            player.flow_buy_cost[Resource.PWR] += cost
 
 
 def do_debt_collection(state: GameState) -> None:
@@ -665,6 +684,9 @@ def do_futures_settlement(state: GameState) -> None:
                 state.futures_debt_per_resource[r] += cost
                 player.ledger.record_event_cost(r, cost, rate)
                 total_negatives[r] += shortage
+                # Per-player futures tracking
+                player.flow_futures_units[r] += shortage
+                player.flow_futures_cost[r] += cost
 
     # Market rises by total negative rates per resource (no buying, just adjust)
     for r, total in total_negatives.items():

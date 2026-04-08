@@ -37,11 +37,19 @@
         <strong>Futures Paid</strong> = debt incurred at futures settlements.
         <strong>Net Cash Flow</strong> = $ Sold − ($ Bought + Futures Paid).
       </p>
-      <div style="margin:12px 0; display:flex; gap:12px; align-items:center;">
+      <div style="margin:12px 0; display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
         <label style="font-size:0.8rem;">View:</label>
         <button class="view-toggle active" data-view="totals">Raw Totals</button>
         <button class="view-toggle" data-view="per-game">Per Game</button>
         <button class="view-toggle" data-view="per-player-game">Per Player-Game</button>
+        <span style="color:#30363d; margin:0 8px;">|</span>
+        <label style="font-size:0.8rem;">Segment:</label>
+        <button class="segment-toggle active" data-segment="all">All Players</button>
+        <button class="segment-toggle" data-segment="winners">Winners</button>
+        <button class="segment-toggle" data-segment="losers">Losers</button>
+        <button class="segment-toggle" data-segment="smart">Smart</button>
+        <button class="segment-toggle" data-segment="greedy">Greedy</button>
+        <button class="segment-toggle" data-segment="random">Random</button>
       </div>
       <div class="chart-container wide" style="min-height:400px">
         <canvas id="market-trajectory-chart"></canvas>

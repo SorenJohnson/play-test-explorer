@@ -467,16 +467,60 @@ const CORP_STARTING_RATES = {
 function renderMarketDynamics() {
   const md = analysisData.market_dynamics;
   if (!md) return;
-  const data = md.resources || md;  // fallback for old format
+  const allResourcesData = md.resources || md;  // fallback for old format
+  const segments = md.segments || {};
+  let currentSegment = "all";
+  let currentView = "totals";
 
-  // Line chart: avg trajectory per resource over turns
-  const resources = Object.keys(data);
-  const maxLen = Math.max(...resources.map((r) => data[r].avg_trajectory.length));
+  // Build a normalized data structure for a segment.
+  // Segment data uses different keys than the resource-level data,
+  // so we map them. PWR is special - segment tracks bills via flow_*.
+  function buildSegmentData(segmentKey) {
+    if (segmentKey === "all") {
+      return allResourcesData;
+    }
+    const seg = segments[segmentKey];
+    if (!seg) return allResourcesData;
+    const resourceMap = seg.resources || {};
+    // Need to merge with avg_starting/final_price from allResourcesData (segment doesn't have prices)
+    const result = {};
+    const allResourceKeys = new Set([
+      ...Object.keys(allResourcesData),
+      ...Object.keys(resourceMap),
+    ]);
+    for (const r of allResourceKeys) {
+      const segR = resourceMap[r] || {
+        bought_units: 0,
+        sold_units: 0,
+        buy_cost: 0,
+        sell_revenue: 0,
+        futures_units: 0,
+        futures_cost: 0,
+      };
+      const fullR = allResourcesData[r] || {};
+      result[r] = {
+        avg_trajectory: fullR.avg_trajectory || [],
+        avg_starting_price: fullR.avg_starting_price || 0,
+        avg_final_price: fullR.avg_final_price || 0,
+        total_bought: segR.bought_units + segR.futures_units,
+        total_sold: segR.sold_units,
+        total_buy_cost: segR.buy_cost + segR.futures_cost,
+        total_sell_revenue: segR.sell_revenue,
+        futures_debt: segR.futures_cost,
+        futures_units: segR.futures_units,
+      };
+    }
+    return result;
+  }
+
+  // Line chart: avg trajectory per resource over turns (uses all-segment data)
+  const resources = Object.keys(allResourcesData);
+  const maxLen = Math.max(...resources.map((r) => (allResourcesData[r].avg_trajectory || []).length));
   const labels = Array.from({ length: maxLen }, (_, i) => `Turn ${i + 1}`);
 
   const datasets = resources.map((r) => ({
     label: r,
-    data: data[r].avg_trajectory,
+    data: allResourcesData[r].avg_trajectory || [],
     borderColor: RESOURCE_COLORS[r] || "#888",
     backgroundColor: "transparent",
     borderWidth: 2,
@@ -523,22 +567,38 @@ function renderMarketDynamics() {
     }
   }
 
-  // Render the table for a given view mode
-  function renderTable(view) {
+  // Render the table for a given view mode + segment
+  function renderTable(view, segment) {
     const tbody = document.querySelector("#market-dynamics-table tbody");
-    const sorted = Object.entries(data).sort(
+    const segmentData = buildSegmentData(segment);
+    const sorted = Object.entries(segmentData).sort(
       (a, b) => b[1].avg_final_price - a[1].avg_final_price
     );
 
+    // Determine divisor based on view + segment
     let divisor = 1;
     let valFmt = (v) => v.toLocaleString();
     let cashFmt = (v) => "$" + Math.round(v).toLocaleString();
+
+    // For non-all segments, normalization should use segment player count
+    let segPlayerCount = totalPlayerGames;
+    if (segment !== "all" && segments[segment]) {
+      segPlayerCount = segments[segment].player_count || totalPlayerGames;
+    }
+    // For per-game in a segment, "games" are roughly player_count / 3 (avg) but
+    // we don't track per-segment game count. Use the segment player count for
+    // per-game and per-player-game both. Per-player-game is the truer view for segments.
     if (view === "per-game") {
       divisor = totalGames || 1;
+      // For non-all segments, scale by what fraction of players are in this segment
+      if (segment !== "all") {
+        divisor = totalGames * (segPlayerCount / (totalPlayerGames || 1));
+        if (divisor < 1) divisor = 1;
+      }
       valFmt = (v) => (v / divisor).toFixed(1);
       cashFmt = (v) => "$" + (v / divisor).toFixed(1);
     } else if (view === "per-player-game") {
-      divisor = totalPlayerGames || 1;
+      divisor = segPlayerCount || 1;
       valFmt = (v) => (v / divisor).toFixed(2);
       cashFmt = (v) => "$" + (v / divisor).toFixed(2);
     }
@@ -626,14 +686,25 @@ function renderMarketDynamics() {
   }
 
   // Initial render
-  renderTable("totals");
+  renderTable(currentView, currentSegment);
 
   // Wire up view toggles
   document.querySelectorAll(".view-toggle").forEach((btn) => {
     btn.addEventListener("click", () => {
       document.querySelectorAll(".view-toggle").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
-      renderTable(btn.dataset.view);
+      currentView = btn.dataset.view;
+      renderTable(currentView, currentSegment);
+    });
+  });
+
+  // Wire up segment toggles
+  document.querySelectorAll(".segment-toggle").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".segment-toggle").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      currentSegment = btn.dataset.segment;
+      renderTable(currentView, currentSegment);
     });
   });
 }

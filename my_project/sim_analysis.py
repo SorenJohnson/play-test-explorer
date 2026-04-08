@@ -358,6 +358,88 @@ def analyze_market_dynamics(sim_files: list[Path]) -> dict:
         "resources": results,
         "total_games": total_games,
         "total_player_games": total_player_games,
+        "segments": _segment_player_flows(sim_files),
+    }
+
+
+def _segment_player_flows(sim_files: list[Path]) -> dict:
+    """Build per-segment aggregates of player flows.
+
+    Segments:
+    - all
+    - winners / losers (top / bottom NW per game)
+    - by strategy (smart / greedy / random)
+    """
+    segment_keys = ["all", "winners", "losers", "smart", "greedy", "random"]
+    out: dict[str, dict] = {
+        seg: {
+            "player_count": 0,
+            "resources": defaultdict(lambda: {
+                "bought_units": 0,
+                "sold_units": 0,
+                "buy_cost": 0.0,
+                "sell_revenue": 0.0,
+                "futures_units": 0,
+                "futures_cost": 0.0,
+            }),
+        }
+        for seg in segment_keys
+    }
+
+    for f in sim_files:
+        with open(f) as fh:
+            data = json.load(fh)
+
+        for game in data["games"]:
+            players = game.get("players", [])
+            if not players:
+                continue
+
+            nws = [p.get("net_worth", 0) for p in players]
+            top_nw = max(nws)
+            bottom_nw = min(nws)
+
+            for p in players:
+                flows = p.get("flows", {})
+                if not flows:
+                    continue
+                nw = p.get("net_worth", 0)
+                strat = p.get("strategy", "")
+
+                segments = ["all"]
+                if nw == top_nw:
+                    segments.append("winners")
+                if nw == bottom_nw and top_nw != bottom_nw:
+                    segments.append("losers")
+                if strat in segment_keys:
+                    segments.append(strat)
+
+                for seg in segments:
+                    out[seg]["player_count"] += 1
+                    seg_res = out[seg]["resources"]
+                    for r, v in flows.get("bought_units", {}).items():
+                        seg_res[r]["bought_units"] += v
+                    for r, v in flows.get("sold_units", {}).items():
+                        seg_res[r]["sold_units"] += v
+                    for r, v in flows.get("buy_cost", {}).items():
+                        seg_res[r]["buy_cost"] += v
+                    for r, v in flows.get("sell_revenue", {}).items():
+                        seg_res[r]["sell_revenue"] += v
+                    for r, v in flows.get("futures_units", {}).items():
+                        seg_res[r]["futures_units"] += v
+                    for r, v in flows.get("futures_cost", {}).items():
+                        seg_res[r]["futures_cost"] += v
+
+    # Convert defaultdicts to plain dicts
+    return {
+        seg: {
+            "player_count": s["player_count"],
+            "resources": {
+                r: {k: round(v, 2) if isinstance(v, float) else v for k, v in stats.items()}
+                for r, stats in s["resources"].items()
+            },
+        }
+        for seg, s in out.items()
     }
 
 
