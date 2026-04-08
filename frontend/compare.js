@@ -13,6 +13,32 @@ const RESOURCE_COLORS = {
 
 let allData = [];
 let analysisData = null;
+let currentScenario = "all";
+const chartRegistry = {}; // id -> Chart instance (for destroy-on-rerender)
+
+// Read an analysis field, honoring the current scenario filter if a per-scenario variant exists.
+function getSource(field) {
+  if (currentScenario === "all") return analysisData[field];
+  const byScenario = analysisData[`${field}_by_scenario`];
+  if (byScenario && byScenario[currentScenario]) return byScenario[currentScenario];
+  return analysisData[field];
+}
+
+// Strip all listeners from a DOM element by cloning it.
+function resetEl(el) {
+  if (!el) return null;
+  const clone = el.cloneNode(true);
+  el.parentNode.replaceChild(clone, el);
+  return clone;
+}
+
+// Destroy a registered chart if present.
+function destroyChart(id) {
+  if (chartRegistry[id]) {
+    chartRegistry[id].destroy();
+    delete chartRegistry[id];
+  }
+}
 
 async function init() {
   const [scenarioResults, analysis] = await Promise.all([
@@ -27,13 +53,50 @@ async function init() {
 
   renderStrategyChart();
   if (analysisData) {
-    renderMarketDynamics();
-    renderCorporationTable();
-    renderBuildingValueTable();
-    renderStrategyContractTable();
-    renderFlowNetwork();
+    populateScenarioSelector();
+    renderScenarioDependent();
+    renderFlowNetwork(); // not scenario-filtered
   }
-  renderGameBrowser();
+  renderGameBrowser(); // not scenario-filtered
+}
+
+function populateScenarioSelector() {
+  const select = document.getElementById("page-scenario");
+  if (!select) return;
+  const scenarios = Object.keys(analysisData.building_value_by_scenario || {}).sort();
+  const prettyLabel = (name) => {
+    if (name === "all") return "All scenarios (combined)";
+    return name.replace(/^sim_/, "").replace(/_/g, " + ");
+  };
+  select.innerHTML = ["all", ...scenarios]
+    .map((s) => `<option value="${s}">${prettyLabel(s)}</option>`)
+    .join("");
+  select.addEventListener("change", () => {
+    currentScenario = select.value;
+    renderScenarioDependent();
+  });
+}
+
+// Re-render all scenario-dependent sections. Resets DOM listeners and charts
+// so repeated calls don't stack handlers or leak Chart.js instances.
+function renderScenarioDependent() {
+  // Destroy scenario-bound charts
+  destroyChart("market-trajectory-chart");
+
+  // Reset elements that have wired listeners (sortable headers, toggle buttons)
+  resetEl(document.querySelector("#corporation-table"));
+  resetEl(document.querySelector("#building-value-table"));
+  resetEl(document.querySelector("#strategy-contract-table"));
+  resetEl(document.querySelector("#market-dynamics-table"));
+  // Toggle button groups for market dynamics
+  document.querySelectorAll(".view-toggle, .segment-toggle").forEach((btn) => {
+    resetEl(btn);
+  });
+
+  renderMarketDynamics();
+  renderCorporationTable();
+  renderBuildingValueTable();
+  renderStrategyContractTable();
 }
 
 // --- Strategy Performance ---
@@ -78,7 +141,7 @@ function renderStrategyChart() {
 // --- Contract Economics (sortable + expandable) ---
 
 function renderStrategyContractTable() {
-  const contracts = analysisData.sim_contract_costs;
+  const contracts = getSource("sim_contract_costs");
   if (!contracts) return;
 
   const table = document.getElementById("strategy-contract-table");
@@ -464,13 +527,15 @@ const CORP_STARTING_RATES = {
   "Reclamation Inc.": { PWR: 1, SI: 1, C: 1, H2O: -1 },
 };
 
+// Persisted across scenario changes so user selections survive filter swaps.
+let mdCurrentSegment = "all";
+let mdCurrentView = "totals";
+
 function renderMarketDynamics() {
-  const md = analysisData.market_dynamics;
+  const md = getSource("market_dynamics");
   if (!md) return;
   const allResourcesData = md.resources || md;  // fallback for old format
   const segments = md.segments || {};
-  let currentSegment = "all";
-  let currentView = "totals";
 
   // Build a normalized data structure for a segment.
   // Segment data uses different keys than the resource-level data,
@@ -528,7 +593,7 @@ function renderMarketDynamics() {
     pointRadius: 0,
   }));
 
-  new Chart(document.getElementById("market-trajectory-chart"), {
+  chartRegistry["market-trajectory-chart"] = new Chart(document.getElementById("market-trajectory-chart"), {
     type: "line",
     data: { labels, datasets },
     options: {
@@ -579,6 +644,10 @@ function renderMarketDynamics() {
     const pc = seg.player_count || 1;
     const d = divisor || pc;
     const fmt = (v) => "$" + (v / d).toFixed(1);
+    const fmtSigned = (v) => {
+      const val = v / d;
+      return (val >= 0 ? "+$" : "-$") + Math.abs(val).toFixed(1);
+    };
     const fmtN = (v) => (v / d).toFixed(2);
 
     // Compute cash components from segment resource flows
@@ -598,49 +667,50 @@ function renderMarketDynamics() {
     const marketNonPwrBought = totalBought - pwrBought;
     const pwrNet = pwrSold - pwrBought;
 
+    const nwClass = t.net_worth >= 0 ? "positive" : "negative";
+    const pwrClass = pwrNet >= 0 ? "positive" : "negative";
+
+    // Build the income line-item rows
+    const row = (label, value, cls, hint = "") => `
+      <div style="display:flex; justify-content:space-between; align-items:baseline; padding:6px 0; border-bottom:1px solid #21262d;">
+        <span style="color:#8b949e; font-size:0.8rem;">${label}</span>
+        <span>
+          <span class="${cls}" style="font-weight:600; font-size:0.9rem;">${value}</span>
+          ${hint ? `<span style="color:#484f58; font-size:0.7rem; margin-left:6px;">${hint}</span>` : ""}
+        </span>
+      </div>`;
+
     el.innerHTML = `
-      <div style="background:#161b22; border:1px solid #30363d; border-radius:6px; padding:16px;">
-        <h3 style="color:#58a6ff; margin-bottom:8px; font-size:0.95rem;">
-          Player Income Breakdown — ${segment} (${pc.toLocaleString()} player-games)
-        </h3>
-        <p style="color:#8b949e; font-size:0.75rem; margin-bottom:12px;">
-          Where does a typical ${segment} player's money come from? (${unitLabel})
-        </p>
-        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:16px; font-size:0.8rem;">
+      <div style="background:#161b22; border:1px solid #30363d; border-radius:8px; padding:20px;">
+        <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:16px;">
+          <h3 style="color:#58a6ff; font-size:1rem; margin:0;">
+            Player Income Breakdown
+          </h3>
+          <span style="color:#8b949e; font-size:0.75rem;">
+            ${segment} segment · ${unitLabel} · ${pc.toLocaleString()} player-games
+          </span>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:24px;">
           <div>
-            <div class="detail-label">Final Net Worth</div>
-            <div class="detail-value ${t.net_worth >= 0 ? "positive" : "negative"}" style="font-size:1.1rem; font-weight:700;">
-              ${fmt(t.net_worth)}
+            <div style="color:#58a6ff; font-size:0.75rem; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">
+              Cash Flow Sources
             </div>
+            ${row("Market Sales (non-PWR)", fmtSigned(marketNonPwrSold), "positive")}
+            ${row("Market Buys (non-PWR)", fmtSigned(-marketNonPwrBought), "negative")}
+            ${row("PWR (power bills)", fmtSigned(pwrNet), pwrClass)}
+            ${row("Futures Settlements", fmtSigned(-totalFutures), "negative")}
           </div>
           <div>
-            <div class="detail-label">= Money</div>
-            <div class="detail-value">${fmt(t.money)}</div>
-          </div>
-          <div>
-            <div class="detail-label">− Debt</div>
-            <div class="detail-value negative">${fmt(t.debt)}</div>
-          </div>
-          <div>
-            <div class="detail-label">+ Contract Value</div>
-            <div class="detail-value positive">${fmt(t.contract_value)}</div>
-            <div style="color:#8b949e; font-size:0.7rem;">${fmtN(t.contracts_fulfilled)} contracts</div>
-          </div>
-          <div>
-            <div class="detail-label">Market Sales (non-PWR)</div>
-            <div class="detail-value positive">${fmt(marketNonPwrSold)}</div>
-          </div>
-          <div>
-            <div class="detail-label">Market Buys (non-PWR)</div>
-            <div class="detail-value negative">${fmt(marketNonPwrBought)}</div>
-          </div>
-          <div>
-            <div class="detail-label">PWR Net (power bills)</div>
-            <div class="detail-value ${pwrNet >= 0 ? "positive" : "negative"}">${pwrNet >= 0 ? "+" : ""}${fmt(pwrNet)}</div>
-          </div>
-          <div>
-            <div class="detail-label">Futures Debt</div>
-            <div class="detail-value negative">${fmt(totalFutures)}</div>
+            <div style="color:#58a6ff; font-size:0.75rem; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">
+              Final Position
+            </div>
+            ${row("Money", fmt(t.money), "positive")}
+            ${row("Debt", fmtSigned(-t.debt), "negative")}
+            ${row("Contracts Fulfilled", fmt(t.contract_value), "positive", `${fmtN(t.contracts_fulfilled)} contracts`)}
+            <div style="display:flex; justify-content:space-between; align-items:baseline; padding:10px 0 0; margin-top:6px; border-top:2px solid #30363d;">
+              <span style="color:#c9d1d9; font-size:0.85rem; font-weight:600;">Net Worth</span>
+              <span class="${nwClass}" style="font-weight:700; font-size:1.2rem;">${fmt(t.net_worth)}</span>
+            </div>
           </div>
         </div>
       </div>`;
@@ -769,16 +839,24 @@ function renderMarketDynamics() {
     }
   }
 
+  // Sync toggle button active classes with persistent state (handles rerender)
+  document.querySelectorAll(".view-toggle").forEach((b) => {
+    b.classList.toggle("active", b.dataset.view === mdCurrentView);
+  });
+  document.querySelectorAll(".segment-toggle").forEach((b) => {
+    b.classList.toggle("active", b.dataset.segment === mdCurrentSegment);
+  });
+
   // Initial render
-  renderTable(currentView, currentSegment);
+  renderTable(mdCurrentView, mdCurrentSegment);
 
   // Wire up view toggles
   document.querySelectorAll(".view-toggle").forEach((btn) => {
     btn.addEventListener("click", () => {
       document.querySelectorAll(".view-toggle").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
-      currentView = btn.dataset.view;
-      renderTable(currentView, currentSegment);
+      mdCurrentView = btn.dataset.view;
+      renderTable(mdCurrentView, mdCurrentSegment);
     });
   });
 
@@ -787,14 +865,14 @@ function renderMarketDynamics() {
     btn.addEventListener("click", () => {
       document.querySelectorAll(".segment-toggle").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
-      currentSegment = btn.dataset.segment;
-      renderTable(currentView, currentSegment);
+      mdCurrentSegment = btn.dataset.segment;
+      renderTable(mdCurrentView, mdCurrentSegment);
     });
   });
 }
 
 function renderCorporationTable() {
-  const data = analysisData.corporations;
+  const data = getSource("corporations");
   if (!data) return;
 
   const tbody = document.querySelector("#corporation-table tbody");
@@ -825,24 +903,25 @@ function renderCorporationTable() {
 }
 
 function renderBuildingValueTable() {
-  const data = analysisData.building_value;
+  const data = getSource("building_value");
   if (!data) return;
 
   const table = document.getElementById("building-value-table");
   const tbody = table.querySelector("tbody");
   const entries = Object.entries(data);
 
-  let currentSort = { col: 4, asc: false }; // default: win_rate desc
+  let currentSort = { col: 4, asc: false }; // default: edge desc
 
   function getSortValue(name, s, colIdx) {
     switch (colIdx) {
       case 0: return name;
       case 1: return s.times_built;
-      case 2: return s.games_built_in;
-      case 3: return s.games_winner_built;
-      case 4: return s.win_rate;
+      case 2: return s.winner_pct;
+      case 3: return s.loser_pct;
+      case 4: return s.edge;
       case 5: return s.avg_builder_net_worth;
-      case 6: return s.avg_market_cost;
+      case 6: return s.nw_delta;
+      case 7: return s.avg_market_cost;
       default: return 0;
     }
   }
@@ -855,16 +934,27 @@ function renderBuildingValueTable() {
       return currentSort.asc ? va - vb : vb - va;
     });
 
+    const signedPct = (v) => {
+      const pct = (v * 100).toFixed(1);
+      return v >= 0 ? `+${pct}%` : `${pct}%`;
+    };
+    const signedDollar = (v) => {
+      const abs = Math.abs(v).toFixed(0);
+      return v >= 0 ? `+$${abs}` : `-$${abs}`;
+    };
+
     tbody.innerHTML = sorted
       .map(([name, s]) => {
-        const winPct = (s.win_rate * 100).toFixed(1);
+        const edgeCls = s.edge > 0 ? "positive" : s.edge < 0 ? "negative" : "";
+        const deltaCls = s.nw_delta > 0 ? "positive" : s.nw_delta < 0 ? "negative" : "";
         return `<tr>
           <td>${name}</td>
           <td>${s.times_built}</td>
-          <td>${s.games_built_in}</td>
-          <td>${s.games_winner_built}</td>
-          <td><strong>${winPct}%</strong></td>
+          <td>${(s.winner_pct * 100).toFixed(1)}%</td>
+          <td>${(s.loser_pct * 100).toFixed(1)}%</td>
+          <td class="${edgeCls}"><strong>${signedPct(s.edge)}</strong></td>
           <td>$${s.avg_builder_net_worth}</td>
+          <td class="${deltaCls}"><strong>${signedDollar(s.nw_delta)}</strong></td>
           <td>$${s.avg_market_cost}</td>
         </tr>`;
       })

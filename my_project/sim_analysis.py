@@ -528,21 +528,33 @@ def analyze_corporations(sim_files: list[Path]) -> dict:
 
 
 def analyze_building_value(sim_files: list[Path]) -> dict:
-    """Compute win rate and value metrics per building.
+    """Compute differential value metrics per building.
 
+    Metrics:
     - times_built: total across all games
-    - win_rate: games_where_winner_built_it / games_where_anyone_built_it
-    - avg_builder_net_worth: avg final NW of players who built it
-    - avg_market_cost: avg $ paid at market when this building was built
+    - games_built_in: games where at least one player built it
+    - winner_pct: % of winners who built it (share of winning player-games)
+    - loser_pct: % of losers who built it (share of losing player-games)
+    - edge: winner_pct − loser_pct (positive = winning building)
+    - avg_builder_net_worth: avg NW of player-games that built it
+    - avg_non_builder_net_worth: avg NW of player-games that did NOT build it
+    - nw_delta: avg_builder_net_worth − avg_non_builder_net_worth
+    - avg_market_cost: avg $ paid at market when built
     """
-    # Building → stats
     total_count: dict[str, int] = defaultdict(int)
     market_cost_total: dict[str, float] = defaultdict(float)
-    builder_nws: dict[str, list[int]] = defaultdict(list)
-
-    # For win rate: track games_built and games_winner_built per building
     games_built: dict[str, int] = defaultdict(int)
-    games_winner_built: dict[str, int] = defaultdict(int)
+
+    # Per-player-game differential tracking (unconditional denominators)
+    winner_built_count: dict[str, int] = defaultdict(int)
+    loser_built_count: dict[str, int] = defaultdict(int)
+    builder_nw_sum: dict[str, float] = defaultdict(float)
+    builder_nw_count: dict[str, int] = defaultdict(int)
+
+    total_winners = 0
+    total_losers = 0
+    total_nw_sum = 0.0
+    total_player_games = 0
 
     for f in sim_files:
         with open(f) as fh:
@@ -570,35 +582,57 @@ def analyze_building_value(sim_files: list[Path]) -> dict:
                         market_cost_total[bname] += per_building
                         built_by_player[player_name].add(bname)
 
-            # Track game-level stats per building
             all_built_this_game: set[str] = set()
-            winner_built_this_game: set[str] = set()
             for i, p in enumerate(players):
                 player_name = f"Player_{i+1}"
                 player_builds = built_by_player.get(player_name, set())
                 all_built_this_game.update(player_builds)
+
+                nw = p["net_worth"]
+                is_winner = nw == winning_nw
+                total_player_games += 1
+                total_nw_sum += nw
+                if is_winner:
+                    total_winners += 1
+                else:
+                    total_losers += 1
+
                 for b in player_builds:
-                    builder_nws[b].append(p["net_worth"])
-                if p["net_worth"] == winning_nw:
-                    winner_built_this_game.update(player_builds)
+                    builder_nw_sum[b] += nw
+                    builder_nw_count[b] += 1
+                    if is_winner:
+                        winner_built_count[b] += 1
+                    else:
+                        loser_built_count[b] += 1
 
             for b in all_built_this_game:
                 games_built[b] += 1
-            for b in winner_built_this_game:
-                games_winner_built[b] += 1
 
     results = {}
     for bname in sorted(total_count.keys(), key=lambda b: -total_count[b]):
         count = total_count[bname]
         gb = games_built[bname]
-        gw = games_winner_built[bname]
-        nws = builder_nws[bname]
+        wb = winner_built_count[bname]
+        lb = loser_built_count[bname]
+        winner_pct = wb / total_winners if total_winners else 0
+        loser_pct = lb / total_losers if total_losers else 0
+
+        b_count = builder_nw_count[bname]
+        b_sum = builder_nw_sum[bname]
+        nb_count = total_player_games - b_count
+        nb_sum = total_nw_sum - b_sum
+        avg_builder_nw = b_sum / b_count if b_count else 0
+        avg_non_builder_nw = nb_sum / nb_count if nb_count else 0
+
         results[bname] = {
             "times_built": count,
             "games_built_in": gb,
-            "games_winner_built": gw,
-            "win_rate": round(gw / gb, 3) if gb else 0,
-            "avg_builder_net_worth": round(sum(nws) / len(nws), 1) if nws else 0,
+            "winner_pct": round(winner_pct, 4),
+            "loser_pct": round(loser_pct, 4),
+            "edge": round(winner_pct - loser_pct, 4),
+            "avg_builder_net_worth": round(avg_builder_nw, 1),
+            "avg_non_builder_net_worth": round(avg_non_builder_nw, 1),
+            "nw_delta": round(avg_builder_nw - avg_non_builder_nw, 1),
             "avg_market_cost": round(market_cost_total[bname] / count, 1) if count else 0,
         }
     return results

@@ -16,6 +16,15 @@
     <header>
       <h1>Contract Economics</h1>
       <p class="subtitle">What do contracts really cost? Data from 2,500 simulated 3-player games across 5 scenarios.</p>
+      <div style="margin-top:12px; display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+        <label style="font-size:0.85rem; color:#8b949e;">
+          Scenario filter:
+          <select id="page-scenario" style="background:#21262d; border:1px solid #30363d; color:#c9d1d9; padding:6px 10px; border-radius:4px; margin-left:6px; font-size:0.85rem;"></select>
+        </label>
+        <span style="color:#484f58; font-size:0.75rem;">
+          Filters Corporation Performance, Building Value, Contract Economics, and Market Dynamics.
+        </span>
+      </div>
     </header>
 
     <!-- Strategy overview (compact) -->
@@ -37,7 +46,10 @@
         <strong>Futures Paid</strong> = debt incurred at futures settlements.
         <strong>Net Cash Flow</strong> = $ Sold − ($ Bought + Futures Paid).
       </p>
-      <div style="margin:12px 0; display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+      <div class="chart-container wide" style="min-height:400px">
+        <canvas id="market-trajectory-chart"></canvas>
+      </div>
+      <div style="margin:16px 0 12px; display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
         <label style="font-size:0.8rem;">View:</label>
         <button class="view-toggle active" data-view="totals">Raw Totals</button>
         <button class="view-toggle" data-view="per-game">Per Game</button>
@@ -51,11 +63,8 @@
         <button class="segment-toggle" data-segment="greedy">Greedy</button>
         <button class="segment-toggle" data-segment="random">Random</button>
       </div>
-      <div class="chart-container wide" style="min-height:400px">
-        <canvas id="market-trajectory-chart"></canvas>
-      </div>
-      <div id="segment-summary" style="margin-top:16px"></div>
-      <div class="table-scroll" style="margin-top:16px">
+      <div id="segment-summary" style="margin-bottom:16px"></div>
+      <div class="table-scroll">
         <table id="market-dynamics-table">
           <thead>
             <tr>
@@ -108,8 +117,10 @@
     <section>
       <h2>Building Value</h2>
       <p class="subtitle">
-        Win rate = % of games where the winning player built this.
-        Avg Builder NW = avg final net worth of players who built it.
+        <strong>Winner %</strong> = share of winning player-games that built this.
+        <strong>Loser %</strong> = share of losing player-games that built this.
+        <strong>Edge</strong> = Winner % − Loser % (positive = winning building).
+        <strong>NW Δ</strong> = avg NW of builders − avg NW of non-builders (magnitude of the effect).
       </p>
       <div class="table-scroll">
         <table id="building-value-table">
@@ -117,10 +128,11 @@
             <tr>
               <th>Building</th>
               <th>Times Built</th>
-              <th>Games Built In</th>
-              <th>Winner Built</th>
-              <th>Win Rate</th>
+              <th>Winner %</th>
+              <th>Loser %</th>
+              <th>Edge</th>
               <th>Avg Builder NW</th>
+              <th>NW Δ</th>
               <th>Avg Market Cost</th>
             </tr>
           </thead>

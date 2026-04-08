@@ -126,6 +126,19 @@ def cmd_analyze() -> None:
         data["corporations"] = analyze_corporations(sim_files)
         data["building_value"] = analyze_building_value(sim_files)
         data["market_dynamics"] = analyze_market_dynamics(sim_files)
+        # Per-scenario variants for the report's scenario filter
+        data["sim_contract_costs_by_scenario"] = {
+            f.stem: analyze_sim_contracts([f]) for f in sim_files
+        }
+        data["corporations_by_scenario"] = {
+            f.stem: analyze_corporations([f]) for f in sim_files
+        }
+        data["building_value_by_scenario"] = {
+            f.stem: analyze_building_value([f]) for f in sim_files
+        }
+        data["market_dynamics_by_scenario"] = {
+            f.stem: analyze_market_dynamics([f]) for f in sim_files
+        }
         source = "full" if full_files else "publish"
         print(f"Analyzed {len(sim_files)} simulation files (from {source} data)")
 
