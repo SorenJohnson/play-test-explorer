@@ -271,6 +271,14 @@ class GameState:
     pwr_total_earned: int = 0  # cash earned from positive PWR at power bills
     pwr_total_debt: int = 0  # debt incurred from negative PWR at power bills
     futures_total_debt: int = 0  # debt incurred from negative non-PWR rates at settlements
+    # Per-resource event accounting:
+    # bills_units_earned[r] = total positive rate units "sold" via power bills
+    # bills_units_owed[r] = total negative rate units "bought" via power bills (PWR only)
+    # futures_units_bought[r] = total negative rate units bought at futures settlements
+    bills_units_earned: dict[Resource, int] = field(default_factory=lambda: {r: 0 for r in Resource})
+    bills_units_owed: dict[Resource, int] = field(default_factory=lambda: {r: 0 for r in Resource})
+    futures_units_bought: dict[Resource, int] = field(default_factory=lambda: {r: 0 for r in Resource})
+    futures_debt_per_resource: dict[Resource, int] = field(default_factory=lambda: {r: 0 for r in Resource})
     max_turns: int = DEFAULT_MAX_TURNS
 
     def remaining_events(self) -> dict[EventType, int]:
@@ -615,10 +623,13 @@ def do_power_bill(state: GameState) -> None:
             earning = pwr_rate * pwr_price
             player.money += earning
             state.pwr_total_earned += earning
+            state.bills_units_earned[Resource.PWR] += pwr_rate
         elif pwr_rate < 0:
-            cost = abs(pwr_rate) * pwr_price
+            shortage = abs(pwr_rate)
+            cost = shortage * pwr_price
             player.debt += cost
             state.pwr_total_debt += cost
+            state.bills_units_owed[Resource.PWR] += shortage
             player.ledger.record_event_cost(Resource.PWR, cost, pwr_rate)
 
 
@@ -650,6 +661,8 @@ def do_futures_settlement(state: GameState) -> None:
                 cost = starting_prices[r] * shortage
                 player.debt += cost
                 state.futures_total_debt += cost
+                state.futures_units_bought[r] += shortage
+                state.futures_debt_per_resource[r] += cost
                 player.ledger.record_event_cost(r, cost, rate)
                 total_negatives[r] += shortage
 

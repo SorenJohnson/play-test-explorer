@@ -206,6 +206,12 @@ def analyze_market_dynamics(sim_files: list[Path]) -> dict:
     final_prices: dict[str, list[int]] = defaultdict(list)
     starting_prices: dict[str, list[int]] = defaultdict(list)
 
+    # Event-driven per-resource flows
+    bills_units_earned: dict[str, int] = defaultdict(int)
+    bills_units_owed: dict[str, int] = defaultdict(int)
+    futures_units_bought: dict[str, int] = defaultdict(int)
+    futures_debt_per_resource: dict[str, int] = defaultdict(int)
+
     # Event-driven economy (aggregate across all games)
     pwr_earned = 0  # total earned at power bills from positive PWR
     pwr_debt = 0  # total debt incurred from negative PWR at power bills
@@ -264,9 +270,26 @@ def analyze_market_dynamics(sim_files: list[Path]) -> dict:
             pwr_debt += game.get("pwr_total_debt", 0)
             futures_debt += game.get("futures_total_debt", 0)
 
+            for r, v in game.get("bills_units_earned", {}).items():
+                bills_units_earned[r] += v
+            for r, v in game.get("bills_units_owed", {}).items():
+                bills_units_owed[r] += v
+            for r, v in game.get("futures_units_bought", {}).items():
+                futures_units_bought[r] += v
+            for r, v in game.get("futures_debt_per_resource", {}).items():
+                futures_debt_per_resource[r] += v
+
     # Build result
     results = {}
-    all_resources = set(all_trajectories) | set(bought) | set(sold) | set(final_prices)
+    all_resources = (
+        set(all_trajectories)
+        | set(bought)
+        | set(sold)
+        | set(final_prices)
+        | set(bills_units_earned)
+        | set(bills_units_owed)
+        | set(futures_units_bought)
+    )
     for r in sorted(all_resources):
         # Compute avg trajectory
         trajectories = all_trajectories.get(r, [])
@@ -279,32 +302,50 @@ def analyze_market_dynamics(sim_files: list[Path]) -> dict:
 
         starts = starting_prices.get(r, [])
         finals = final_prices.get(r, [])
-        b = bought.get(r, 0)
-        s = sold.get(r, 0)
+
+        # Combine market trades + event-driven flows
+        # PWR: power bills earn for + rate (treat as "sold"), debt for - rate (treat as "bought")
+        # Other: futures settlement charges debt for - rate (treat as "bought")
+        market_bought = bought.get(r, 0)
+        market_sold = sold.get(r, 0)
+        market_buy_cost = int(round(buy_cost.get(r, 0)))
+        market_sell_revenue = sell_revenue.get(r, 0)
+
+        # Power bill flows (PWR only in practice, but tracked for any resource)
+        bill_earned_units = bills_units_earned.get(r, 0)
+        bill_owed_units = bills_units_owed.get(r, 0)
+        bill_earned_cash = pwr_earned if r == "PWR" else 0
+        bill_debt_cash = pwr_debt if r == "PWR" else 0
+
+        # Futures settlement (non-PWR only)
+        fut_units = futures_units_bought.get(r, 0)
+        fut_debt = futures_debt_per_resource.get(r, 0)
+
+        total_bought = market_bought + bill_owed_units + fut_units
+        total_sold = market_sold + bill_earned_units
+        total_buy_cost = market_buy_cost + bill_debt_cash + fut_debt
+        total_sell_revenue = market_sell_revenue + bill_earned_cash
+
         results[r] = {
             "avg_trajectory": avg_traj,
             "avg_starting_price": round(sum(starts) / len(starts), 2) if starts else 0,
             "avg_final_price": round(sum(finals) / len(finals), 2) if finals else 0,
             "min_final": min(finals) if finals else 0,
             "max_final": max(finals) if finals else 0,
-            "total_bought": b,
-            "total_sold": s,
-            "net_flow": b - s,  # positive = net bought, negative = net sold
-            "total_buy_cost": int(round(buy_cost.get(r, 0))),  # $ players paid to market
-            "total_sell_revenue": sell_revenue.get(r, 0),  # $ market paid to players
+            "total_bought": total_bought,
+            "total_sold": total_sold,
+            "net_flow": total_bought - total_sold,
+            "total_buy_cost": total_buy_cost,
+            "total_sell_revenue": total_sell_revenue,
+            "futures_debt": fut_debt,
+            "futures_units": fut_units,
+            "market_bought": market_bought,
+            "market_sold": market_sold,
+            "bill_earned_units": bill_earned_units,
+            "bill_owed_units": bill_owed_units,
         }
 
-    return {
-        "resources": results,
-        "event_economy": {
-            "power_bill_earned": pwr_earned,
-            "power_bill_debt": pwr_debt,
-            "futures_settlement_debt": futures_debt,
-            "total_earned": pwr_earned,
-            "total_debt": pwr_debt + futures_debt,
-            "net_impact": pwr_earned - pwr_debt - futures_debt,
-        },
-    }
+    return {"resources": results}
 
 
 def analyze_corporations(sim_files: list[Path]) -> dict:

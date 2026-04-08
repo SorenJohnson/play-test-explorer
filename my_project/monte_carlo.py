@@ -53,6 +53,10 @@ class GameSummary:
     pwr_total_earned: int = 0
     pwr_total_debt: int = 0
     futures_total_debt: int = 0
+    bills_units_earned: dict[str, int] = field(default_factory=dict)
+    bills_units_owed: dict[str, int] = field(default_factory=dict)
+    futures_units_bought: dict[str, int] = field(default_factory=dict)
+    futures_debt_per_resource: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -133,6 +137,10 @@ def _summarize_game(state: GameState) -> GameSummary:
         pwr_total_earned=state.pwr_total_earned,
         pwr_total_debt=state.pwr_total_debt,
         futures_total_debt=state.futures_total_debt,
+        bills_units_earned={r.value: v for r, v in state.bills_units_earned.items()},
+        bills_units_owed={r.value: v for r, v in state.bills_units_owed.items()},
+        futures_units_bought={r.value: v for r, v in state.futures_units_bought.items()},
+        futures_debt_per_resource={r.value: v for r, v in state.futures_debt_per_resource.items()},
     )
 
 
@@ -236,6 +244,10 @@ def results_to_dict(results: MonteCarloResults) -> dict:
             "pwr_total_earned": g.pwr_total_earned,
             "pwr_total_debt": g.pwr_total_debt,
             "futures_total_debt": g.futures_total_debt,
+            "bills_units_earned": g.bills_units_earned,
+            "bills_units_owed": g.bills_units_owed,
+            "futures_units_bought": g.futures_units_bought,
+            "futures_debt_per_resource": g.futures_debt_per_resource,
             # Keep player 0 at top level for backwards compat with single-player report
             "net_worth": g.final_net_worth[0],
             "money": g.final_money[0],

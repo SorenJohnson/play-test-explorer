@@ -32,9 +32,9 @@
       <h2>Market Dynamics</h2>
       <p class="subtitle">
         How each resource's market price moved over the game, and the buy/sell pressure driving it.
-        <strong>$ Players Paid</strong> = cash spent buying this resource.
-        <strong>$ Players Earned</strong> = cash received from selling it.
-        <strong>Market Impact</strong> = net cash flow (positive = market paid out more than it took in).
+        Includes power bill earnings/debt for PWR (PWR isn't market-traded; bills convert positive PWR to cash and negative PWR to debt).
+        <strong>Futures Paid</strong> = debt incurred at futures settlements when negative rates are forcibly bought.
+        <strong>Market Impact</strong> = net cash flow ($ Earned − $ Paid).
       </p>
       <div class="chart-container wide" style="min-height:400px">
         <canvas id="market-trajectory-chart"></canvas>
@@ -52,13 +52,13 @@
               <th>Net Units</th>
               <th>$ Players Paid</th>
               <th>$ Players Earned</th>
+              <th>Futures Paid</th>
               <th>Market Impact</th>
             </tr>
           </thead>
           <tbody></tbody>
         </table>
       </div>
-      <div id="event-economy" style="margin-top:16px"></div>
     </section>
 
     <!-- Corporation performance -->
