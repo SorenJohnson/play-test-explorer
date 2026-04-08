@@ -262,7 +262,7 @@ def compute_resource_flows(sim_files: list[Path]) -> dict:
 
 
 def compute_rate_value_curves(
-    num_turns: int = 15,
+    num_turns: int = 6,
     num_players: int = 3,
     market_start_pos: int = 10,
 ) -> dict:

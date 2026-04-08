@@ -277,14 +277,13 @@ def _time_dependent_rate_value(
     price = state.market.price(resource)
 
     if resource == Resource.PWR:
-        # Power bills pay rate × price. End-game has no extra power bill
-        # (only if event deck includes one), but PWR adjust events also matter
-        collections = remaining.get(EventType.POWER_BILL, 0)
-        return price * max(collections, 1)  # at least 1 to avoid zero-valuing PWR
+        # Power bills pay rate × price. +1 for mandatory end-game power bill
+        collections = remaining.get(EventType.POWER_BILL, 0) + 1
+        return price * collections
     else:
         # Futures settlements charge for negative rates at market price
-        # End-game always has a final futures settlement
-        collections = remaining.get(EventType.FUTURES_SETTLEMENT, 0) + 1  # +1 for end-game
+        # +1 for mandatory end-game futures settlement
+        collections = remaining.get(EventType.FUTURES_SETTLEMENT, 0) + 1
         return price * collections
 
 

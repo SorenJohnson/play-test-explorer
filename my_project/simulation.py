@@ -242,7 +242,7 @@ class GameState:
     turn: int = 0
     event_idx: int = 0
     history: list[TurnRecord] = field(default_factory=list)
-    max_turns: int = 15
+    max_turns: int = 6
 
     def remaining_events(self) -> dict[EventType, int]:
         """Count remaining events from current position in event deck."""
@@ -260,7 +260,7 @@ class GameState:
         start_money: int = 20,
         start_market_pos: int = 10,
         randomize_market: bool = False,
-        max_turns: int = 15,
+        max_turns: int = 6,
         corporation_rates: list[dict[Resource, int]] | None = None,
     ) -> GameState:
         market = Market.create(start_market_pos)
@@ -363,15 +363,15 @@ def compute_build_deficit(
 def compute_rate_time_value(resource: Resource, state: GameState) -> float:
     """Compute the time-dependent value of +1 rate of a resource.
 
-    PWR: price × remaining power bills
+    PWR: price × (remaining power bills + 1 for end-game)
     Others: price × (remaining futures settlements + 1 for end-game)
     """
     remaining = state.remaining_events()
     price = state.market.price(resource)
 
     if resource == Resource.PWR:
-        collections = remaining.get(EventType.POWER_BILL, 0)
-        return price * max(collections, 1)
+        collections = remaining.get(EventType.POWER_BILL, 0) + 1  # +1 for end-game
+        return price * collections
     else:
         collections = remaining.get(EventType.FUTURES_SETTLEMENT, 0) + 1
         return price * collections
@@ -700,7 +700,7 @@ def run_game(
     start_money: int = 20,
     start_market_pos: int = 10,
     randomize_market: bool = False,
-    max_turns: int = 15,
+    max_turns: int = 6,
     corporation_rates: list[dict[Resource, int]] | None = None,
     strategies: list | None = None,
 ) -> GameState:
@@ -736,7 +736,8 @@ def run_game(
             state.event_idx += 1
             run_turn(state, player, player_strategies[i], event)
 
-    # End game: final futures settlement
+    # End game: final power bill + final futures settlement
+    do_power_bill(state)
     do_futures_settlement(state)
 
     return state

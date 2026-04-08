@@ -25,7 +25,7 @@ class SimulationConfig:
     start_money: int = 20
     start_market_pos: int = 10
     randomize_market: bool = True
-    max_turns: int = 15
+    max_turns: int = 6
     strategy: str = "greedy"
     player_strategies: list[str] | None = None  # per-player override, e.g. ["greedy", "random", "random"]
 
