@@ -439,10 +439,10 @@ def execute_build(
         player.apply_rates(card)
         player.buildings_played.append(card.building)
 
-    # Remove cards from hand (highest indices first to avoid shifting)
+    # Remove cards from hand (highest indices first to avoid shifting) → discard pile
     all_indices = sorted(set(build_indices) | set(discard_indices), reverse=True)
     for idx in all_indices:
-        player.hand.pop(idx)
+        state.deck.discard.append(player.hand.pop(idx))
 
     names = ", ".join(c.building for c in build_cards)
     detail = f"Built {names}"
@@ -481,14 +481,14 @@ def execute_sell(state: GameState, player: Player, card_idx: int) -> ActionRecor
                 best_resource = sell_res
 
     if best_resource is None:
-        player.hand.pop(card_idx)
+        state.deck.discard.append(player.hand.pop(card_idx))
         return ActionRecord(action_type="sell", detail="Sold (no matching resources)")
 
     rate = max(0, player.rate(best_resource))
     revenue = state.market.sell(best_resource, rate)
     player.money += revenue
     player.ledger.record_sell(best_resource, revenue)
-    player.hand.pop(card_idx)
+    state.deck.discard.append(player.hand.pop(card_idx))
     return ActionRecord(
         action_type="sell",
         detail=f"Sold {rate} {best_resource.value} for ${revenue}",
@@ -527,7 +527,7 @@ def execute_contract(
 
     player.money += contract.reward
     player.contracts_fulfilled += 1
-    player.hand.pop(card_idx)
+    state.deck.discard.append(player.hand.pop(card_idx))
 
     req_str = ", ".join(f"{r.amount} {r.resource.value}" for r in contract.requirements)
     label = req_str

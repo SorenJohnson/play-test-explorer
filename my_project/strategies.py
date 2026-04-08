@@ -97,21 +97,24 @@ def _random_pool_swap(state: GameState, player: Player) -> None:
 # --- Strategies ---
 
 def random_strategy(state: GameState, player: Player) -> Action:
-    """Pick a random valid action. Called repeatedly until pass or hand empty."""
+    """Pick a random legal action. Always acts if any legal move exists."""
     if not player.hand:
         return Action(ActionType.PASS)
 
     options: list[Action] = []
 
-    # Build: try single cards only (multi-card builds are complex for random)
+    # Build: try single cards (with optional discard of others to help afford)
     for i, card in enumerate(player.hand):
-        cards = [card]
         remaining = [j for j in range(len(player.hand)) if j != i]
-        result = compute_build_deficit(cards, player, 0, state.market)
-        if result is not None:
-            options.append(Action(ActionType.BUILD, build_cards=[i]))
+        # Try without discards first, then with
+        for num_disc in range(len(remaining) + 1):
+            discard_list = remaining[:num_disc]
+            result = compute_build_deficit([card], player, num_disc, state.market)
+            if result is not None:
+                options.append(Action(ActionType.BUILD, build_cards=[i], discard_cards=list(discard_list)))
+                break  # found cheapest affordable discard level
 
-    # Sell
+    # Sell: any card whose sell alternates match a positive rate
     for i, card in enumerate(player.hand):
         if card.can_sell:
             for sell_res in card.can_sell:
@@ -131,7 +134,9 @@ def random_strategy(state: GameState, player: Player) -> Action:
                     options.append(Action(ActionType.CONTRACT, contract_card=i, contract_idx=ci))
 
     if not options:
-        return Action(ActionType.PASS)
+        # No legal action — discard a random card (sell with no match, just to use the card)
+        # This ensures cards cycle back to the deck
+        return Action(ActionType.SELL, sell_card=random.randrange(len(player.hand)))
 
     return random.choice(options)
 
@@ -197,8 +202,9 @@ def greedy_strategy(state: GameState, player: Player) -> Action:
                     best_score = contract_score
                     best_action = Action(ActionType.CONTRACT, contract_card=i, contract_idx=ci)
 
-    if best_score <= 0:
-        return Action(ActionType.PASS)
+    # If no action scored well, sell the least valuable card to cycle it
+    if best_score <= -900 and player.hand:
+        return Action(ActionType.SELL, sell_card=0)
 
     return best_action
 
@@ -417,8 +423,9 @@ def smart_greedy_strategy(state: GameState, player: Player) -> Action:
                     best_score = contract_score
                     best_action = Action(ActionType.CONTRACT, contract_card=i, contract_idx=ci)
 
-    if best_score <= 0:
-        return Action(ActionType.PASS)
+    # If no action scored well, sell the least valuable card to cycle it
+    if best_score <= -900 and player.hand:
+        return Action(ActionType.SELL, sell_card=0)
 
     return best_action
 
