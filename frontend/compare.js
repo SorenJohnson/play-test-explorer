@@ -30,13 +30,10 @@ async function init() {
     renderMarketDynamics();
     renderCorporationTable();
     renderBuildingValueTable();
-    renderContractCostChart();
     renderStrategyContractTable();
-    renderContractSelector();
     renderFlowNetwork();
   }
   renderGameBrowser();
-  renderMarketChart();
 }
 
 // --- Strategy Performance ---
@@ -78,48 +75,7 @@ function renderStrategyChart() {
   });
 }
 
-// --- Contract Cost Box Plots ---
-
-function renderContractCostChart() {
-  const contracts = analysisData.sim_contract_costs;
-  if (!contracts) return;
-
-  const sorted = Object.entries(contracts).sort(
-    (a, b) => a[1].gross_cost.median - b[1].gross_cost.median
-  );
-
-  new Chart(document.getElementById("contract-cost-chart"), {
-    type: "boxplot",
-    data: {
-      labels: sorted.map(([l]) => l),
-      datasets: [
-        {
-          label: "Gross Cost (total invested)",
-          backgroundColor: "#f8514933",
-          borderColor: "#f85149",
-          data: sorted.map(([, s]) => s.gross_cost.values),
-        },
-        {
-          label: "Net Cost (after sell revenue)",
-          backgroundColor: "#3fb95033",
-          borderColor: "#3fb950",
-          data: sorted.map(([, s]) => s.true_cost.values),
-        },
-      ],
-    },
-    options: {
-      indexAxis: "y",
-      responsive: true,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { title: { display: true, text: "$ Spent", color: "#8b949e" }, ticks: { color: "#8b949e" }, grid: { color: "#21262d" } },
-        y: { ticks: { color: "#8b949e", font: { size: 9 } }, grid: { color: "#21262d" } },
-      },
-    },
-  });
-}
-
-// --- Contract Cost by Strategy ---
+// --- Contract Economics (sortable + expandable) ---
 
 function renderStrategyContractTable() {
   const contracts = analysisData.sim_contract_costs;
@@ -130,6 +86,7 @@ function renderStrategyContractTable() {
   const entries = Object.entries(contracts);
 
   let currentSort = { col: 2, asc: true }; // default: gross cost ascending
+  const expandedRows = new Set();
 
   function getSortValue(label, stats, colIdx) {
     const smart = stats.by_strategy?.smart;
@@ -147,41 +104,122 @@ function renderStrategyContractTable() {
     }
   }
 
+  function buildExpandedRow(label, stats) {
+    const buildings = stats.top_buildings || [];
+    const rates = stats.avg_rates_at_fulfillment || {};
+
+    const buildingRows = buildings.length
+      ? buildings
+          .map(
+            (b) =>
+              `<tr><td>${b.building}</td><td>${b.count}</td><td>${b.rate.toFixed(1)}</td></tr>`
+          )
+          .join("")
+      : "<tr><td colspan='3'>No data</td></tr>";
+
+    const rateEntries = Object.entries(rates)
+      .filter(([, v]) => Math.abs(v) >= 0.1)
+      .sort((a, b) => b[1] - a[1])
+      .map(
+        ([r, v]) =>
+          `<span style="color:${RESOURCE_COLORS[r] || "#888"}">${r}: ${v > 0 ? "+" : ""}${v}</span>`
+      )
+      .join("&nbsp;&nbsp;");
+
+    const gross = stats.gross_cost;
+    const net = stats.true_cost;
+
+    return `<tr class="contract-detail-row"><td colspan="7">
+      <div style="background:#0d1117; padding:16px; border-left:3px solid #58a6ff;">
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:24px;">
+          <div>
+            <h4 style="color:#58a6ff; margin-bottom:8px; font-size:0.85rem;">Build Path (since last contract)</h4>
+            <table style="width:100%">
+              <thead><tr><th>Building</th><th>Count</th><th>Avg/Contract</th></tr></thead>
+              <tbody>${buildingRows}</tbody>
+            </table>
+          </div>
+          <div>
+            <h4 style="color:#58a6ff; margin-bottom:8px; font-size:0.85rem;">Avg Rate Profile at Fulfillment</h4>
+            <div style="line-height:2; font-size:0.8rem;">${rateEntries || "No data"}</div>
+          </div>
+          <div>
+            <h4 style="color:#58a6ff; margin-bottom:8px; font-size:0.85rem;">Cost Distribution</h4>
+            <div style="font-size:0.8rem; line-height:1.8;">
+              <div class="detail-row"><span class="detail-label">Gross cost (mean):</span> <span class="detail-value">$${gross.mean}</span></div>
+              <div class="detail-row"><span class="detail-label">Gross cost (median):</span> <span class="detail-value">$${gross.median}</span></div>
+              <div class="detail-row"><span class="detail-label">Gross cost (min/max):</span> <span class="detail-value">$${gross.min} / $${gross.max}</span></div>
+              <div class="detail-row"><span class="detail-label">Net cost (mean):</span> <span class="detail-value">$${net.mean}</span></div>
+              <div class="detail-row"><span class="detail-label">Net cost (median):</span> <span class="detail-value">$${net.median}</span></div>
+              <div class="detail-row"><span class="detail-label">Net cost (min/max):</span> <span class="detail-value">$${net.min} / $${net.max}</span></div>
+              <div class="detail-row"><span class="detail-label">Avg net profit:</span> <span class="detail-value positive">$${(50 - net.mean).toFixed(1)}</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </td></tr>`;
+  }
+
   function renderRows() {
     const sorted = [...entries].sort((a, b) => {
       const va = getSortValue(a[0], a[1], currentSort.col);
       const vb = getSortValue(b[0], b[1], currentSort.col);
-      if (typeof va === "string") return currentSort.asc ? va.localeCompare(vb) : vb.localeCompare(va);
+      if (typeof va === "string")
+        return currentSort.asc ? va.localeCompare(vb) : vb.localeCompare(va);
       return currentSort.asc ? va - vb : vb - va;
     });
 
-    tbody.innerHTML = sorted.map(([label, stats]) => {
+    const rows = [];
+    sorted.forEach(([label, stats]) => {
       const smart = stats.by_strategy?.smart;
       const greedy = stats.by_strategy?.greedy;
       const random = stats.by_strategy?.random;
-      return `<tr>
-        <td>${label}</td>
-        <td>${stats.count}</td>
-        <td>$${stats.gross_cost.mean}</td>
-        <td>$${stats.true_cost.mean}</td>
-        <td>${smart ? `$${smart.mean} (n=${smart.count})` : "-"}</td>
-        <td>${greedy ? `$${greedy.mean} (n=${greedy.count})` : "-"}</td>
-        <td>${random ? `$${random.mean} (n=${random.count})` : "-"}</td>
-      </tr>`;
-    }).join("");
+      const expanded = expandedRows.has(label);
+      const arrow = expanded ? "▼" : "▶";
+      rows.push(
+        `<tr class="contract-row" data-label="${label}" style="cursor:pointer;">
+          <td>${arrow} ${label}</td>
+          <td>${stats.count}</td>
+          <td>$${stats.gross_cost.mean}</td>
+          <td>$${stats.true_cost.mean}</td>
+          <td>${smart ? `$${smart.mean} (n=${smart.count})` : "-"}</td>
+          <td>${greedy ? `$${greedy.mean} (n=${greedy.count})` : "-"}</td>
+          <td>${random ? `$${random.mean} (n=${random.count})` : "-"}</td>
+        </tr>`
+      );
+      if (expanded) {
+        rows.push(buildExpandedRow(label, stats));
+      }
+    });
+    tbody.innerHTML = rows.join("");
+
+    // Wire up click handlers
+    tbody.querySelectorAll(".contract-row").forEach((row) => {
+      row.addEventListener("click", () => {
+        const label = row.dataset.label;
+        if (expandedRows.has(label)) {
+          expandedRows.delete(label);
+        } else {
+          expandedRows.add(label);
+        }
+        renderRows();
+      });
+    });
   }
 
   // Make headers clickable for sorting
   table.querySelectorAll("thead th").forEach((th, idx) => {
     th.style.cursor = "pointer";
-    th.addEventListener("click", () => {
+    th.addEventListener("click", (e) => {
+      e.stopPropagation();
       if (currentSort.col === idx) {
         currentSort.asc = !currentSort.asc;
       } else {
         currentSort = { col: idx, asc: true };
       }
-      // Update header indicators
-      table.querySelectorAll("thead th").forEach((h) => h.textContent = h.textContent.replace(/ [▲▼]$/, ""));
+      table.querySelectorAll("thead th").forEach((h) => {
+        h.textContent = h.textContent.replace(/ [▲▼]$/, "");
+      });
       th.textContent += currentSort.asc ? " ▲" : " ▼";
       renderRows();
     });
@@ -189,84 +227,6 @@ function renderStrategyContractTable() {
 
   renderRows();
 }
-
-// --- Build Path Selector ---
-
-function renderContractSelector() {
-  const contracts = analysisData.sim_contract_costs;
-  if (!contracts) return;
-
-  const container = document.getElementById("contract-selector");
-  const sorted = Object.entries(contracts).sort((a, b) => b[1].count - a[1].count);
-
-  const buttons = sorted.map(([label, stats]) =>
-    `<button class="contract-btn" data-label="${label}">${label} <span style="color:#8b949e">(${stats.count})</span></button>`
-  );
-  container.innerHTML = `<div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:16px">${buttons.join("")}</div>`;
-
-  container.querySelectorAll(".contract-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      container.querySelectorAll(".contract-btn").forEach((b) => b.style.borderColor = "#30363d");
-      btn.style.borderColor = "#58a6ff";
-      showBuildPath(btn.dataset.label);
-    });
-  });
-
-  // Show first contract by default
-  if (sorted.length > 0) {
-    showBuildPath(sorted[0][0]);
-    container.querySelector(".contract-btn").style.borderColor = "#58a6ff";
-  }
-}
-
-function showBuildPath(contractLabel) {
-  const stats = analysisData.sim_contract_costs[contractLabel];
-  if (!stats) return;
-
-  const detail = document.getElementById("build-path-detail");
-  const buildings = stats.top_buildings || [];
-  const rates = stats.avg_rates_at_fulfillment || {};
-
-  const buildingRows = buildings.map((b) =>
-    `<tr>
-      <td>${b.building}</td>
-      <td>${b.count}</td>
-      <td>${b.rate.toFixed(1)}</td>
-    </tr>`
-  ).join("");
-
-  const rateEntries = Object.entries(rates)
-    .filter(([, v]) => Math.abs(v) >= 0.1)
-    .sort((a, b) => b[1] - a[1])
-    .map(([r, v]) => `<span style="color:${RESOURCE_COLORS[r] || '#888'}">${r}: ${v > 0 ? "+" : ""}${v}</span>`)
-    .join("&nbsp;&nbsp;");
-
-  detail.innerHTML = `
-    <div style="background:#161b22; border:1px solid #30363d; border-radius:8px; padding:16px; font-size:0.85rem;">
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:24px;">
-        <div>
-          <h3 style="color:#58a6ff; margin-bottom:8px;">Buildings Played Before This Contract</h3>
-          <p style="color:#8b949e; margin-bottom:8px;">How often each building appeared in the build path (since last contract)</p>
-          <table style="width:100%">
-            <thead><tr><th>Building</th><th>Times</th><th>Avg / Contract</th></tr></thead>
-            <tbody>${buildingRows || "<tr><td colspan='3'>No data</td></tr>"}</tbody>
-          </table>
-        </div>
-        <div>
-          <h3 style="color:#58a6ff; margin-bottom:8px;">Avg Rate Profile at Fulfillment</h3>
-          <p style="color:#8b949e; margin-bottom:8px;">What rates players typically had when they fulfilled this contract</p>
-          <div style="line-height:2">${rateEntries || "No data"}</div>
-          <div style="margin-top:16px;">
-            <div class="detail-row"><span class="detail-label">Avg true cost:</span> <span class="detail-value">$${stats.true_cost.mean}</span></div>
-            <div class="detail-row"><span class="detail-label">Median:</span> <span class="detail-value">$${stats.true_cost.median}</span></div>
-            <div class="detail-row"><span class="detail-label">Net profit (avg):</span> <span class="detail-value">$${(50 - stats.true_cost.mean).toFixed(1)}</span></div>
-          </div>
-        </div>
-      </div>
-    </div>`;
-}
-
-// --- Rate Profiles at Fulfillment ---
 
 // --- Flow Network ---
 
@@ -429,32 +389,6 @@ function renderFlowNetwork() {
   });
 }
 
-// --- Market Prices ---
-
-function renderMarketChart() {
-  const resources = Object.keys(allData[0].data.price_stats);
-
-  const datasets = allData.map((s) => ({
-    label: s.label,
-    backgroundColor: s.color + "44",
-    borderColor: s.color,
-    data: resources.map((r) => s.data.price_stats[r].values),
-  }));
-
-  new Chart(document.getElementById("market-chart"), {
-    type: "boxplot",
-    data: { labels: resources, datasets },
-    options: {
-      responsive: true,
-      plugins: { legend: { labels: { color: "#8b949e" } } },
-      scales: {
-        x: { ticks: { color: "#8b949e" }, grid: { color: "#21262d" } },
-        y: { title: { display: true, text: "Final Price ($)", color: "#8b949e" }, ticks: { color: "#8b949e" }, grid: { color: "#21262d" } },
-      },
-    },
-  });
-}
-
 // --- Game Browser ---
 
 function renderGameBrowser() {
@@ -531,8 +465,10 @@ const CORP_STARTING_RATES = {
 };
 
 function renderMarketDynamics() {
-  const data = analysisData.market_dynamics;
-  if (!data) return;
+  const md = analysisData.market_dynamics;
+  if (!md) return;
+  const data = md.resources || md;  // fallback for old format
+  const pwrEconomy = md.pwr_economy;
 
   // Line chart: avg trajectory per resource over turns
   const resources = Object.keys(data);
@@ -602,6 +538,39 @@ function renderMarketDynamics() {
       </tr>`;
     })
     .join("");
+
+  // PWR economy (separate from market since PWR isn't traded)
+  const pwrEl = document.getElementById("pwr-economy");
+  if (pwrEl && pwrEconomy) {
+    const net = pwrEconomy.net_impact;
+    const netClass = net >= 0 ? "positive" : "negative";
+    const netSign = net >= 0 ? "+" : "";
+    pwrEl.innerHTML = `
+      <div style="background:#161b22; border:1px solid #30363d; border-radius:6px; padding:16px;">
+        <h3 style="color:#58a6ff; margin-bottom:8px; font-size:0.95rem;">PWR Economy (Power Bills)</h3>
+        <p style="color:#8b949e; font-size:0.75rem; margin-bottom:12px;">
+          PWR isn't traded on the market. Instead, it's collected at power bill events:
+          positive PWR earns <code>rate × price</code>, negative PWR adds it to debt.
+          PWR_ADJUST events shift the market based on the active player's rate.
+        </p>
+        <div style="display:flex; gap:24px; font-size:0.85rem;">
+          <div>
+            <div class="detail-label">Earned (positive PWR)</div>
+            <div class="detail-value positive">+$${pwrEconomy.total_earned.toLocaleString()}</div>
+          </div>
+          <div>
+            <div class="detail-label">Debt (negative PWR)</div>
+            <div class="detail-value negative">-$${pwrEconomy.total_debt.toLocaleString()}</div>
+          </div>
+          <div>
+            <div class="detail-label">Net PWR Impact</div>
+            <div class="detail-value ${netClass}" style="font-size:1.1rem; font-weight:700;">
+              ${netSign}$${net.toLocaleString()}
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }
 }
 
 function renderCorporationTable() {

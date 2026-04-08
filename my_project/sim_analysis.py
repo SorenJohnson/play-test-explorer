@@ -206,6 +206,10 @@ def analyze_market_dynamics(sim_files: list[Path]) -> dict:
     final_prices: dict[str, list[int]] = defaultdict(list)
     starting_prices: dict[str, list[int]] = defaultdict(list)
 
+    # PWR power bill economy (aggregate across all games)
+    pwr_earned = 0  # total earned at power bills from positive PWR
+    pwr_debt = 0  # total debt incurred from negative PWR
+
     for f in sim_files:
         with open(f) as fh:
             data = json.load(fh)
@@ -254,6 +258,10 @@ def analyze_market_dynamics(sim_files: list[Path]) -> dict:
             for r, p in game.get("final_market", {}).items():
                 final_prices[r].append(p)
 
+            # PWR economy stats from this game
+            pwr_earned += game.get("pwr_total_earned", 0)
+            pwr_debt += game.get("pwr_total_debt", 0)
+
     # Build result
     results = {}
     all_resources = set(all_trajectories) | set(bought) | set(sold) | set(final_prices)
@@ -283,7 +291,15 @@ def analyze_market_dynamics(sim_files: list[Path]) -> dict:
             "total_buy_cost": int(round(buy_cost.get(r, 0))),  # $ players paid to market
             "total_sell_revenue": sell_revenue.get(r, 0),  # $ market paid to players
         }
-    return results
+
+    return {
+        "resources": results,
+        "pwr_economy": {
+            "total_earned": pwr_earned,
+            "total_debt": pwr_debt,
+            "net_impact": pwr_earned - pwr_debt,
+        },
+    }
 
 
 def analyze_corporations(sim_files: list[Path]) -> dict:

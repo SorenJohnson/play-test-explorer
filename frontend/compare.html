@@ -34,7 +34,7 @@
         How each resource's market price moved over the game, and the buy/sell pressure driving it.
         <strong>$ Players Paid</strong> = cash spent buying this resource.
         <strong>$ Players Earned</strong> = cash received from selling it.
-        <strong>Market Impact</strong> = net cash extracted from (or added to) the market through this resource.
+        <strong>Market Impact</strong> = net cash flow (positive = market paid out more than it took in).
       </p>
       <div class="chart-container wide" style="min-height:400px">
         <canvas id="market-trajectory-chart"></canvas>
@@ -58,6 +58,7 @@
           <tbody></tbody>
         </table>
       </div>
+      <div id="pwr-economy" style="margin-top:16px"></div>
     </section>
 
     <!-- Corporation performance -->
@@ -108,18 +109,10 @@
       </div>
     </section>
 
+    <!-- Contract economics (merged: cost by strategy + build paths) -->
     <section>
-      <h2>Contract Cost — Gross vs Net</h2>
-      <p class="subtitle">Gross = total invested to build rate infrastructure. Net = gross minus revenue already earned from selling. $50 reward line for reference.</p>
-      <div class="chart-container wide" style="min-height:550px">
-        <canvas id="contract-cost-chart"></canvas>
-      </div>
-    </section>
-
-    <!-- Contract cost by strategy -->
-    <section>
-      <h2>Contract Cost by Strategy</h2>
-      <p class="subtitle">Do smart players pay less for the same contracts?</p>
+      <h2>Contract Economics</h2>
+      <p class="subtitle">Click any row to see the build path players took to fulfill it, plus cost distribution details.</p>
       <div class="table-scroll">
         <table id="strategy-contract-table">
           <thead>
@@ -136,14 +129,6 @@
           <tbody></tbody>
         </table>
       </div>
-    </section>
-
-    <!-- Build paths to contracts -->
-    <section>
-      <h2>Build Paths — What Buildings Lead to Each Contract?</h2>
-      <p class="subtitle">Click a contract to see which buildings players typically built before fulfilling it.</p>
-      <div id="contract-selector"></div>
-      <div id="build-path-detail"></div>
     </section>
 
     <!-- Resource flow network -->
@@ -192,13 +177,6 @@
       </div>
     </section>
 
-    <!-- Final market prices -->
-    <section>
-      <h2>Final Market Prices</h2>
-      <div class="chart-container wide" style="min-height:300px">
-        <canvas id="market-chart"></canvas>
-      </div>
-    </section>
   </div>
   <script src="compare.js"></script>
 </body>

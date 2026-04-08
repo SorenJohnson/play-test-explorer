@@ -267,6 +267,9 @@ class GameState:
     turn: int = 0
     event_idx: int = 0
     history: list[TurnRecord] = field(default_factory=list)
+    # PWR economy tracking (summed across all players across all power bills)
+    pwr_total_earned: int = 0  # cash earned from positive PWR at power bills
+    pwr_total_debt: int = 0  # debt incurred from negative PWR at power bills
     max_turns: int = DEFAULT_MAX_TURNS
 
     def remaining_events(self) -> dict[EventType, int]:
@@ -608,10 +611,13 @@ def do_power_bill(state: GameState) -> None:
     for player in state.players:
         pwr_rate = player.rate(Resource.PWR)
         if pwr_rate > 0:
-            player.money += pwr_rate * pwr_price
+            earning = pwr_rate * pwr_price
+            player.money += earning
+            state.pwr_total_earned += earning
         elif pwr_rate < 0:
             cost = abs(pwr_rate) * pwr_price
             player.debt += cost
+            state.pwr_total_debt += cost
             player.ledger.record_event_cost(Resource.PWR, cost, pwr_rate)
 
 
