@@ -86,7 +86,7 @@ class Player:
     ledger: CostLedger = field(default_factory=CostLedger.create)
 
     def net_worth(self) -> int:
-        return self.money - self.debt
+        return self.money - self.debt + self.contracts_fulfilled * 50
 
     def rate(self, resource: Resource) -> int:
         return self.rates.get(resource, 0)
@@ -525,7 +525,9 @@ def execute_contract(
     # Record in ledger
     player.ledger.record_contract(contract.requirements)
 
-    player.money += contract.reward
+    # Contracts pay off debt, not give cash. Remaining value is end-game net worth.
+    debt_payoff = min(player.debt, contract.reward)
+    player.debt -= debt_payoff
     player.contracts_fulfilled += 1
     state.deck.discard.append(player.hand.pop(card_idx))
 
