@@ -11,6 +11,16 @@ const RESOURCE_COLORS = {
   SI: "#f1c40f", O2: "#bdc3c7", FOOD: "#27ae60", GLS: "#5dade2", ELX: "#e67e22",
 };
 
+const SPREAD_SAMPLE_SIZE = 50;
+
+function hexToRgba(hex, alpha) {
+  const h = hex.replace("#", "");
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 let allData = [];
 let analysisData = null;
 let currentScenario = "all";
@@ -530,6 +540,132 @@ const CORP_STARTING_RATES = {
 // Persisted across scenario changes so user selections survive filter swaps.
 let mdCurrentSegment = "all";
 let mdCurrentView = "totals";
+let mdShowSpread = false;
+
+// --- Market spread (per-game trajectory) helpers ---
+
+// Pull raw games for the current scenario from the already-loaded sim files.
+// Avoids any extra fetches and any backend changes — the data is right there.
+function getGamesForCurrentScenario() {
+  if (currentScenario === "all") {
+    return allData.flatMap((s) => s.data.games || []);
+  }
+  const target = `data/${currentScenario}.json`;
+  const entry = allData.find((s) => s.file === target);
+  return entry ? (entry.data.games || []) : [];
+}
+
+// In-place Fisher-Yates pick of the first `n` items from a shuffled copy.
+function sampleArray(arr, n) {
+  if (arr.length <= n) return arr.slice();
+  const idx = arr.map((_, i) => i);
+  for (let i = idx.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [idx[i], idx[j]] = [idx[j], idx[i]];
+  }
+  return idx.slice(0, n).map((i) => arr[i]);
+}
+
+// Mirrors analyze_market_dynamics: take one snapshot per distinct turn (the
+// first action_history entry per turn), then collect prices into per-resource
+// trajectories. Returns { resource: [trajectory, trajectory, ...] }.
+function extractTrajectoriesFromGames(games) {
+  const out = {};
+  for (const game of games) {
+    const seen = new Set();
+    const perGame = {};
+    for (const rec of game.action_history || []) {
+      if (seen.has(rec.turn)) continue;
+      seen.add(rec.turn);
+      const market = rec.market || {};
+      for (const r of Object.keys(market)) {
+        if (!perGame[r]) perGame[r] = [];
+        perGame[r].push(market[r]);
+      }
+    }
+    for (const r of Object.keys(perGame)) {
+      if (!out[r]) out[r] = [];
+      out[r].push(perGame[r]);
+    }
+  }
+  return out;
+}
+
+// Push faint per-game datasets onto an existing chart. Each dataset is tagged
+// _kind="spread" + _resource so the legend filter and per-resource toggle work.
+function buildSpreadDatasets(chart) {
+  const games = getGamesForCurrentScenario();
+  const sampled = sampleArray(games, SPREAD_SAMPLE_SIZE);
+  const byResource = extractTrajectoriesFromGames(sampled);
+
+  // Extend labels if any sampled trajectory is longer than the current avg-derived axis.
+  const maxTrajLen = Math.max(
+    0,
+    ...Object.values(byResource).flatMap((trajs) => trajs.map((t) => t.length))
+  );
+  if (maxTrajLen > chart.data.labels.length) {
+    for (let i = chart.data.labels.length; i < maxTrajLen; i++) {
+      chart.data.labels.push(`Turn ${i + 1}`);
+    }
+  }
+
+  for (const [r, trajs] of Object.entries(byResource)) {
+    const color = RESOURCE_COLORS[r] || "#888";
+    const avgIdx = chart.data.datasets.findIndex(
+      (d) => d._kind === "avg" && d._resource === r
+    );
+    const avgVisible = avgIdx >= 0 ? chart.isDatasetVisible(avgIdx) : true;
+    for (const traj of trajs) {
+      chart.data.datasets.push({
+        label: `${r}__spread`,
+        data: traj,
+        borderColor: hexToRgba(color, 0.12),
+        backgroundColor: "transparent",
+        borderWidth: 1,
+        tension: 0.2,
+        pointRadius: 0,
+        hidden: !avgVisible,
+        _resource: r,
+        _kind: "spread",
+      });
+    }
+  }
+}
+
+function wireMarketSpreadToggle() {
+  const btn = document.getElementById("market-spread-toggle");
+  if (!btn) return;
+  btn.classList.toggle("active", mdShowSpread);
+  // If the toggle was on before a scenario change, rebuild the spread for the
+  // new scenario's games immediately so the user doesn't have to re-click.
+  if (mdShowSpread) {
+    const chart = chartRegistry["market-trajectory-chart"];
+    if (chart && !chart.data.datasets.some((d) => d._kind === "spread")) {
+      buildSpreadDatasets(chart);
+      chart.update();
+    }
+  }
+  btn.onclick = () => {
+    mdShowSpread = !mdShowSpread;
+    btn.classList.toggle("active", mdShowSpread);
+    const chart = chartRegistry["market-trajectory-chart"];
+    if (!chart) return;
+    const hasSpread = chart.data.datasets.some((d) => d._kind === "spread");
+    if (mdShowSpread && !hasSpread) {
+      buildSpreadDatasets(chart);
+    } else {
+      chart.data.datasets.forEach((d, i) => {
+        if (d._kind !== "spread") return;
+        const avgIdx = chart.data.datasets.findIndex(
+          (x) => x._kind === "avg" && x._resource === d._resource
+        );
+        const avgVisible = avgIdx >= 0 ? chart.isDatasetVisible(avgIdx) : false;
+        chart.setDatasetVisibility(i, mdShowSpread && avgVisible);
+      });
+    }
+    chart.update();
+  };
+}
 
 function renderMarketDynamics() {
   const md = getSource("market_dynamics");
@@ -578,7 +714,9 @@ function renderMarketDynamics() {
     return result;
   }
 
-  // Line chart: avg trajectory per resource over turns (uses all-segment data)
+  // Line chart: avg trajectory per resource over turns (uses all-segment data).
+  // Spread datasets (per-game faint lines) are built lazily on toggle click —
+  // see wireMarketSpreadToggle below.
   const resources = Object.keys(allResourcesData);
   const maxLen = Math.max(...resources.map((r) => (allResourcesData[r].avg_trajectory || []).length));
   const labels = Array.from({ length: maxLen }, (_, i) => `Turn ${i + 1}`);
@@ -591,6 +729,8 @@ function renderMarketDynamics() {
     borderWidth: 2,
     tension: 0.2,
     pointRadius: 0,
+    _resource: r,
+    _kind: "avg",
   }));
 
   chartRegistry["market-trajectory-chart"] = new Chart(document.getElementById("market-trajectory-chart"), {
@@ -599,7 +739,26 @@ function renderMarketDynamics() {
     options: {
       responsive: true,
       plugins: {
-        legend: { labels: { color: "#8b949e", font: { size: 11 } } },
+        legend: {
+          labels: {
+            color: "#8b949e",
+            font: { size: 11 },
+            filter: (item, chartData) => chartData.datasets[item.datasetIndex]._kind === "avg",
+          },
+          onClick: (e, legendItem, legend) => {
+            const chart = legend.chart;
+            const avgIdx = legendItem.datasetIndex;
+            const resource = chart.data.datasets[avgIdx]._resource;
+            const willHide = chart.isDatasetVisible(avgIdx);
+            chart.setDatasetVisibility(avgIdx, !willHide);
+            chart.data.datasets.forEach((d, i) => {
+              if (d._kind === "spread" && d._resource === resource) {
+                chart.setDatasetVisibility(i, !willHide && mdShowSpread);
+              }
+            });
+            chart.update();
+          },
+        },
       },
       scales: {
         x: {
@@ -615,6 +774,8 @@ function renderMarketDynamics() {
       },
     },
   });
+
+  wireMarketSpreadToggle();
 
   // Use totals from analysis (computed from full data, not trimmed publish data).
   // Falls back to counting trimmed data if missing.

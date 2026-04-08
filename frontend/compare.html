@@ -49,6 +49,12 @@
       <div class="chart-container wide" style="min-height:400px">
         <canvas id="market-trajectory-chart"></canvas>
       </div>
+      <div style="margin:8px 0 0; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <button id="market-spread-toggle" class="view-toggle">Show spread</button>
+        <span style="font-size:0.75rem; color:#8b949e;">
+          Overlays a 50-game sample. Click resource names in the legend to focus.
+        </span>
+      </div>
       <div style="margin:16px 0 12px; display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
         <label style="font-size:0.8rem;">View:</label>
         <button class="view-toggle active" data-view="totals">Raw Totals</button>
