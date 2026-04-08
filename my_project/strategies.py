@@ -232,18 +232,12 @@ def _rate_value(resource: Resource, market_price: int) -> float:
 
 
 def _score_sell(state: GameState, player: Player, card) -> float:
-    """Score a sell action: revenue from best sellable resource."""
-    from my_project.simulation import PRICE_TRACK
+    """Score a sell action: revenue from best sellable resource (all units at current price)."""
     best = 0.0
     for sell_res in card.can_sell:
         rate = max(0, player.rate(sell_res))
         if rate > 0:
-            revenue = 0
-            pos = state.market.positions[sell_res]
-            for _ in range(rate):
-                p = max(0, min(pos, len(PRICE_TRACK) - 1))
-                revenue += PRICE_TRACK[p]
-                pos = max(pos - 1, 0)
+            revenue = state.market.price(sell_res) * rate
             best = max(best, revenue)
     return best
 

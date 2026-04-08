@@ -23,7 +23,7 @@ PRICE_TRACK = [1, 1, 1, 2, 2, 2, 3, 3, 4, 4, 5, 5, 6, 7, 8, 9, 10]
 DEFAULT_MAX_TURNS = 8
 DEFAULT_NUM_PLAYERS = 3
 DEFAULT_START_MONEY = 20
-DEFAULT_MARKET_POS = 10
+DEFAULT_MARKET_POS = 9
 HAND_SIZE = 3
 POOL_SIZE = 4
 CONTRACTS_AVAILABLE_BASE = 2  # base + num_players contract cards drawn
@@ -54,20 +54,16 @@ class Market:
         return PRICE_TRACK[pos]
 
     def buy(self, resource: Resource, amount: int) -> int:
-        """Buy `amount` units. Returns total cost. Price increases by amount."""
-        total = 0
-        for _ in range(amount):
-            total += self.price(resource)
-            self.positions[resource] = min(self.positions[resource] + 1, len(PRICE_TRACK) - 1)
-        return total
+        """Buy `amount` units at the current price. Returns total cost. Then price rises by amount."""
+        cost = self.price(resource) * amount
+        self.positions[resource] = min(self.positions[resource] + amount, len(PRICE_TRACK) - 1)
+        return cost
 
     def sell(self, resource: Resource, amount: int) -> int:
-        """Sell `amount` units. Returns total revenue. Price decreases by amount."""
-        total = 0
-        for _ in range(amount):
-            total += self.price(resource)
-            self.positions[resource] = max(self.positions[resource] - 1, 0)
-        return total
+        """Sell `amount` units at the current price. Returns total revenue. Then price drops by amount."""
+        revenue = self.price(resource) * amount
+        self.positions[resource] = max(self.positions[resource] - amount, 0)
+        return revenue
 
     def adjust(self, resource: Resource, delta: int) -> None:
         """Shift price position by delta (positive = up, negative = down)."""
@@ -76,14 +72,11 @@ class Market:
         ))
 
     def estimate_buy_cost(self, resource: Resource, amount: int) -> int:
-        """Estimate cost of buying without modifying market state."""
-        total = 0
-        pos = self.positions[resource]
-        for _ in range(amount):
-            p = max(0, min(pos, len(PRICE_TRACK) - 1))
-            total += PRICE_TRACK[p]
-            pos = min(pos + 1, len(PRICE_TRACK) - 1)
-        return total
+        """Estimate cost of buying without modifying market state.
+
+        All units pay the current price (matches buy() semantics).
+        """
+        return self.price(resource) * amount
 
     def snapshot(self) -> dict[str, int]:
         return {r.value: self.price(r) for r in Resource}
@@ -494,12 +487,8 @@ def execute_sell(state: GameState, player: Player, card_idx: int) -> ActionRecor
     for sell_res in card.can_sell:
         rate = max(0, player.rate(sell_res))
         if rate > 0:
-            revenue = 0
-            pos = state.market.positions[sell_res]
-            for _ in range(rate):
-                p = max(0, min(pos, len(PRICE_TRACK) - 1))
-                revenue += PRICE_TRACK[p]
-                pos = max(pos - 1, 0)
+            # All units sell at current price (then market drops by amount)
+            revenue = state.market.price(sell_res) * rate
             if revenue > best_revenue:
                 best_revenue = revenue
                 best_resource = sell_res

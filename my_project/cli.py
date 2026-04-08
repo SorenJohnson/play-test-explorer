@@ -14,7 +14,7 @@ from my_project.sim_analysis import (
 from my_project.monte_carlo import SimulationConfig, export_results, run_monte_carlo
 from my_project.network import build_network
 from my_project.parsing import parse_cards, parse_contracts
-from my_project.simulation import DEFAULT_MAX_TURNS, DEFAULT_NUM_PLAYERS
+from my_project.simulation import DEFAULT_MARKET_POS, DEFAULT_MAX_TURNS, DEFAULT_NUM_PLAYERS
 
 
 DATA_DIR = Path(__file__).parent / "data"
@@ -189,7 +189,7 @@ def main() -> None:
     sim.add_argument("-n", "--runs", type=int, default=100, help="Number of simulations")
     sim.add_argument("-p", "--players", type=int, default=1, help="Number of players")
     sim.add_argument("-m", "--money", type=int, default=20, help="Starting money")
-    sim.add_argument("--market-pos", type=int, default=10, help="Starting market position (10=$5)")
+    sim.add_argument("--market-pos", type=int, default=DEFAULT_MARKET_POS, help="Starting market position")
     sim.add_argument("--randomize-market", action="store_true", help="Randomize starting prices")
     sim.add_argument("-t", "--turns", type=int, default=DEFAULT_MAX_TURNS, help="Turns per player")
     sim.add_argument("-s", "--strategy", choices=["greedy", "random", "smart"], default="greedy",
