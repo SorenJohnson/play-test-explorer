@@ -289,20 +289,56 @@ def _best_contract_value_per_unit(resource: Resource, state: GameState) -> float
     return best
 
 
+def _expected_pwr_price(state: GameState) -> float:
+    """Estimate average PWR price across remaining power bills.
+
+    Each PWR_ADJUST event shifts the market by the active player's PWR rate
+    (positive rate shifts market DOWN like selling, negative shifts UP).
+    We approximate the expected market trajectory by using the AVERAGE
+    PWR rate across all players (since we don't know which player will
+    be active when each adjust fires).
+
+    Returns the avg between current PWR price and the projected future price.
+    """
+    from my_project.simulation import PRICE_TRACK
+
+    remaining = state.remaining_events()
+    num_adjusts = remaining.get(EventType.PWR_ADJUST, 0)
+    num_bills = remaining.get(EventType.POWER_BILL, 0) + 1  # +1 for end-game
+
+    if num_bills == 0 or not state.players:
+        return float(state.market.price(Resource.PWR))
+
+    # Average PWR rate across all players
+    avg_pwr_rate = sum(p.rate(Resource.PWR) for p in state.players) / len(state.players)
+
+    # Total expected market shift over remaining adjusts
+    # Positive avg rate pushes market DOWN (each adjust shifts -rate positions)
+    expected_shift = -avg_pwr_rate * num_adjusts
+
+    current_pos = state.market.positions[Resource.PWR]
+    projected_pos = max(0, min(current_pos + expected_shift, len(PRICE_TRACK) - 1))
+
+    # Average between current and projected position (linear trajectory)
+    avg_pos = (current_pos + projected_pos) / 2
+    avg_pos_idx = max(0, min(int(round(avg_pos)), len(PRICE_TRACK) - 1))
+    return float(PRICE_TRACK[avg_pos_idx])
+
+
 def _positive_rate_value(resource: Resource, state: GameState) -> float:
     """Value of +1 positive rate.
 
-    - PWR: earns at every power bill (including end-game). Passive income.
-    - Other: max of:
-      - sell value × multiplier (accounts for potential multi-sell)
-      - best contract value per unit (if any pool contract uses this resource)
+    - PWR: earns at every power bill. Uses expected avg PWR price
+      (accounts for market drift from PWR_ADJUST events).
+    - Other: max of sell value × multiplier OR best contract value per unit.
     """
-    price = state.market.price(resource)
     if resource == Resource.PWR:
         remaining = state.remaining_events()
-        collections = remaining.get(EventType.POWER_BILL, 0) + 1  # +1 for end-game
-        return price * collections
+        collections = remaining.get(EventType.POWER_BILL, 0) + 1
+        avg_price = _expected_pwr_price(state)
+        return avg_price * collections
 
+    price = state.market.price(resource)
     sell_value = price * SELL_VALUE_MULTIPLIER
     contract_value = _best_contract_value_per_unit(resource, state)
     return max(sell_value, contract_value)
@@ -311,15 +347,17 @@ def _positive_rate_value(resource: Resource, state: GameState) -> float:
 def _negative_rate_cost(resource: Resource, state: GameState) -> float:
     """Cost of -1 negative rate.
 
-    - PWR: charged at every power bill (including end-game). Persistent debt.
-    - Other: charged at every futures settlement (including end-game).
+    - PWR: charged at every power bill at expected avg price.
+    - Other: charged at every futures settlement at current price.
     """
-    price = state.market.price(resource)
     remaining = state.remaining_events()
     if resource == Resource.PWR:
         collections = remaining.get(EventType.POWER_BILL, 0) + 1
-    else:
-        collections = remaining.get(EventType.FUTURES_SETTLEMENT, 0) + 1
+        avg_price = _expected_pwr_price(state)
+        return avg_price * collections
+
+    price = state.market.price(resource)
+    collections = remaining.get(EventType.FUTURES_SETTLEMENT, 0) + 1
     return price * collections
 
 
