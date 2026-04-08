@@ -13677,13 +13677,13 @@
     "H2O": [
       {
         "turn": 1,
-        "value": 20,
-        "remaining_collections": 5
+        "value": 16,
+        "remaining_collections": 4
       },
       {
         "turn": 2,
-        "value": 16,
-        "remaining_collections": 4
+        "value": 12,
+        "remaining_collections": 3
       },
       {
         "turn": 3,
@@ -13697,8 +13697,8 @@
       },
       {
         "turn": 5,
-        "value": 12,
-        "remaining_collections": 3
+        "value": 8,
+        "remaining_collections": 2
       },
       {
         "turn": 6,
@@ -13719,13 +13719,13 @@
     "FE": [
       {
         "turn": 1,
-        "value": 20,
-        "remaining_collections": 5
+        "value": 16,
+        "remaining_collections": 4
       },
       {
         "turn": 2,
-        "value": 16,
-        "remaining_collections": 4
+        "value": 12,
+        "remaining_collections": 3
       },
       {
         "turn": 3,
@@ -13739,8 +13739,8 @@
       },
       {
         "turn": 5,
-        "value": 12,
-        "remaining_collections": 3
+        "value": 8,
+        "remaining_collections": 2
       },
       {
         "turn": 6,
@@ -13761,13 +13761,13 @@
     "C": [
       {
         "turn": 1,
-        "value": 20,
-        "remaining_collections": 5
+        "value": 16,
+        "remaining_collections": 4
       },
       {
         "turn": 2,
-        "value": 16,
-        "remaining_collections": 4
+        "value": 12,
+        "remaining_collections": 3
       },
       {
         "turn": 3,
@@ -13781,8 +13781,8 @@
       },
       {
         "turn": 5,
-        "value": 12,
-        "remaining_collections": 3
+        "value": 8,
+        "remaining_collections": 2
       },
       {
         "turn": 6,
@@ -13803,13 +13803,13 @@
     "SI": [
       {
         "turn": 1,
-        "value": 20,
-        "remaining_collections": 5
+        "value": 16,
+        "remaining_collections": 4
       },
       {
         "turn": 2,
-        "value": 16,
-        "remaining_collections": 4
+        "value": 12,
+        "remaining_collections": 3
       },
       {
         "turn": 3,
@@ -13823,8 +13823,8 @@
       },
       {
         "turn": 5,
-        "value": 12,
-        "remaining_collections": 3
+        "value": 8,
+        "remaining_collections": 2
       },
       {
         "turn": 6,
@@ -13845,13 +13845,13 @@
     "O2": [
       {
         "turn": 1,
-        "value": 20,
-        "remaining_collections": 5
+        "value": 16,
+        "remaining_collections": 4
       },
       {
         "turn": 2,
-        "value": 16,
-        "remaining_collections": 4
+        "value": 12,
+        "remaining_collections": 3
       },
       {
         "turn": 3,
@@ -13865,8 +13865,8 @@
       },
       {
         "turn": 5,
-        "value": 12,
-        "remaining_collections": 3
+        "value": 8,
+        "remaining_collections": 2
       },
       {
         "turn": 6,
@@ -13887,13 +13887,13 @@
     "FOOD": [
       {
         "turn": 1,
-        "value": 20,
-        "remaining_collections": 5
+        "value": 16,
+        "remaining_collections": 4
       },
       {
         "turn": 2,
-        "value": 16,
-        "remaining_collections": 4
+        "value": 12,
+        "remaining_collections": 3
       },
       {
         "turn": 3,
@@ -13907,8 +13907,8 @@
       },
       {
         "turn": 5,
-        "value": 12,
-        "remaining_collections": 3
+        "value": 8,
+        "remaining_collections": 2
       },
       {
         "turn": 6,
@@ -13929,13 +13929,13 @@
     "GLS": [
       {
         "turn": 1,
-        "value": 20,
-        "remaining_collections": 5
+        "value": 16,
+        "remaining_collections": 4
       },
       {
         "turn": 2,
-        "value": 16,
-        "remaining_collections": 4
+        "value": 12,
+        "remaining_collections": 3
       },
       {
         "turn": 3,
@@ -13949,8 +13949,8 @@
       },
       {
         "turn": 5,
-        "value": 12,
-        "remaining_collections": 3
+        "value": 8,
+        "remaining_collections": 2
       },
       {
         "turn": 6,
@@ -13971,13 +13971,13 @@
     "ELX": [
       {
         "turn": 1,
-        "value": 20,
-        "remaining_collections": 5
+        "value": 16,
+        "remaining_collections": 4
       },
       {
         "turn": 2,
-        "value": 16,
-        "remaining_collections": 4
+        "value": 12,
+        "remaining_collections": 3
       },
       {
         "turn": 3,
@@ -13991,8 +13991,8 @@
       },
       {
         "turn": 5,
-        "value": 12,
-        "remaining_collections": 3
+        "value": 8,
+        "remaining_collections": 2
       },
       {
         "turn": 6,
@@ -15811,8 +15811,8 @@
       "total_bought": 8333,
       "total_sold": 14428,
       "net_flow": -6095,
-      "buy_revenue": 43832.0,
-      "sell_revenue": 83937
+      "total_buy_cost": 43832,
+      "total_sell_revenue": 83937
     },
     "ELX": {
       "avg_trajectory": [
@@ -15848,8 +15848,8 @@
       "total_bought": 1290,
       "total_sold": 5689,
       "net_flow": -4399,
-      "buy_revenue": 6571.0,
-      "sell_revenue": 31072
+      "total_buy_cost": 6571,
+      "total_sell_revenue": 31072
     },
     "FE": {
       "avg_trajectory": [
@@ -15885,8 +15885,8 @@
       "total_bought": 23847,
       "total_sold": 26281,
       "net_flow": -2434,
-      "buy_revenue": 127044.0,
-      "sell_revenue": 167591
+      "total_buy_cost": 127044,
+      "total_sell_revenue": 167591
     },
     "FOOD": {
       "avg_trajectory": [
@@ -15922,8 +15922,8 @@
       "total_bought": 0,
       "total_sold": 11611,
       "net_flow": -11611,
-      "buy_revenue": 0,
-      "sell_revenue": 62608
+      "total_buy_cost": 0,
+      "total_sell_revenue": 62608
     },
     "GLS": {
       "avg_trajectory": [
@@ -15959,8 +15959,8 @@
       "total_bought": 11610,
       "total_sold": 8208,
       "net_flow": 3402,
-      "buy_revenue": 65025.0,
-      "sell_revenue": 53619
+      "total_buy_cost": 65025,
+      "total_sell_revenue": 53619
     },
     "H2O": {
       "avg_trajectory": [
@@ -15996,8 +15996,8 @@
       "total_bought": 0,
       "total_sold": 8442,
       "net_flow": -8442,
-      "buy_revenue": 0,
-      "sell_revenue": 57541
+      "total_buy_cost": 0,
+      "total_sell_revenue": 57541
     },
     "O2": {
       "avg_trajectory": [
@@ -16033,8 +16033,8 @@
       "total_bought": 0,
       "total_sold": 5757,
       "net_flow": -5757,
-      "buy_revenue": 0,
-      "sell_revenue": 32809
+      "total_buy_cost": 0,
+      "total_sell_revenue": 32809
     },
     "PWR": {
       "avg_trajectory": [
@@ -16070,8 +16070,8 @@
       "total_bought": 0,
       "total_sold": 0,
       "net_flow": 0,
-      "buy_revenue": 0,
-      "sell_revenue": 0
+      "total_buy_cost": 0,
+      "total_sell_revenue": 0
     },
     "SI": {
       "avg_trajectory": [
@@ -16107,8 +16107,8 @@
       "total_bought": 5660,
       "total_sold": 6098,
       "net_flow": -438,
-      "buy_revenue": 32685.0,
-      "sell_revenue": 43199
+      "total_buy_cost": 32685,
+      "total_sell_revenue": 43199
     }
   }
 }

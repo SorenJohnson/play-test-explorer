@@ -30,7 +30,12 @@
     <!-- Market dynamics -->
     <section>
       <h2>Market Dynamics</h2>
-      <p class="subtitle">How each resource's market price moved over the game, and the buy/sell pressure driving it.</p>
+      <p class="subtitle">
+        How each resource's market price moved over the game, and the buy/sell pressure driving it.
+        <strong>$ Players Paid</strong> = cash spent buying this resource.
+        <strong>$ Players Earned</strong> = cash received from selling it.
+        <strong>Market Impact</strong> = net cash extracted from (or added to) the market through this resource.
+      </p>
       <div class="chart-container wide" style="min-height:400px">
         <canvas id="market-trajectory-chart"></canvas>
       </div>
@@ -42,11 +47,12 @@
               <th>Start $</th>
               <th>End $</th>
               <th>Δ</th>
-              <th>Bought</th>
-              <th>Sold</th>
-              <th>Net Flow</th>
-              <th>$ Paid</th>
-              <th>$ Earned</th>
+              <th>Units Bought</th>
+              <th>Units Sold</th>
+              <th>Net Units</th>
+              <th>$ Players Paid</th>
+              <th>$ Players Earned</th>
+              <th>Market Impact</th>
             </tr>
           </thead>
           <tbody></tbody>

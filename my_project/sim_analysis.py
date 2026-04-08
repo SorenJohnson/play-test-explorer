@@ -280,8 +280,8 @@ def analyze_market_dynamics(sim_files: list[Path]) -> dict:
             "total_bought": b,
             "total_sold": s,
             "net_flow": b - s,  # positive = net bought, negative = net sold
-            "buy_revenue": round(buy_cost.get(r, 0), 0),  # $ paid by buyers
-            "sell_revenue": sell_revenue.get(r, 0),  # $ earned by sellers
+            "total_buy_cost": int(round(buy_cost.get(r, 0))),  # $ players paid to market
+            "total_sell_revenue": sell_revenue.get(r, 0),  # $ market paid to players
         }
     return results
 

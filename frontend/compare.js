@@ -584,6 +584,10 @@ function renderMarketDynamics() {
       const deltaClass = delta >= 0 ? "positive" : "negative";
       const deltaSign = delta >= 0 ? "+" : "";
       const dot = `<span class="resource-dot" style="background:${RESOURCE_COLORS[r] || "#888"}"></span>`;
+      // Market Impact: positive means market added cash to players (sells > buys)
+      const marketImpact = s.total_sell_revenue - s.total_buy_cost;
+      const impactClass = marketImpact >= 0 ? "positive" : "negative";
+      const impactSign = marketImpact >= 0 ? "+" : "";
       return `<tr>
         <td>${dot}<strong>${r}</strong></td>
         <td>$${s.avg_starting_price}</td>
@@ -592,8 +596,9 @@ function renderMarketDynamics() {
         <td>${s.total_bought.toLocaleString()}</td>
         <td>${s.total_sold.toLocaleString()}</td>
         <td>${s.net_flow > 0 ? "+" : ""}${s.net_flow.toLocaleString()}</td>
-        <td>$${s.buy_revenue.toLocaleString()}</td>
-        <td>$${s.sell_revenue.toLocaleString()}</td>
+        <td>$${s.total_buy_cost.toLocaleString()}</td>
+        <td>$${s.total_sell_revenue.toLocaleString()}</td>
+        <td class="${impactClass}">${impactSign}$${marketImpact.toLocaleString()}</td>
       </tr>`;
     })
     .join("");
