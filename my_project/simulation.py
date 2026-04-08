@@ -19,10 +19,23 @@ from my_project.models import Card, Contract, Resource, ResourceAmount
 
 PRICE_TRACK = [1, 1, 1, 2, 2, 2, 3, 3, 4, 4, 5, 5, 6, 7, 8, 9, 10]
 
+# Game balance constants
 DEFAULT_MAX_TURNS = 8
 DEFAULT_NUM_PLAYERS = 3
 DEFAULT_START_MONEY = 20
 DEFAULT_MARKET_POS = 10
+HAND_SIZE = 3
+POOL_SIZE = 4
+CONTRACTS_AVAILABLE_BASE = 2  # base + num_players contract cards drawn
+CONTRACT_REWARD = 50  # net worth value of a fulfilled contract
+DEBT_INTEREST_DIVISOR = 10  # $1 interest per $X owed
+MAX_ACTIONS_PER_TURN = 10  # safety limit
+
+# Event deck composition (random within ranges)
+POWER_BILL_RANGE = (3, 4)
+DEBT_COLLECTION_RANGE = (2, 4)
+FUTURES_SETTLEMENT_RANGE = (3, 4)
+PWR_ADJUST_FRACTION = 0.5  # fraction of remaining slots
 
 
 @dataclass
@@ -87,11 +100,11 @@ class Player:
     hand: list[Card] = field(default_factory=list)
     buildings_played: list[str] = field(default_factory=list)
     contracts_fulfilled: int = 0
-    hand_size: int = 3
+    hand_size: int = HAND_SIZE
     ledger: CostLedger = field(default_factory=CostLedger.create)
 
     def net_worth(self) -> int:
-        return self.money - self.debt + self.contracts_fulfilled * 50
+        return self.money - self.debt + self.contracts_fulfilled * CONTRACT_REWARD
 
     def rate(self, resource: Resource) -> int:
         return self.rates.get(resource, 0)
@@ -154,21 +167,19 @@ class EventType(StrEnum):
 def build_event_deck(num_turns: int, num_players: int) -> list[EventType]:
     """Build a shuffled event deck with one card per player-turn.
 
-    Composition (randomized within ranges):
-    - 3-4 power bills
-    - 2-4 debt collections
-    - 3-4 futures settlements
-    - 50% of remaining are PWR adjustments, rest are no-events
+    Composition uses POWER_BILL_RANGE, DEBT_COLLECTION_RANGE, FUTURES_SETTLEMENT_RANGE
+    constants. PWR_ADJUST_FRACTION of remaining slots become PWR adjustments,
+    the rest are no-events.
     """
     total = num_turns * num_players
     events: list[EventType] = []
-    events.extend([EventType.POWER_BILL] * random.randint(3, 4))
-    events.extend([EventType.DEBT_COLLECTION] * random.randint(2, 4))
-    events.extend([EventType.FUTURES_SETTLEMENT] * random.randint(3, 4))
+    events.extend([EventType.POWER_BILL] * random.randint(*POWER_BILL_RANGE))
+    events.extend([EventType.DEBT_COLLECTION] * random.randint(*DEBT_COLLECTION_RANGE))
+    events.extend([EventType.FUTURES_SETTLEMENT] * random.randint(*FUTURES_SETTLEMENT_RANGE))
 
     remaining = total - len(events)
     if remaining > 0:
-        pwr_adjusts = remaining // 2
+        pwr_adjusts = int(remaining * PWR_ADJUST_FRACTION)
         events.extend([EventType.PWR_ADJUST] * pwr_adjusts)
         events.extend([EventType.NO_EVENT] * (remaining - pwr_adjusts))
     else:
@@ -288,12 +299,12 @@ class GameState:
         # Draw contracts
         contracts = list(all_contracts)
         random.shuffle(contracts)
-        num_available = 2 + num_players
+        num_available = CONTRACTS_AVAILABLE_BASE + num_players
         available = contracts[:num_available]
         remaining_contracts = contracts[num_available:]
 
         # Draw pool
-        pool = deck.draw(4)
+        pool = deck.draw(POOL_SIZE)
 
         # Build event deck
         event_deck = build_event_deck(max_turns, num_players)
@@ -591,11 +602,11 @@ def do_power_bill(state: GameState) -> None:
 
 
 def do_debt_collection(state: GameState) -> None:
-    """Increase debt by $1 per $10 owed (minus contract value)."""
+    """Increase debt by $1 per DEBT_INTEREST_DIVISOR owed (minus contract value)."""
     for player in state.players:
-        contract_offset = player.contracts_fulfilled * 50
+        contract_offset = player.contracts_fulfilled * CONTRACT_REWARD
         effective_debt = max(0, player.debt - contract_offset)
-        interest = effective_debt // 10
+        interest = effective_debt // DEBT_INTEREST_DIVISOR
         player.debt += interest
 
 
@@ -666,9 +677,8 @@ def run_turn(state: GameState, player: Player, strategy, event: EventType) -> No
         swap_fn(state, player)
 
     # Action phase: keep taking actions until hand is empty or player passes
-    max_actions = 10  # safety limit
     actions_taken = 0
-    while player.hand and actions_taken < max_actions:
+    while player.hand and actions_taken < MAX_ACTIONS_PER_TURN:
         action = strategy(state, player)
         if action.action_type == ActionType.PASS:
             break

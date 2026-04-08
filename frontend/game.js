@@ -5,6 +5,9 @@ const RESOURCE_COLORS = {
 
 const PLAYER_COLORS = ["#3fb950", "#58a6ff", "#f85149", "#f0883e"];
 
+// Game balance constants (mirror simulation.py)
+const CONTRACT_REWARD = 50;
+
 let gameData = null;
 
 async function init() {
@@ -83,7 +86,7 @@ function renderNetWorthChart() {
       label: `${player} — Net Worth`,
       data: turns.map((t) => ({
         x: t.turn,
-        y: t.money_after - (t.debt || 0) + (t.contracts || 0) * 50,
+        y: t.money_after - (t.debt || 0) + (t.contracts || 0) * CONTRACT_REWARD,
       })),
       borderColor: color,
       backgroundColor: color + "22",
@@ -272,7 +275,7 @@ function renderTurnLog() {
       // Money & Debt
       const debt = turn.debt || 0;
       const contracts = turn.contracts || 0;
-      const nw = turn.money_after - debt + contracts * 50;
+      const nw = turn.money_after - debt + contracts * CONTRACT_REWARD;
       cellHtml += `<div style="color:#8b949e; font-size:0.7rem">$${turn.money_before} → $${turn.money_after}`;
       if (debt > 0) cellHtml += ` | <span style="color:#f85149">debt: $${debt}</span>`;
       if (contracts > 0) cellHtml += ` | <span style="color:#f0883e">${contracts}×📋</span>`;
