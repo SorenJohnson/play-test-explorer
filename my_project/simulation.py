@@ -112,6 +112,11 @@ class Player:
     flow_sell_revenue: dict[Resource, int] = field(default_factory=lambda: {r: 0 for r in Resource})
     flow_futures_units: dict[Resource, int] = field(default_factory=lambda: {r: 0 for r in Resource})
     flow_futures_cost: dict[Resource, int] = field(default_factory=lambda: {r: 0 for r in Resource})
+    # Per-turn state: resets at the start of each of this player's turns.
+    # Rule: only one BUILD action is allowed per turn (multi-card builds
+    # are fine, but subsequent build actions are blocked). This prevents
+    # rates from being reused as a free discount across separate actions.
+    has_built_this_turn: bool = False
 
     def net_worth(self) -> int:
         return self.money - self.debt + self.contracts_fulfilled * CONTRACT_REWARD
@@ -450,8 +455,12 @@ def execute_build(
 ) -> ActionRecord | None:
     """Play one or more building cards. Optionally discard cards to reduce deficit.
 
-    Returns ActionRecord on success, None if the build is unaffordable.
+    Returns ActionRecord on success, None if the build is unaffordable OR if
+    the player has already built this turn (one build action per turn).
     """
+    if player.has_built_this_turn:
+        return None
+
     build_cards = [player.hand[i] for i in build_indices]
     num_discards = len(discard_indices)
 
@@ -511,6 +520,9 @@ def execute_build(
     all_indices = sorted(set(build_indices) | set(discard_indices), reverse=True)
     for idx in all_indices:
         state.deck.discard.append(player.hand.pop(idx))
+
+    # Enforce one build per turn
+    player.has_built_this_turn = True
 
     names = ", ".join(c.building for c in build_cards)
     detail = f"Built {names}"
@@ -749,6 +761,9 @@ def run_turn(state: GameState, player: Player, strategy, event: EventType) -> No
     state.turn += 1
     money_before = player.money
     action_records: list[ActionRecord] = []
+
+    # Reset per-turn state (rule: one build action per turn)
+    player.has_built_this_turn = False
 
     # Pool swapping phase (free, before actions)
     swap_fn = getattr(strategy, 'pool_swap', None)

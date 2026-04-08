@@ -116,15 +116,17 @@ def random_strategy(state: GameState, player: Player) -> Action:
     options: list[Action] = []
 
     # Build: try single cards (with optional discard of others to help afford)
-    for i, card in enumerate(player.hand):
-        remaining = [j for j in range(len(player.hand)) if j != i]
-        # Try without discards first, then with
-        for num_disc in range(len(remaining) + 1):
-            discard_list = remaining[:num_disc]
-            result = compute_build_deficit([card], player, num_disc, state.market)
-            if result is not None:
-                options.append(Action(ActionType.BUILD, build_cards=[i], discard_cards=list(discard_list)))
-                break  # found cheapest affordable discard level
+    # Only offered if the player hasn't already built this turn.
+    if not player.has_built_this_turn:
+        for i, card in enumerate(player.hand):
+            remaining = [j for j in range(len(player.hand)) if j != i]
+            # Try without discards first, then with
+            for num_disc in range(len(remaining) + 1):
+                discard_list = remaining[:num_disc]
+                result = compute_build_deficit([card], player, num_disc, state.market)
+                if result is not None:
+                    options.append(Action(ActionType.BUILD, build_cards=[i], discard_cards=list(discard_list)))
+                    break  # found cheapest affordable discard level
 
     # Sell: any card whose sell alternates match a positive rate
     for i, card in enumerate(player.hand):
@@ -172,33 +174,35 @@ def greedy_strategy(state: GameState, player: Player) -> Action:
     best_action = Action(ActionType.PASS)
     hand_indices = list(range(len(player.hand)))
 
-    # Score build options (all subsets of current hand)
-    for size in range(1, len(player.hand) + 1):
-        for build_combo in combinations(hand_indices, size):
-            build_list = list(build_combo)
-            remaining = [i for i in hand_indices if i not in build_combo]
-            cards = [player.hand[i] for i in build_list]
+    # Score build options (all subsets of current hand).
+    # Rule: only one build action per turn. Skip entirely if already built.
+    if not player.has_built_this_turn:
+        for size in range(1, len(player.hand) + 1):
+            for build_combo in combinations(hand_indices, size):
+                build_list = list(build_combo)
+                remaining = [i for i in hand_indices if i not in build_combo]
+                cards = [player.hand[i] for i in build_list]
 
-            # Try with increasing discards
-            best_for_combo = None
-            for num_disc in range(len(remaining) + 1):
-                discard_list = remaining[:num_disc]
-                result = compute_build_deficit(cards, player, num_disc, state.market)
-                if result is None:
-                    continue
+                # Try with increasing discards
+                best_for_combo = None
+                for num_disc in range(len(remaining) + 1):
+                    discard_list = remaining[:num_disc]
+                    result = compute_build_deficit(cards, player, num_disc, state.market)
+                    if result is None:
+                        continue
 
-                _, estimated_cost = result
-                value = _score_build_value(cards, state, player)
-                score = value - estimated_cost
+                    _, estimated_cost = result
+                    value = _score_build_value(cards, state, player)
+                    score = value - estimated_cost
 
-                if best_for_combo is None or score > best_for_combo[0]:
-                    best_for_combo = (score, build_list, list(discard_list))
+                    if best_for_combo is None or score > best_for_combo[0]:
+                        best_for_combo = (score, build_list, list(discard_list))
 
-            if best_for_combo is not None:
-                score, bl, dl = best_for_combo
-                if score > best_score:
-                    best_score = score
-                    best_action = Action(ActionType.BUILD, build_cards=bl, discard_cards=dl)
+                if best_for_combo is not None:
+                    score, bl, dl = best_for_combo
+                    if score > best_score:
+                        best_score = score
+                        best_action = Action(ActionType.BUILD, build_cards=bl, discard_cards=dl)
 
     # Score sell options
     for i, card in enumerate(player.hand):
@@ -471,32 +475,34 @@ def smart_greedy_strategy(state: GameState, player: Player) -> Action:
     best_action = Action(ActionType.PASS)
     hand_indices = list(range(len(player.hand)))
 
-    # Score build options
-    for size in range(1, len(player.hand) + 1):
-        for build_combo in combinations(hand_indices, size):
-            build_list = list(build_combo)
-            remaining = [i for i in hand_indices if i not in build_combo]
-            cards = [player.hand[i] for i in build_list]
+    # Score build options.
+    # Rule: only one build action per turn. Skip entirely if already built.
+    if not player.has_built_this_turn:
+        for size in range(1, len(player.hand) + 1):
+            for build_combo in combinations(hand_indices, size):
+                build_list = list(build_combo)
+                remaining = [i for i in hand_indices if i not in build_combo]
+                cards = [player.hand[i] for i in build_list]
 
-            best_for_combo = None
-            for num_disc in range(len(remaining) + 1):
-                discard_list = remaining[:num_disc]
-                result = compute_build_deficit(cards, player, num_disc, state.market)
-                if result is None:
-                    continue
+                best_for_combo = None
+                for num_disc in range(len(remaining) + 1):
+                    discard_list = remaining[:num_disc]
+                    result = compute_build_deficit(cards, player, num_disc, state.market)
+                    if result is None:
+                        continue
 
-                _, estimated_cost = result
-                value = _smart_score_build_value(cards, state, player)
-                score = value - estimated_cost
+                    _, estimated_cost = result
+                    value = _smart_score_build_value(cards, state, player)
+                    score = value - estimated_cost
 
-                if best_for_combo is None or score > best_for_combo[0]:
-                    best_for_combo = (score, build_list, list(discard_list))
+                    if best_for_combo is None or score > best_for_combo[0]:
+                        best_for_combo = (score, build_list, list(discard_list))
 
-            if best_for_combo is not None:
-                score, bl, dl = best_for_combo
-                if score > best_score:
-                    best_score = score
-                    best_action = Action(ActionType.BUILD, build_cards=bl, discard_cards=dl)
+                if best_for_combo is not None:
+                    score, bl, dl = best_for_combo
+                    if score > best_score:
+                        best_score = score
+                        best_action = Action(ActionType.BUILD, build_cards=bl, discard_cards=dl)
 
     # Score sell options
     for i, card in enumerate(player.hand):
