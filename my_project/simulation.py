@@ -178,31 +178,33 @@ class EventType(StrEnum):
 def build_event_deck(num_turns: int, num_players: int) -> list[EventType]:
     """Build a shuffled event deck with one card per player-turn.
 
-    Composition uses POWER_BILL_RANGE, DEBT_COLLECTION_RANGE, FUTURES_SETTLEMENT_RANGE
-    constants. PWR_ADJUST_FRACTION of remaining slots become PWR adjustments,
-    the rest are no-events.
+    The last slot is always END_GAME (fires final power bill + futures
+    settlement). The remaining slots are filled with random events per
+    the composition ranges. PWR_ADJUST_FRACTION of leftover slots become
+    PWR adjustments, the rest are no-events.
     """
     total = num_turns * num_players
+    # Reserve last slot for END_GAME
+    reg_slots = max(0, total - 1)
+
     events: list[EventType] = []
     events.extend([EventType.POWER_BILL] * random.randint(*POWER_BILL_RANGE))
     events.extend([EventType.DEBT_COLLECTION] * random.randint(*DEBT_COLLECTION_RANGE))
     events.extend([EventType.FUTURES_SETTLEMENT] * random.randint(*FUTURES_SETTLEMENT_RANGE))
 
-    remaining = total - len(events)
+    # Truncate if over capacity
+    if len(events) > reg_slots:
+        events = events[:reg_slots]
+
+    remaining = reg_slots - len(events)
     if remaining > 0:
         pwr_adjusts = int(remaining * PWR_ADJUST_FRACTION)
         events.extend([EventType.PWR_ADJUST] * pwr_adjusts)
         events.extend([EventType.NO_EVENT] * (remaining - pwr_adjusts))
-    else:
-        events = events[:total]
-
-    remaining = total - len(events)
-    if remaining > 0:
-        events.extend([EventType.NO_EVENT] * remaining)
-    else:
-        events = events[:total]
 
     random.shuffle(events)
+    # END_GAME always goes at the bottom (fires on the final player-turn)
+    events.append(EventType.END_GAME)
     return events
 
 
@@ -331,9 +333,6 @@ class GameState:
 
         # Build event deck
         event_deck = build_event_deck(max_turns, num_players)
-        # Force the final event slot to be END_GAME (runs power bill + futures)
-        if event_deck:
-            event_deck[-1] = EventType.END_GAME
 
         # Create players. Assign unique corporations randomly (capped at # of corps).
         corp_pool = list(CORPORATIONS)
