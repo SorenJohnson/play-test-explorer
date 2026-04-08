@@ -551,16 +551,22 @@ function renderMarketDynamics() {
         const dot = `<span class="resource-dot" style="background:${RESOURCE_COLORS[r] || "#888"}"></span>`;
         const futuresPaid = s.futures_debt || 0;
         const futuresUnits = s.futures_units || 0;
-        // Display "Bought" excludes futures (shown in its own column)
+        // Bought excludes futures (futures shown in its own column)
         const boughtUnits = s.total_bought - futuresUnits;
         const boughtCash = s.total_buy_cost - futuresPaid;
-        // Net cash flow = sold - everything bought (market + bills + futures)
+        // Net cash flow includes everything: sold - bought - futures
         const netFlowCash = s.total_sell_revenue - s.total_buy_cost;
         const netClass = netFlowCash >= 0 ? "positive" : "negative";
         const netSignCash = netFlowCash >= 0 ? "+" : "";
-        // Net units (sold - bought, includes everything)
-        const netUnits = boughtUnits - s.total_sold;
+        // Net units (sold - bought - futures)
+        const netUnits = s.total_sold - boughtUnits - futuresUnits;
+        const unitClass = netUnits >= 0 ? "positive" : "negative";
         const unitSign = netUnits > 0 ? "+" : "";
+        // Average prices per transaction type
+        const avgBuy = boughtUnits > 0 ? boughtCash / boughtUnits : 0;
+        const avgSell = s.total_sold > 0 ? s.total_sell_revenue / s.total_sold : 0;
+        const avgFut = futuresUnits > 0 ? futuresPaid / futuresUnits : 0;
+        const fmtAvg = (v) => v > 0 ? `$${v.toFixed(2)}` : "-";
         return `<tr>
           <td>${dot}<strong>${r}</strong></td>
           <td>$${s.avg_starting_price}</td>
@@ -568,10 +574,14 @@ function renderMarketDynamics() {
           <td class="${deltaClass}">${deltaSign}${delta}</td>
           <td>${valFmt(boughtUnits)}</td>
           <td>${valFmt(s.total_sold)}</td>
-          <td>${unitSign}${valFmt(netUnits)}</td>
+          <td>${valFmt(futuresUnits)}</td>
+          <td class="${unitClass}">${unitSign}${valFmt(netUnits)}</td>
           <td>${boughtCash > 0 ? `<span class="negative">${cashFmt(boughtCash)}</span>` : "-"}</td>
           <td>${s.total_sell_revenue > 0 ? `<span class="positive">${cashFmt(s.total_sell_revenue)}</span>` : "-"}</td>
           <td>${futuresPaid > 0 ? `<span class="negative">${cashFmt(futuresPaid)}</span>` : "-"}</td>
+          <td>${fmtAvg(avgBuy)}</td>
+          <td>${fmtAvg(avgSell)}</td>
+          <td>${fmtAvg(avgFut)}</td>
           <td class="${netClass}">${netSignCash}${cashFmt(netFlowCash)}</td>
         </tr>`;
       })
