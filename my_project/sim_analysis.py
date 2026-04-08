@@ -217,11 +217,17 @@ def analyze_market_dynamics(sim_files: list[Path]) -> dict:
     pwr_debt = 0  # total debt incurred from negative PWR at power bills
     futures_debt = 0  # total debt incurred from negative non-PWR rates at settlements
 
+    # Count games and player-games for normalization
+    total_games = 0
+    total_player_games = 0
+
     for f in sim_files:
         with open(f) as fh:
             data = json.load(fh)
 
         for game in data["games"]:
+            total_games += 1
+            total_player_games += len(game.get("players", []))
             history = game.get("action_history", [])
             if not history:
                 continue
@@ -345,7 +351,11 @@ def analyze_market_dynamics(sim_files: list[Path]) -> dict:
             "bill_owed_units": bill_owed_units,
         }
 
-    return {"resources": results}
+    return {
+        "resources": results,
+        "total_games": total_games,
+        "total_player_games": total_player_games,
+    }
 
 
 def analyze_corporations(sim_files: list[Path]) -> dict:

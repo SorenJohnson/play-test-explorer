@@ -13596,13 +13596,13 @@
     "H2O": [
       {
         "turn": 1,
-        "value": 16,
-        "remaining_collections": 4
+        "value": 20,
+        "remaining_collections": 5
       },
       {
         "turn": 2,
-        "value": 12,
-        "remaining_collections": 3
+        "value": 16,
+        "remaining_collections": 4
       },
       {
         "turn": 3,
@@ -13616,8 +13616,8 @@
       },
       {
         "turn": 5,
-        "value": 8,
-        "remaining_collections": 2
+        "value": 12,
+        "remaining_collections": 3
       },
       {
         "turn": 6,
@@ -13638,13 +13638,13 @@
     "FE": [
       {
         "turn": 1,
-        "value": 16,
-        "remaining_collections": 4
+        "value": 20,
+        "remaining_collections": 5
       },
       {
         "turn": 2,
-        "value": 12,
-        "remaining_collections": 3
+        "value": 16,
+        "remaining_collections": 4
       },
       {
         "turn": 3,
@@ -13658,8 +13658,8 @@
       },
       {
         "turn": 5,
-        "value": 8,
-        "remaining_collections": 2
+        "value": 12,
+        "remaining_collections": 3
       },
       {
         "turn": 6,
@@ -13680,13 +13680,13 @@
     "C": [
       {
         "turn": 1,
-        "value": 16,
-        "remaining_collections": 4
+        "value": 20,
+        "remaining_collections": 5
       },
       {
         "turn": 2,
-        "value": 12,
-        "remaining_collections": 3
+        "value": 16,
+        "remaining_collections": 4
       },
       {
         "turn": 3,
@@ -13700,8 +13700,8 @@
       },
       {
         "turn": 5,
-        "value": 8,
-        "remaining_collections": 2
+        "value": 12,
+        "remaining_collections": 3
       },
       {
         "turn": 6,
@@ -13722,13 +13722,13 @@
     "SI": [
       {
         "turn": 1,
-        "value": 16,
-        "remaining_collections": 4
+        "value": 20,
+        "remaining_collections": 5
       },
       {
         "turn": 2,
-        "value": 12,
-        "remaining_collections": 3
+        "value": 16,
+        "remaining_collections": 4
       },
       {
         "turn": 3,
@@ -13742,8 +13742,8 @@
       },
       {
         "turn": 5,
-        "value": 8,
-        "remaining_collections": 2
+        "value": 12,
+        "remaining_collections": 3
       },
       {
         "turn": 6,
@@ -13764,13 +13764,13 @@
     "O2": [
       {
         "turn": 1,
-        "value": 16,
-        "remaining_collections": 4
+        "value": 20,
+        "remaining_collections": 5
       },
       {
         "turn": 2,
-        "value": 12,
-        "remaining_collections": 3
+        "value": 16,
+        "remaining_collections": 4
       },
       {
         "turn": 3,
@@ -13784,8 +13784,8 @@
       },
       {
         "turn": 5,
-        "value": 8,
-        "remaining_collections": 2
+        "value": 12,
+        "remaining_collections": 3
       },
       {
         "turn": 6,
@@ -13806,13 +13806,13 @@
     "FOOD": [
       {
         "turn": 1,
-        "value": 16,
-        "remaining_collections": 4
+        "value": 20,
+        "remaining_collections": 5
       },
       {
         "turn": 2,
-        "value": 12,
-        "remaining_collections": 3
+        "value": 16,
+        "remaining_collections": 4
       },
       {
         "turn": 3,
@@ -13826,8 +13826,8 @@
       },
       {
         "turn": 5,
-        "value": 8,
-        "remaining_collections": 2
+        "value": 12,
+        "remaining_collections": 3
       },
       {
         "turn": 6,
@@ -13848,13 +13848,13 @@
     "GLS": [
       {
         "turn": 1,
-        "value": 16,
-        "remaining_collections": 4
+        "value": 20,
+        "remaining_collections": 5
       },
       {
         "turn": 2,
-        "value": 12,
-        "remaining_collections": 3
+        "value": 16,
+        "remaining_collections": 4
       },
       {
         "turn": 3,
@@ -13868,8 +13868,8 @@
       },
       {
         "turn": 5,
-        "value": 8,
-        "remaining_collections": 2
+        "value": 12,
+        "remaining_collections": 3
       },
       {
         "turn": 6,
@@ -13890,13 +13890,13 @@
     "ELX": [
       {
         "turn": 1,
-        "value": 16,
-        "remaining_collections": 4
+        "value": 20,
+        "remaining_collections": 5
       },
       {
         "turn": 2,
-        "value": 12,
-        "remaining_collections": 3
+        "value": 16,
+        "remaining_collections": 4
       },
       {
         "turn": 3,
@@ -13910,8 +13910,8 @@
       },
       {
         "turn": 5,
-        "value": 8,
-        "remaining_collections": 2
+        "value": 12,
+        "remaining_collections": 3
       },
       {
         "turn": 6,
@@ -16084,6 +16084,8 @@
         "bill_earned_units": 0,
         "bill_owed_units": 0
       }
-    }
+    },
+    "total_games": 2500,
+    "total_player_games": 7500
   }
 }

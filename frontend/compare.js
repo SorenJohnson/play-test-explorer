@@ -507,14 +507,19 @@ function renderMarketDynamics() {
     },
   });
 
-  // Compute totals for normalization
-  let totalGames = 0;
-  let totalPlayerGames = 0;
-  for (const s of allData) {
-    const games = s.data.games || [];
-    totalGames += games.length;
-    for (const g of games) {
-      totalPlayerGames += (g.players || []).length;
+  // Use totals from analysis (computed from full data, not trimmed publish data).
+  // Falls back to counting trimmed data if missing.
+  let totalGames = md.total_games;
+  let totalPlayerGames = md.total_player_games;
+  if (!totalGames) {
+    totalGames = 0;
+    totalPlayerGames = 0;
+    for (const s of allData) {
+      const games = s.data.games || [];
+      totalGames += games.length;
+      for (const g of games) {
+        totalPlayerGames += (g.players || []).length;
+      }
     }
   }
 
