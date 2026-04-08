@@ -9,11 +9,41 @@ body {
   background: #0d1117;
   color: #c9d1d9;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* Site navigation (shared with report.css pages, lighter copy for flow's
+   fullscreen layout — no max-width container, edge-to-edge bar). */
+.site-nav {
+  display: flex;
+  gap: 18px;
+  padding: 12px 24px;
+  background: #161b22;
+  border-bottom: 1px solid #30363d;
+  flex: none;
+}
+.site-nav a {
+  color: #8b949e;
+  text-decoration: none;
+  font-size: 0.85rem;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+.site-nav a:hover {
+  color: #c9d1d9;
+  background: #21262d;
+}
+.site-nav a.active {
+  color: #58a6ff;
+  font-weight: 600;
 }
 
 #app {
   display: flex;
-  height: 100vh;
+  flex: 1;
+  min-height: 0;
 }
 
 #sidebar {

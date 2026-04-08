@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Build Cost Flow</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
+  <script src="https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"></script>
+  <script src="https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
+</head>
+<body>
+  <nav class="site-nav">
+    <a href="index.html">Home</a>
+    <a href="play.html">Play</a>
+    <a href="compare.html">Analytics</a>
+    <a href="report.html">Report</a>
+    <a href="flow.html" class="active">Flow</a>
+  </nav>
+  <div id="app">
+    <div id="sidebar">
+      <h1>Build Cost Flow</h1>
+      <p class="subtitle">What does it cost to produce resources?</p>
+
+      <div id="controls">
+        <label>
+          <input type="checkbox" id="show-contracts" checked>
+          Show contracts
+        </label>
+      </div>
+
+      <div id="info-panel">
+        <p class="hint">Click a node or edge for details</p>
+      </div>
+
+      <div id="resource-table">
+        <h2>Resources</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Resource</th>
+              <th>Build Demand</th>
+              <th>Production</th>
+              <th>Contract</th>
+            </tr>
+          </thead>
+          <tbody id="resource-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div id="cy"></div>
+  </div>
+  <div id="tooltip"></div>
+  <script src="app.js"></script>
+</body>
+</html>
