@@ -13554,13 +13554,13 @@
     "PWR": [
       {
         "turn": 1,
-        "value": 12,
-        "remaining_collections": 3
+        "value": 16,
+        "remaining_collections": 4
       },
       {
         "turn": 2,
-        "value": 8,
-        "remaining_collections": 2
+        "value": 12,
+        "remaining_collections": 3
       },
       {
         "turn": 3,
@@ -13574,8 +13574,8 @@
       },
       {
         "turn": 5,
-        "value": 4,
-        "remaining_collections": 1
+        "value": 8,
+        "remaining_collections": 2
       },
       {
         "turn": 6,
@@ -15730,7 +15730,6 @@
         "max_final": 10,
         "total_bought": 10769,
         "total_sold": 14455,
-        "net_flow": -3686,
         "total_buy_cost": 57468,
         "total_sell_revenue": 84680,
         "futures_debt": 12127,
@@ -15773,7 +15772,6 @@
         "max_final": 10,
         "total_bought": 1315,
         "total_sold": 5914,
-        "net_flow": -4599,
         "total_buy_cost": 6682,
         "total_sell_revenue": 31851,
         "futures_debt": 0,
@@ -15816,7 +15814,6 @@
         "max_final": 10,
         "total_bought": 24538,
         "total_sold": 26221,
-        "net_flow": -1683,
         "total_buy_cost": 129468,
         "total_sell_revenue": 166999,
         "futures_debt": 0,
@@ -15859,7 +15856,6 @@
         "max_final": 10,
         "total_bought": 3815,
         "total_sold": 12086,
-        "net_flow": -8271,
         "total_buy_cost": 19887,
         "total_sell_revenue": 65494,
         "futures_debt": 19887,
@@ -15902,7 +15898,6 @@
         "max_final": 10,
         "total_bought": 11703,
         "total_sold": 8545,
-        "net_flow": 3158,
         "total_buy_cost": 65656,
         "total_sell_revenue": 55981,
         "futures_debt": 0,
@@ -15945,7 +15940,6 @@
         "max_final": 10,
         "total_bought": 12369,
         "total_sold": 8473,
-        "net_flow": 3896,
         "total_buy_cost": 71300,
         "total_sell_revenue": 58072,
         "futures_debt": 71300,
@@ -15988,7 +15982,6 @@
         "max_final": 10,
         "total_bought": 4868,
         "total_sold": 6103,
-        "net_flow": -1235,
         "total_buy_cost": 25981,
         "total_sell_revenue": 34508,
         "futures_debt": 25981,
@@ -16031,7 +16024,6 @@
         "max_final": 10,
         "total_bought": 65724,
         "total_sold": 94533,
-        "net_flow": -28809,
         "total_buy_cost": 297163,
         "total_sell_revenue": 356002,
         "futures_debt": 0,
@@ -16074,7 +16066,6 @@
         "max_final": 10,
         "total_bought": 20256,
         "total_sold": 6157,
-        "net_flow": 14099,
         "total_buy_cost": 134039,
         "total_sell_revenue": 43615,
         "futures_debt": 102007,

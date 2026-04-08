@@ -549,24 +549,30 @@ function renderMarketDynamics() {
         const deltaClass = delta >= 0 ? "positive" : "negative";
         const deltaSign = delta >= 0 ? "+" : "";
         const dot = `<span class="resource-dot" style="background:${RESOURCE_COLORS[r] || "#888"}"></span>`;
-        const marketImpact = s.total_sell_revenue - s.total_buy_cost;
-        const impactClass = marketImpact >= 0 ? "positive" : "negative";
-        const impactSign = marketImpact >= 0 ? "+" : "";
         const futuresPaid = s.futures_debt || 0;
-        const netFlow = s.net_flow;
-        const netSign = netFlow > 0 ? "+" : "";
+        const futuresUnits = s.futures_units || 0;
+        // Display "Bought" excludes futures (shown in its own column)
+        const boughtUnits = s.total_bought - futuresUnits;
+        const boughtCash = s.total_buy_cost - futuresPaid;
+        // Net cash flow = sold - everything bought (market + bills + futures)
+        const netFlowCash = s.total_sell_revenue - s.total_buy_cost;
+        const netClass = netFlowCash >= 0 ? "positive" : "negative";
+        const netSignCash = netFlowCash >= 0 ? "+" : "";
+        // Net units (sold - bought, includes everything)
+        const netUnits = boughtUnits - s.total_sold;
+        const unitSign = netUnits > 0 ? "+" : "";
         return `<tr>
           <td>${dot}<strong>${r}</strong></td>
           <td>$${s.avg_starting_price}</td>
           <td>$${s.avg_final_price}</td>
           <td class="${deltaClass}">${deltaSign}${delta}</td>
-          <td>${valFmt(s.total_bought)}</td>
+          <td>${valFmt(boughtUnits)}</td>
           <td>${valFmt(s.total_sold)}</td>
-          <td>${netSign}${valFmt(netFlow)}</td>
-          <td>${cashFmt(s.total_buy_cost)}</td>
+          <td>${unitSign}${valFmt(netUnits)}</td>
+          <td>${cashFmt(boughtCash)}</td>
           <td>${cashFmt(s.total_sell_revenue)}</td>
           <td>${futuresPaid > 0 ? `<span class="negative">${cashFmt(futuresPaid)}</span>` : "-"}</td>
-          <td class="${impactClass}">${impactSign}${cashFmt(marketImpact)}</td>
+          <td class="${netClass}">${netSignCash}${cashFmt(netFlowCash)}</td>
         </tr>`;
       })
       .join("");

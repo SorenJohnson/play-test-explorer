@@ -327,6 +327,7 @@ def analyze_market_dynamics(sim_files: list[Path]) -> dict:
         fut_units = futures_units_bought.get(r, 0)
         fut_debt = futures_debt_per_resource.get(r, 0)
 
+        # Bought / sold include market + bills, futures kept separate for display
         total_bought = market_bought + bill_owed_units + fut_units
         total_sold = market_sold + bill_earned_units
         total_buy_cost = market_buy_cost + bill_debt_cash + fut_debt
@@ -338,13 +339,15 @@ def analyze_market_dynamics(sim_files: list[Path]) -> dict:
             "avg_final_price": round(sum(finals) / len(finals), 2) if finals else 0,
             "min_final": min(finals) if finals else 0,
             "max_final": max(finals) if finals else 0,
+            # Bought / sold counts and cash exclude futures (futures are separate)
             "total_bought": total_bought,
             "total_sold": total_sold,
-            "net_flow": total_bought - total_sold,
             "total_buy_cost": total_buy_cost,
             "total_sell_revenue": total_sell_revenue,
+            # Futures settlement debt (forced buys at settlements)
             "futures_debt": fut_debt,
             "futures_units": fut_units,
+            # Component breakdowns
             "market_bought": market_bought,
             "market_sold": market_sold,
             "bill_earned_units": bill_earned_units,
