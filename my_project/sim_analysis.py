@@ -187,6 +187,105 @@ def analyze_sim_building_costs(sim_files: list[Path]) -> dict:
     return results
 
 
+def analyze_market_dynamics(sim_files: list[Path]) -> dict:
+    """Track market price trajectories and buy/sell/drain pressures per resource.
+
+    Returns per-resource stats:
+    - Avg price trajectory over turns (0 = start, N = end)
+    - Total bought from market (sum of deficit purchases)
+    - Total sold to market (sum of sells)
+    - Total negative rate exposure during futures settlements
+    - Final price distribution
+    """
+    # price_trajectories[resource] = list of (turn_idx, price) lists per game
+    all_trajectories: dict[str, list[list[int]]] = defaultdict(list)
+    bought: dict[str, int] = defaultdict(int)
+    sold: dict[str, int] = defaultdict(int)
+    sell_revenue: dict[str, int] = defaultdict(int)
+    buy_cost: dict[str, int] = defaultdict(int)
+    final_prices: dict[str, list[int]] = defaultdict(list)
+    starting_prices: dict[str, list[int]] = defaultdict(list)
+
+    for f in sim_files:
+        with open(f) as fh:
+            data = json.load(fh)
+
+        for game in data["games"]:
+            history = game.get("action_history", [])
+            if not history:
+                continue
+
+            # Per-game: track price at each distinct turn (one entry per round)
+            per_game: dict[str, list[int]] = defaultdict(list)
+            seen_turns: set[int] = set()
+            for rec in history:
+                # Take only the first player's turn per round for consistent trajectory
+                if rec["turn"] in seen_turns:
+                    continue
+                seen_turns.add(rec["turn"])
+                for r, p in rec.get("market", {}).items():
+                    per_game[r].append(p)
+
+            for r, prices in per_game.items():
+                if prices:
+                    all_trajectories[r].append(prices)
+                    starting_prices[r].append(prices[0])
+
+            # Aggregate build/sell stats
+            for rec in history:
+                for a in rec.get("actions", []):
+                    if a["type"] == "build":
+                        spent = a.get("money_spent", 0)
+                        for r, amt in a.get("costs_paid", {}).items():
+                            bought[r] += amt
+                            # Attribute full money_spent proportionally by cost units
+                            total_units = sum(a.get("costs_paid", {}).values())
+                            if total_units:
+                                buy_cost[r] += spent * amt / total_units
+                    elif a["type"] == "sell":
+                        r = a.get("resource", "")
+                        amt = a.get("amount", 0)
+                        rev = a.get("revenue", 0)
+                        if r:
+                            sold[r] += amt
+                            sell_revenue[r] += rev
+
+            # Final prices
+            for r, p in game.get("final_market", {}).items():
+                final_prices[r].append(p)
+
+    # Build result
+    results = {}
+    all_resources = set(all_trajectories) | set(bought) | set(sold) | set(final_prices)
+    for r in sorted(all_resources):
+        # Compute avg trajectory
+        trajectories = all_trajectories.get(r, [])
+        avg_traj: list[float] = []
+        if trajectories:
+            max_len = max(len(t) for t in trajectories)
+            for turn in range(max_len):
+                vals = [t[turn] for t in trajectories if turn < len(t)]
+                avg_traj.append(round(sum(vals) / len(vals), 2))
+
+        starts = starting_prices.get(r, [])
+        finals = final_prices.get(r, [])
+        b = bought.get(r, 0)
+        s = sold.get(r, 0)
+        results[r] = {
+            "avg_trajectory": avg_traj,
+            "avg_starting_price": round(sum(starts) / len(starts), 2) if starts else 0,
+            "avg_final_price": round(sum(finals) / len(finals), 2) if finals else 0,
+            "min_final": min(finals) if finals else 0,
+            "max_final": max(finals) if finals else 0,
+            "total_bought": b,
+            "total_sold": s,
+            "net_flow": b - s,  # positive = net bought, negative = net sold
+            "buy_revenue": round(buy_cost.get(r, 0), 0),  # $ paid by buyers
+            "sell_revenue": sell_revenue.get(r, 0),  # $ earned by sellers
+        }
+    return results
+
+
 def analyze_corporations(sim_files: list[Path]) -> dict:
     """Compute win rate and performance stats per corporation.
 

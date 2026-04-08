@@ -27,6 +27,7 @@ async function init() {
 
   renderStrategyChart();
   if (analysisData) {
+    renderMarketDynamics();
     renderCorporationTable();
     renderBuildingValueTable();
     renderContractCostChart();
@@ -528,6 +529,75 @@ const CORP_STARTING_RATES = {
   "Yoshimi Robotics": { PWR: -2, FE: 2 },
   "Reclamation Inc.": { PWR: 1, SI: 1, C: 1, H2O: -1 },
 };
+
+function renderMarketDynamics() {
+  const data = analysisData.market_dynamics;
+  if (!data) return;
+
+  // Line chart: avg trajectory per resource over turns
+  const resources = Object.keys(data);
+  const maxLen = Math.max(...resources.map((r) => data[r].avg_trajectory.length));
+  const labels = Array.from({ length: maxLen }, (_, i) => `Turn ${i + 1}`);
+
+  const datasets = resources.map((r) => ({
+    label: r,
+    data: data[r].avg_trajectory,
+    borderColor: RESOURCE_COLORS[r] || "#888",
+    backgroundColor: "transparent",
+    borderWidth: 2,
+    tension: 0.2,
+    pointRadius: 0,
+  }));
+
+  new Chart(document.getElementById("market-trajectory-chart"), {
+    type: "line",
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { labels: { color: "#8b949e", font: { size: 11 } } },
+      },
+      scales: {
+        x: {
+          title: { display: true, text: "Game Turn", color: "#8b949e" },
+          ticks: { color: "#8b949e", maxTicksLimit: 12 },
+          grid: { color: "#21262d" },
+        },
+        y: {
+          title: { display: true, text: "Avg Market Price ($)", color: "#8b949e" },
+          ticks: { color: "#8b949e" },
+          grid: { color: "#21262d" },
+        },
+      },
+    },
+  });
+
+  // Table: per-resource buy/sell flow stats
+  const tbody = document.querySelector("#market-dynamics-table tbody");
+  const sorted = Object.entries(data).sort(
+    (a, b) => b[1].avg_final_price - a[1].avg_final_price
+  );
+
+  tbody.innerHTML = sorted
+    .map(([r, s]) => {
+      const delta = (s.avg_final_price - s.avg_starting_price).toFixed(1);
+      const deltaClass = delta >= 0 ? "positive" : "negative";
+      const deltaSign = delta >= 0 ? "+" : "";
+      const dot = `<span class="resource-dot" style="background:${RESOURCE_COLORS[r] || "#888"}"></span>`;
+      return `<tr>
+        <td>${dot}<strong>${r}</strong></td>
+        <td>$${s.avg_starting_price}</td>
+        <td>$${s.avg_final_price}</td>
+        <td class="${deltaClass}">${deltaSign}${delta}</td>
+        <td>${s.total_bought.toLocaleString()}</td>
+        <td>${s.total_sold.toLocaleString()}</td>
+        <td>${s.net_flow > 0 ? "+" : ""}${s.net_flow.toLocaleString()}</td>
+        <td>$${s.buy_revenue.toLocaleString()}</td>
+        <td>$${s.sell_revenue.toLocaleString()}</td>
+      </tr>`;
+    })
+    .join("");
+}
 
 function renderCorporationTable() {
   const data = analysisData.corporations;

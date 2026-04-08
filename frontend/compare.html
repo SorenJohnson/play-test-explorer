@@ -27,6 +27,33 @@
     </section>
 
     <!-- Contract cost box plots -->
+    <!-- Market dynamics -->
+    <section>
+      <h2>Market Dynamics</h2>
+      <p class="subtitle">How each resource's market price moved over the game, and the buy/sell pressure driving it.</p>
+      <div class="chart-container wide" style="min-height:400px">
+        <canvas id="market-trajectory-chart"></canvas>
+      </div>
+      <div class="table-scroll" style="margin-top:16px">
+        <table id="market-dynamics-table">
+          <thead>
+            <tr>
+              <th>Resource</th>
+              <th>Start $</th>
+              <th>End $</th>
+              <th>Δ</th>
+              <th>Bought</th>
+              <th>Sold</th>
+              <th>Net Flow</th>
+              <th>$ Paid</th>
+              <th>$ Earned</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
     <!-- Corporation performance -->
     <section>
       <h2>Corporation Performance</h2>
