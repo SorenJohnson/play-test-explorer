@@ -206,9 +206,10 @@ def analyze_market_dynamics(sim_files: list[Path]) -> dict:
     final_prices: dict[str, list[int]] = defaultdict(list)
     starting_prices: dict[str, list[int]] = defaultdict(list)
 
-    # PWR power bill economy (aggregate across all games)
+    # Event-driven economy (aggregate across all games)
     pwr_earned = 0  # total earned at power bills from positive PWR
-    pwr_debt = 0  # total debt incurred from negative PWR
+    pwr_debt = 0  # total debt incurred from negative PWR at power bills
+    futures_debt = 0  # total debt incurred from negative non-PWR rates at settlements
 
     for f in sim_files:
         with open(f) as fh:
@@ -258,9 +259,10 @@ def analyze_market_dynamics(sim_files: list[Path]) -> dict:
             for r, p in game.get("final_market", {}).items():
                 final_prices[r].append(p)
 
-            # PWR economy stats from this game
+            # Event-driven economy stats from this game
             pwr_earned += game.get("pwr_total_earned", 0)
             pwr_debt += game.get("pwr_total_debt", 0)
+            futures_debt += game.get("futures_total_debt", 0)
 
     # Build result
     results = {}
@@ -294,10 +296,13 @@ def analyze_market_dynamics(sim_files: list[Path]) -> dict:
 
     return {
         "resources": results,
-        "pwr_economy": {
+        "event_economy": {
+            "power_bill_earned": pwr_earned,
+            "power_bill_debt": pwr_debt,
+            "futures_settlement_debt": futures_debt,
             "total_earned": pwr_earned,
-            "total_debt": pwr_debt,
-            "net_impact": pwr_earned - pwr_debt,
+            "total_debt": pwr_debt + futures_debt,
+            "net_impact": pwr_earned - pwr_debt - futures_debt,
         },
     }
 

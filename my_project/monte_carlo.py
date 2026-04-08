@@ -52,6 +52,7 @@ class GameSummary:
     starting_rates: list[dict[str, int]] = field(default_factory=list)
     pwr_total_earned: int = 0
     pwr_total_debt: int = 0
+    futures_total_debt: int = 0
 
 
 @dataclass
@@ -131,6 +132,7 @@ def _summarize_game(state: GameState) -> GameSummary:
         starting_rates=starting_rates,
         pwr_total_earned=state.pwr_total_earned,
         pwr_total_debt=state.pwr_total_debt,
+        futures_total_debt=state.futures_total_debt,
     )
 
 
@@ -233,6 +235,7 @@ def results_to_dict(results: MonteCarloResults) -> dict:
             "action_history": g.action_history,
             "pwr_total_earned": g.pwr_total_earned,
             "pwr_total_debt": g.pwr_total_debt,
+            "futures_total_debt": g.futures_total_debt,
             # Keep player 0 at top level for backwards compat with single-player report
             "net_worth": g.final_net_worth[0],
             "money": g.final_money[0],

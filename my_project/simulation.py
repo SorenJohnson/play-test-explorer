@@ -267,9 +267,10 @@ class GameState:
     turn: int = 0
     event_idx: int = 0
     history: list[TurnRecord] = field(default_factory=list)
-    # PWR economy tracking (summed across all players across all power bills)
+    # Event-driven economy tracking (summed across all players)
     pwr_total_earned: int = 0  # cash earned from positive PWR at power bills
     pwr_total_debt: int = 0  # debt incurred from negative PWR at power bills
+    futures_total_debt: int = 0  # debt incurred from negative non-PWR rates at settlements
     max_turns: int = DEFAULT_MAX_TURNS
 
     def remaining_events(self) -> dict[EventType, int]:
@@ -648,6 +649,7 @@ def do_futures_settlement(state: GameState) -> None:
                 shortage = abs(rate)
                 cost = starting_prices[r] * shortage
                 player.debt += cost
+                state.futures_total_debt += cost
                 player.ledger.record_event_cost(r, cost, rate)
                 total_negatives[r] += shortage
 

@@ -468,7 +468,7 @@ function renderMarketDynamics() {
   const md = analysisData.market_dynamics;
   if (!md) return;
   const data = md.resources || md;  // fallback for old format
-  const pwrEconomy = md.pwr_economy;
+  const eventEconomy = md.event_economy || md.pwr_economy;
 
   // Line chart: avg trajectory per resource over turns
   const resources = Object.keys(data);
@@ -539,31 +539,37 @@ function renderMarketDynamics() {
     })
     .join("");
 
-  // PWR economy (separate from market since PWR isn't traded)
-  const pwrEl = document.getElementById("pwr-economy");
-  if (pwrEl && pwrEconomy) {
-    const net = pwrEconomy.net_impact;
+  // Event-driven economy (power bills + futures settlements — not on market)
+  const ecoEl = document.getElementById("event-economy");
+  if (ecoEl && eventEconomy) {
+    const net = eventEconomy.net_impact;
     const netClass = net >= 0 ? "positive" : "negative";
     const netSign = net >= 0 ? "+" : "";
-    pwrEl.innerHTML = `
+    const earned = eventEconomy.power_bill_earned ?? eventEconomy.total_earned;
+    const pwrDebt = eventEconomy.power_bill_debt ?? eventEconomy.total_debt;
+    const futuresDebt = eventEconomy.futures_settlement_debt ?? 0;
+    ecoEl.innerHTML = `
       <div style="background:#161b22; border:1px solid #30363d; border-radius:6px; padding:16px;">
-        <h3 style="color:#58a6ff; margin-bottom:8px; font-size:0.95rem;">PWR Economy (Power Bills)</h3>
+        <h3 style="color:#58a6ff; margin-bottom:8px; font-size:0.95rem;">Event Economy (Power Bills + Futures Settlements)</h3>
         <p style="color:#8b949e; font-size:0.75rem; margin-bottom:12px;">
-          PWR isn't traded on the market. Instead, it's collected at power bill events:
-          positive PWR earns <code>rate × price</code>, negative PWR adds it to debt.
-          PWR_ADJUST events shift the market based on the active player's rate.
+          Power bills and futures settlements charge debt for negative rates without trading on the market.
+          Power bills also pay earnings for positive PWR. Settlements only charge debt — they never earn.
         </p>
-        <div style="display:flex; gap:24px; font-size:0.85rem;">
+        <div style="display:flex; gap:24px; flex-wrap:wrap; font-size:0.85rem;">
           <div>
-            <div class="detail-label">Earned (positive PWR)</div>
-            <div class="detail-value positive">+$${pwrEconomy.total_earned.toLocaleString()}</div>
+            <div class="detail-label">Power Bill Earnings (+PWR)</div>
+            <div class="detail-value positive">+$${earned.toLocaleString()}</div>
           </div>
           <div>
-            <div class="detail-label">Debt (negative PWR)</div>
-            <div class="detail-value negative">-$${pwrEconomy.total_debt.toLocaleString()}</div>
+            <div class="detail-label">Power Bill Debt (-PWR)</div>
+            <div class="detail-value negative">-$${pwrDebt.toLocaleString()}</div>
           </div>
           <div>
-            <div class="detail-label">Net PWR Impact</div>
+            <div class="detail-label">Futures Settlement Debt</div>
+            <div class="detail-value negative">-$${futuresDebt.toLocaleString()}</div>
+          </div>
+          <div>
+            <div class="detail-label">Net Event Impact</div>
             <div class="detail-value ${netClass}" style="font-size:1.1rem; font-weight:700;">
               ${netSign}$${net.toLocaleString()}
             </div>
