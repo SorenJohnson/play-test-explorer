@@ -543,49 +543,86 @@ function renderMarketDynamics() {
       cashFmt = (v) => "$" + (v / divisor).toFixed(2);
     }
 
-    tbody.innerHTML = sorted
-      .map(([r, s]) => {
-        const delta = (s.avg_final_price - s.avg_starting_price).toFixed(1);
-        const deltaClass = delta >= 0 ? "positive" : "negative";
-        const deltaSign = delta >= 0 ? "+" : "";
-        const dot = `<span class="resource-dot" style="background:${RESOURCE_COLORS[r] || "#888"}"></span>`;
-        const futuresPaid = s.futures_debt || 0;
-        const futuresUnits = s.futures_units || 0;
-        // Bought excludes futures (futures shown in its own column)
-        const boughtUnits = s.total_bought - futuresUnits;
-        const boughtCash = s.total_buy_cost - futuresPaid;
-        // Net cash flow includes everything: sold - bought - futures
-        const netFlowCash = s.total_sell_revenue - s.total_buy_cost;
-        const netClass = netFlowCash >= 0 ? "positive" : "negative";
-        const netSignCash = netFlowCash >= 0 ? "+" : "";
-        // Net units (sold - bought - futures)
-        const netUnits = s.total_sold - boughtUnits - futuresUnits;
-        const unitClass = netUnits >= 0 ? "positive" : "negative";
-        const unitSign = netUnits > 0 ? "+" : "";
-        // Average prices per transaction type
-        const avgBuy = boughtUnits > 0 ? boughtCash / boughtUnits : 0;
-        const avgSell = s.total_sold > 0 ? s.total_sell_revenue / s.total_sold : 0;
-        const avgFut = futuresUnits > 0 ? futuresPaid / futuresUnits : 0;
-        const fmtAvg = (v) => v > 0 ? `$${v.toFixed(2)}` : "-";
-        return `<tr>
-          <td>${dot}<strong>${r}</strong></td>
-          <td>$${s.avg_starting_price}</td>
-          <td>$${s.avg_final_price}</td>
-          <td class="${deltaClass}">${deltaSign}${delta}</td>
-          <td>${valFmt(boughtUnits)}</td>
-          <td>${valFmt(s.total_sold)}</td>
-          <td>${valFmt(futuresUnits)}</td>
-          <td class="${unitClass}">${unitSign}${valFmt(netUnits)}</td>
-          <td>${boughtCash > 0 ? `<span class="negative">${cashFmt(boughtCash)}</span>` : "-"}</td>
-          <td>${s.total_sell_revenue > 0 ? `<span class="positive">${cashFmt(s.total_sell_revenue)}</span>` : "-"}</td>
-          <td>${futuresPaid > 0 ? `<span class="negative">${cashFmt(futuresPaid)}</span>` : "-"}</td>
-          <td>${fmtAvg(avgBuy)}</td>
-          <td>${fmtAvg(avgSell)}</td>
-          <td>${fmtAvg(avgFut)}</td>
-          <td class="${netClass}">${netSignCash}${cashFmt(netFlowCash)}</td>
-        </tr>`;
-      })
-      .join("");
+    // Aggregate totals
+    let totBoughtUnits = 0,
+      totSoldUnits = 0,
+      totFutUnits = 0;
+    let totBoughtCash = 0,
+      totSoldCash = 0,
+      totFutCash = 0;
+
+    const rowsHtml = sorted.map(([r, s]) => {
+      const delta = (s.avg_final_price - s.avg_starting_price).toFixed(1);
+      const deltaClass = delta >= 0 ? "positive" : "negative";
+      const deltaSign = delta >= 0 ? "+" : "";
+      const dot = `<span class="resource-dot" style="background:${RESOURCE_COLORS[r] || "#888"}"></span>`;
+      const futuresPaid = s.futures_debt || 0;
+      const futuresUnits = s.futures_units || 0;
+      const boughtUnits = s.total_bought - futuresUnits;
+      const boughtCash = s.total_buy_cost - futuresPaid;
+      const netFlowCash = s.total_sell_revenue - s.total_buy_cost;
+      const netClass = netFlowCash >= 0 ? "positive" : "negative";
+      const netSignCash = netFlowCash >= 0 ? "+" : "";
+      const netUnits = s.total_sold - boughtUnits - futuresUnits;
+      const unitClass = netUnits >= 0 ? "positive" : "negative";
+      const unitSign = netUnits > 0 ? "+" : "";
+      const avgBuy = boughtUnits > 0 ? boughtCash / boughtUnits : 0;
+      const avgSell = s.total_sold > 0 ? s.total_sell_revenue / s.total_sold : 0;
+      const avgFut = futuresUnits > 0 ? futuresPaid / futuresUnits : 0;
+      const fmtAvg = (v) => (v > 0 ? `$${v.toFixed(2)}` : "-");
+
+      totBoughtUnits += boughtUnits;
+      totSoldUnits += s.total_sold;
+      totFutUnits += futuresUnits;
+      totBoughtCash += boughtCash;
+      totSoldCash += s.total_sell_revenue;
+      totFutCash += futuresPaid;
+
+      return `<tr>
+        <td>${dot}<strong>${r}</strong></td>
+        <td>$${s.avg_starting_price}</td>
+        <td>$${s.avg_final_price}</td>
+        <td class="${deltaClass}">${deltaSign}${delta}</td>
+        <td>${valFmt(boughtUnits)}</td>
+        <td>${valFmt(s.total_sold)}</td>
+        <td>${valFmt(futuresUnits)}</td>
+        <td class="${unitClass}">${unitSign}${valFmt(netUnits)}</td>
+        <td>${boughtCash > 0 ? `<span class="negative">${cashFmt(boughtCash)}</span>` : "-"}</td>
+        <td>${s.total_sell_revenue > 0 ? `<span class="positive">${cashFmt(s.total_sell_revenue)}</span>` : "-"}</td>
+        <td>${futuresPaid > 0 ? `<span class="negative">${cashFmt(futuresPaid)}</span>` : "-"}</td>
+        <td>${fmtAvg(avgBuy)}</td>
+        <td>${fmtAvg(avgSell)}</td>
+        <td>${fmtAvg(avgFut)}</td>
+        <td class="${netClass}">${netSignCash}${cashFmt(netFlowCash)}</td>
+      </tr>`;
+    });
+
+    // Totals row
+    const totNetUnits = totSoldUnits - totBoughtUnits - totFutUnits;
+    const totNetCash = totSoldCash - totBoughtCash - totFutCash;
+    const totNetUnitClass = totNetUnits >= 0 ? "positive" : "negative";
+    const totNetCashClass = totNetCash >= 0 ? "positive" : "negative";
+    const totUnitSign = totNetUnits > 0 ? "+" : "";
+    const totCashSign = totNetCash > 0 ? "+" : "";
+    rowsHtml.push(`<tr style="border-top:2px solid #30363d; font-weight:700; background:#161b22;">
+      <td><strong>TOTAL</strong></td>
+      <td>—</td>
+      <td>—</td>
+      <td>—</td>
+      <td>${valFmt(totBoughtUnits)}</td>
+      <td>${valFmt(totSoldUnits)}</td>
+      <td>${valFmt(totFutUnits)}</td>
+      <td class="${totNetUnitClass}">${totUnitSign}${valFmt(totNetUnits)}</td>
+      <td><span class="negative">${cashFmt(totBoughtCash)}</span></td>
+      <td><span class="positive">${cashFmt(totSoldCash)}</span></td>
+      <td><span class="negative">${cashFmt(totFutCash)}</span></td>
+      <td>—</td>
+      <td>—</td>
+      <td>—</td>
+      <td class="${totNetCashClass}">${totCashSign}${cashFmt(totNetCash)}</td>
+    </tr>`);
+
+    tbody.innerHTML = rowsHtml.join("");
   }
 
   // Initial render
