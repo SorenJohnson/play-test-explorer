@@ -22,11 +22,16 @@ from my_project.simulation import (
     swap_pool_card,
 )
 
+# Valuation constants
+SELL_VALUE_MULTIPLIER = 1.5  # positive rate value = current sell price × this
+
 
 # --- Pool Swapping ---
 
-def _score_card(card, player: Player, market) -> float:
-    """Rough score of how valuable a card is to this player."""
+def _score_card(card, player: Player, state) -> float:
+    """Rough score of how valuable a card is to this player (for greedy pool swap)."""
+    market = state.market
+
     # Value of building it
     build_value = 0.0
     for ra in card.rates:
@@ -52,10 +57,17 @@ def _score_card(card, player: Player, market) -> float:
             if rate > 0:
                 sell_value = max(sell_value, rate * market.price(sell_res))
 
-    # Contract value
+    # Contract card value = best affordable contract score
     contract_value = 0.0
     if card.can_fulfill_contract:
-        contract_value = 10.0  # base value of having a contract card
+        for contract in state.available_contracts:
+            can_afford = all(
+                player.rate(req.resource) >= req.amount for req in contract.requirements
+            )
+            if can_afford:
+                score = _score_contract(state, player, contract)
+                if score is not None:
+                    contract_value = max(contract_value, score)
 
     return max(build_value - build_cost, sell_value, contract_value)
 
@@ -70,9 +82,9 @@ def _greedy_pool_swap(state: GameState, player: Player) -> None:
         best_gain = 0.0
 
         for hi, hand_card in enumerate(player.hand):
-            hand_score = _score_card(hand_card, player, state.market)
+            hand_score = _score_card(hand_card, player, state)
             for pi, pool_card in enumerate(state.pool):
-                pool_score = _score_card(pool_card, player, state.market)
+                pool_score = _score_card(pool_card, player, state)
                 gain = pool_score - hand_score
                 if gain > best_gain:
                     best_gain = gain
@@ -243,35 +255,57 @@ def _score_sell(state: GameState, player: Player, card) -> float:
 
 
 def _score_contract(state: GameState, player: Player, contract) -> float | None:
-    """Score a contract: $50 reward minus value of rates permanently spent."""
+    """Score a contract: reward minus opportunity cost of rates spent (sell value)."""
     for req in contract.requirements:
         if player.rate(req.resource) < req.amount:
             return None
 
-    rates_lost_value = 0.0
+    opportunity_cost = 0.0
     for req in contract.requirements:
-        price = state.market.price(req.resource)
-        rates_lost_value += _rate_value(req.resource, price) * req.amount
+        sell_value = state.market.price(req.resource) * SELL_VALUE_MULTIPLIER
+        opportunity_cost += sell_value * req.amount
 
-    return contract.reward - rates_lost_value
+    return contract.reward - opportunity_cost
 
 
 # --- Time-dependent rate valuation ---
+
+
+def _best_contract_value_per_unit(resource: Resource, state: GameState) -> float:
+    """For each contract in the pool that uses this resource,
+    compute $/unit. Return the best (highest) value per unit.
+
+    Example: "3 FOOD" contract → $50/3 = $16.67/FOOD unit.
+    """
+    best = 0.0
+    for contract in state.available_contracts:
+        total_units = sum(req.amount for req in contract.requirements)
+        if total_units == 0:
+            continue
+        uses_resource = any(req.resource == resource for req in contract.requirements)
+        if uses_resource:
+            value_per_unit = contract.reward / total_units
+            best = max(best, value_per_unit)
+    return best
+
 
 def _positive_rate_value(resource: Resource, state: GameState) -> float:
     """Value of +1 positive rate.
 
     - PWR: earns at every power bill (including end-game). Passive income.
-    - Other: only realized by selling (one-shot at current market price).
-      We assume a single sell at current price.
+    - Other: max of:
+      - sell value × multiplier (accounts for potential multi-sell)
+      - best contract value per unit (if any pool contract uses this resource)
     """
     price = state.market.price(resource)
     if resource == Resource.PWR:
         remaining = state.remaining_events()
         collections = remaining.get(EventType.POWER_BILL, 0) + 1  # +1 for end-game
         return price * collections
-    else:
-        return float(price)  # one-shot sell value
+
+    sell_value = price * SELL_VALUE_MULTIPLIER
+    contract_value = _best_contract_value_per_unit(resource, state)
+    return max(sell_value, contract_value)
 
 
 def _negative_rate_cost(resource: Resource, state: GameState) -> float:
@@ -306,17 +340,22 @@ def _smart_score_build_value(cards, state: GameState, player: Player) -> float:
 
 
 def _smart_score_contract(state: GameState, player: Player, contract) -> float | None:
-    """Score contract: $50 reward minus value of positive rates spent."""
+    """Score contract: reward minus opportunity cost of rates spent.
+
+    Opportunity cost = what you'd otherwise get from selling those rates,
+    NOT the contract value (which would double-count).
+    """
     for req in contract.requirements:
         if player.rate(req.resource) < req.amount:
             return None
 
-    rates_lost_value = 0.0
+    opportunity_cost = 0.0
     for req in contract.requirements:
-        # Rates spent on a contract are positive rates going away
-        rates_lost_value += _positive_rate_value(req.resource, state) * req.amount
+        # If you don't fulfill this contract, you'd sell the rates instead
+        sell_value = state.market.price(req.resource) * SELL_VALUE_MULTIPLIER
+        opportunity_cost += sell_value * req.amount
 
-    return contract.reward - rates_lost_value
+    return contract.reward - opportunity_cost
 
 
 def _smart_score_card(card, player: Player, state: GameState) -> float:
@@ -342,7 +381,17 @@ def _smart_score_card(card, player: Player, state: GameState) -> float:
             if rate > 0:
                 sell_value = max(sell_value, rate * state.market.price(sell_res))
 
-    contract_value = 10.0 if card.can_fulfill_contract else 0.0
+    # Contract card value = best contract we could fulfill with current rates
+    contract_value = 0.0
+    if card.can_fulfill_contract:
+        for contract in state.available_contracts:
+            can_afford = all(
+                player.rate(req.resource) >= req.amount for req in contract.requirements
+            )
+            if can_afford:
+                score = _smart_score_contract(state, player, contract)
+                if score is not None:
+                    contract_value = max(contract_value, score)
 
     return max(build_value - build_cost, sell_value, contract_value)
 
