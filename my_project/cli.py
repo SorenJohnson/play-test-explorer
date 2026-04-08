@@ -193,7 +193,7 @@ def main() -> None:
     sim.add_argument("-m", "--money", type=int, default=20, help="Starting money")
     sim.add_argument("--market-pos", type=int, default=10, help="Starting market position (10=$5)")
     sim.add_argument("--randomize-market", action="store_true", help="Randomize starting prices")
-    sim.add_argument("-t", "--turns", type=int, default=6, help="Turns per player")
+    sim.add_argument("-t", "--turns", type=int, default=8, help="Turns per player")
     sim.add_argument("-s", "--strategy", choices=["greedy", "random", "smart"], default="greedy",
                      help="Default strategy for all players")
     sim.add_argument("--player-strategies", nargs="+", choices=["greedy", "random", "smart"],

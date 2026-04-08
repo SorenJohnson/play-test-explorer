@@ -67,11 +67,10 @@ class TestEventDeck:
         assert len(deck) == 45
 
     def test_deck_composition(self):
-        deck = build_event_deck(15, 1)
-        assert deck.count(EventType.POWER_BILL) == 3
-        assert deck.count(EventType.DEBT_COLLECTION) == 2
-        assert deck.count(EventType.FUTURES_SETTLEMENT) == 2
-        assert deck.count(EventType.PWR_ADJUST) == 3
+        deck = build_event_deck(8, 3)
+        assert 3 <= deck.count(EventType.POWER_BILL) <= 4
+        assert 2 <= deck.count(EventType.DEBT_COLLECTION) <= 4
+        assert 3 <= deck.count(EventType.FUTURES_SETTLEMENT) <= 4
 
     def test_small_deck_truncates(self):
         deck = build_event_deck(2, 1)  # only 2 slots

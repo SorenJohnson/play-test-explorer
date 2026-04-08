@@ -149,19 +149,25 @@ class EventType(StrEnum):
 def build_event_deck(num_turns: int, num_players: int) -> list[EventType]:
     """Build a shuffled event deck with one card per player-turn.
 
-    Default composition:
-    - 3 power bills
-    - 2 debt collections
-    - 2 futures settlements
-    - 3 PWR adjustments
-    - rest are no-events
+    Composition (randomized within ranges):
+    - 3-4 power bills
+    - 2-4 debt collections
+    - 3-4 futures settlements
+    - 50% of remaining are PWR adjustments, rest are no-events
     """
     total = num_turns * num_players
     events: list[EventType] = []
-    events.extend([EventType.POWER_BILL] * 3)
-    events.extend([EventType.DEBT_COLLECTION] * 2)
-    events.extend([EventType.FUTURES_SETTLEMENT] * 2)
-    events.extend([EventType.PWR_ADJUST] * 3)
+    events.extend([EventType.POWER_BILL] * random.randint(3, 4))
+    events.extend([EventType.DEBT_COLLECTION] * random.randint(2, 4))
+    events.extend([EventType.FUTURES_SETTLEMENT] * random.randint(3, 4))
+
+    remaining = total - len(events)
+    if remaining > 0:
+        pwr_adjusts = remaining // 2
+        events.extend([EventType.PWR_ADJUST] * pwr_adjusts)
+        events.extend([EventType.NO_EVENT] * (remaining - pwr_adjusts))
+    else:
+        events = events[:total]
 
     remaining = total - len(events)
     if remaining > 0:
@@ -242,7 +248,7 @@ class GameState:
     turn: int = 0
     event_idx: int = 0
     history: list[TurnRecord] = field(default_factory=list)
-    max_turns: int = 6
+    max_turns: int = 8
 
     def remaining_events(self) -> dict[EventType, int]:
         """Count remaining events from current position in event deck."""
@@ -260,7 +266,7 @@ class GameState:
         start_money: int = 20,
         start_market_pos: int = 10,
         randomize_market: bool = False,
-        max_turns: int = 6,
+        max_turns: int = 8,
         corporation_rates: list[dict[Resource, int]] | None = None,
     ) -> GameState:
         market = Market.create(start_market_pos)
@@ -700,7 +706,7 @@ def run_game(
     start_money: int = 20,
     start_market_pos: int = 10,
     randomize_market: bool = False,
-    max_turns: int = 6,
+    max_turns: int = 8,
     corporation_rates: list[dict[Resource, int]] | None = None,
     strategies: list | None = None,
 ) -> GameState:
