@@ -231,6 +231,25 @@ def test_deterministic_with_seed():
     ]
 
 
+def test_default_player_names():
+    """Without custom names, players keep the engine's Player_N defaults."""
+    game = PlayableGame(seed=42)
+    state = game.state_dict()
+    assert [p["name"] for p in state["players"]] == ["Player_1", "Player_2", "Player_3"]
+
+
+def test_custom_player_names():
+    """Custom names override the engine defaults; empty entries fall back."""
+    game = PlayableGame(seed=42, names=["Roland", "Alex", ""])
+    state = game.state_dict()
+    assert [p["name"] for p in state["players"]] == ["Roland", "Alex", "Player_3"]
+
+
+def test_custom_names_length_mismatch_raises():
+    with pytest.raises(ValueError):
+        PlayableGame(seed=42, names=["Only one"])
+
+
 def test_current_player_index_stable_across_begin():
     """begin_human_turn pre-advances event_idx internally. Public accessors
     (current_player_index, turn_number, round_number) must stay stable for the

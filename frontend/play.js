@@ -9,6 +9,13 @@ const RESOURCE_COLORS = {
 
 const RESOURCE_ORDER = ["PWR", "H2O", "FE", "C", "SI", "O2", "FOOD", "GLS", "ELX"];
 
+// Per-player identity colors. Distinct from #58a6ff (the active-state accent)
+// so "this is P1" and "this is highlighted" don't visually collide.
+const PLAYER_COLORS = ["#79c0ff", "#ffa657", "#56d364", "#c297ff"];
+function playerColor(idx) {
+  return PLAYER_COLORS[idx % PLAYER_COLORS.length];
+}
+
 const PY_FILES = [
   "__init__.py", "accounting.py", "models.py", "parsing.py",
   "play_adapter.py", "simulation.py", "strategies.py",
@@ -107,9 +114,17 @@ async function loadPythonSources() {
 // Last-used config so the New Game modal pre-fills with the previous settings.
 let lastGameConfig = {
   seats: ["human", "smart", "smart"],
+  names: ["Player_1", "Player_2", "Player_3"],
   rounds: 8,
   seed: null,
 };
+
+// Default name for a seat index — matches the engine's `Player_{i+1}` format
+// so a user who never edits the field gets the same display string the
+// backend would have produced anyway.
+function defaultSeatName(idx) {
+  return `Player_${idx + 1}`;
+}
 
 function startNewGame(config = null) {
   const cfg = config || lastGameConfig;
@@ -122,10 +137,13 @@ function startNewGame(config = null) {
     try { game.destroy(); } catch {}
     game = null;
   }
-  // Build the seats list as a Python literal. Each entry is a quoted string.
+  // Build seats and names as Python literals. Names are quoted with JSON to
+  // safely escape any user input.
   const seatsLiteral = "[" + cfg.seats.map((s) => `"${s}"`).join(", ") + "]";
+  const namesArr = (cfg.names || []).map((n, i) => n || defaultSeatName(i));
+  const namesLiteral = "[" + namesArr.map((n) => JSON.stringify(n)).join(", ") + "]";
   pyodide.runPython(
-    `game = PlayableGame(seed=${seed}, seats=${seatsLiteral}, max_turns=${cfg.rounds})`
+    `game = PlayableGame(seed=${seed}, seats=${seatsLiteral}, names=${namesLiteral}, max_turns=${cfg.rounds})`
   );
   game = pyodide.globals.get("game");
   turnLog.length = 0;
@@ -167,47 +185,65 @@ function populateNewGameForm(cfg) {
   numSeatsSelect.value = String(cfg.seats.length);
   document.getElementById("ng-rounds").value = String(cfg.rounds);
   document.getElementById("ng-seed").value = cfg.seed === null ? "" : String(cfg.seed);
-  renderSeatRows(cfg.seats);
+  renderSeatRows(cfg.seats, cfg.names || []);
   numSeatsSelect.onchange = () => {
     const n = parseInt(numSeatsSelect.value, 10);
-    const current = readSeatRows();
-    const next = Array.from({ length: n }, (_, i) =>
-      current[i] || (i === 0 ? "human" : "smart")
+    const { seats: curSeats, names: curNames } = readSeatRows();
+    const nextSeats = Array.from({ length: n }, (_, i) =>
+      curSeats[i] || (i === 0 ? "human" : "smart")
     );
-    renderSeatRows(next);
+    const nextNames = Array.from({ length: n }, (_, i) => curNames[i] || defaultSeatName(i));
+    renderSeatRows(nextSeats, nextNames);
   };
 }
 
-function renderSeatRows(seats) {
+function renderSeatRows(seats, names) {
   const wrap = document.getElementById("ng-seats-list");
   wrap.innerHTML = seats
-    .map(
-      (s, i) => `
+    .map((s, i) => {
+      const name = names[i] || defaultSeatName(i);
+      return `
     <div class="seat-row">
-      <span>P${i + 1}</span>
+      <input type="text" class="seat-name" data-seat-idx="${i}"
+             value="${escapeAttr(name)}" maxlength="20">
       <select data-seat-idx="${i}">
         <option value="human" ${s === "human" ? "selected" : ""}>Human</option>
         <option value="smart" ${s === "smart" ? "selected" : ""}>Smart AI</option>
         <option value="greedy" ${s === "greedy" ? "selected" : ""}>Greedy AI</option>
         <option value="random" ${s === "random" ? "selected" : ""}>Random AI</option>
       </select>
-    </div>`
-    )
+    </div>`;
+    })
     .join("");
 }
 
+// Escape a user string for safe insertion into an HTML attribute.
+function escapeAttr(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 function readSeatRows() {
-  return Array.from(document.querySelectorAll("#ng-seats-list select")).map(
+  const seats = Array.from(document.querySelectorAll("#ng-seats-list select")).map(
     (sel) => sel.value
   );
+  const names = Array.from(document.querySelectorAll("#ng-seats-list input.seat-name")).map(
+    (inp) => inp.value.trim()
+  );
+  return { seats, names };
 }
 
 function readNewGameConfig() {
-  const seats = readSeatRows();
+  const { seats, names } = readSeatRows();
+  // Fill any blank names with the seat default so the backend always gets a real string.
+  const filledNames = names.map((n, i) => n || defaultSeatName(i));
   const rounds = parseInt(document.getElementById("ng-rounds").value, 10) || 8;
   const seedRaw = document.getElementById("ng-seed").value.trim();
   const seed = seedRaw === "" ? null : parseInt(seedRaw, 10);
-  return { seats, rounds, seed: Number.isNaN(seed) ? null : seed };
+  return { seats, names: filledNames, rounds, seed: Number.isNaN(seed) ? null : seed };
 }
 
 function clearSelection() {
@@ -264,15 +300,16 @@ function renderStatusBar() {
   document.getElementById("seed-display").textContent = s.seed;
   const activeIdx = s.current_player_index;
   const humans = s.human_indices || [s.human_index ?? 0];
-  let activeLabel;
+  const activeEl = document.getElementById("active-player");
   if (activeIdx < 0) {
-    activeLabel = "Game Over";
-  } else if (humans.includes(activeIdx)) {
-    activeLabel = humans.length > 1 ? `${s.players[activeIdx].name} (You)` : "YOU";
-  } else {
-    activeLabel = s.players[activeIdx].name;
+    activeEl.innerHTML = "Game Over";
+    return;
   }
-  document.getElementById("active-player").textContent = activeLabel;
+  const youSuffix = humans.includes(activeIdx) ? " (You)" : "";
+  const label = `${s.players[activeIdx].name}${youSuffix}`;
+  const color = playerColor(activeIdx);
+  activeEl.innerHTML =
+    `<span class="player-swatch" style="background:${color}"></span>${label}`;
 }
 
 function renderOpponents() {
@@ -285,6 +322,7 @@ function renderOpponents() {
   el.innerHTML = opponents.map((p) => {
     const playerIdx = s.players.indexOf(p);
     const isActive = playerIdx === s.current_player_index;
+    const seatColor = playerColor(playerIdx);
     const rateChips = RESOURCE_ORDER.map((r) => {
       const v = p.rates[r] || 0;
       if (v === 0) return "";
@@ -292,7 +330,7 @@ function renderOpponents() {
       return `<span style="color:${color}">${v > 0 ? "+" : ""}${v} ${r}</span>`;
     }).filter(Boolean).join(" ");
     return `
-      <div class="opponent-card ${isActive ? "active" : ""}">
+      <div class="opponent-card ${isActive ? "active" : ""}" style="--player-color:${seatColor}">
         <div class="opponent-name">${p.name}</div>
         <div class="opponent-corp">${p.corporation || "—"}</div>
         <div class="opponent-stats">
@@ -389,10 +427,11 @@ function renderPlayer() {
   const s = currentState;
   const youIdx = activeHumanIndex(s);
   const p = s.players[youIdx];
-  const humans = s.human_indices || [s.human_index ?? 0];
-  const youPrefix = humans.length > 1 ? `${p.name} (You)` : "You";
-  document.getElementById("player-heading").textContent =
-    `${youPrefix} — ${p.corporation || "No corporation"}`;
+  const seatColor = playerColor(youIdx);
+  const heading = document.getElementById("player-heading");
+  heading.textContent = `${p.name} (You) — ${p.corporation || "No corporation"}`;
+  heading.style.color = seatColor;
+  document.getElementById("player-panel").style.setProperty("--player-color", seatColor);
 
   const rateCells = RESOURCE_ORDER.map((r) => {
     const v = p.rates[r] || 0;
@@ -740,11 +779,18 @@ function renderLog() {
     el.innerHTML = "<em style='color:#484f58'>No turns yet</em>";
     return;
   }
+  const s = currentState;
+  const humans = (s && s.human_indices) || [];
   el.innerHTML = turnLog.slice(-30).reverse().map((entry) => {
+    const idx = entry.playerIdx;
+    const player = s && idx >= 0 ? s.players[idx] : null;
+    const baseName = player ? player.name : "?";
+    const youSuffix = humans.includes(idx) ? " (You)" : "";
+    const color = idx >= 0 ? playerColor(idx) : "#21262d";
     const cls = entry.isHuman ? "log-entry human" : "log-entry";
-    return `<div class="${cls}">
+    return `<div class="${cls}" style="--player-color:${color}">
       <span class="turn-num">T${entry.turn}</span>
-      <span class="player-name">${entry.player}</span>
+      <span class="player-name">${baseName}${youSuffix}</span>
       ${entry.text}
       ${entry.event ? `<div style="margin-top:4px"><span class="event-tag">⚡ ${entry.event}</span></div>` : ""}
     </div>`;
@@ -856,7 +902,7 @@ function logHumanAction(text) {
   const s = currentState;
   turnLog.push({
     turn: s.turn_index + 1,
-    player: "YOU",
+    playerIdx: s.current_player_index,
     text,
     isHuman: true,
     event: null,
@@ -875,7 +921,7 @@ function logHumanTurnEnd(eventResult) {
     const s = currentState;
     turnLog.push({
       turn: s.turn_index + 1,
-      player: "YOU",
+      playerIdx: s.current_player_index,
       text: "Passed",
       isHuman: true,
       event: eventText,
@@ -885,8 +931,6 @@ function logHumanTurnEnd(eventResult) {
 
 function logAiTurn(result) {
   if (!result.ok) return;
-  const playerIdx = result.player_index;
-  const playerName = currentState?.players[playerIdx]?.name || `AI_${playerIdx}`;
   const s = currentState;
   const turnNum = s ? s.turn_index + 1 : "?";
   const actionText = result.actions.length
@@ -898,7 +942,7 @@ function logAiTurn(result) {
       : null;
   turnLog.push({
     turn: turnNum,
-    player: playerName,
+    playerIdx: result.player_index,
     text: actionText,
     isHuman: false,
     event: eventText,
@@ -915,10 +959,11 @@ function showEndgame() {
     const classes = ["endgame-rank"];
     if (rank === 0) classes.push("winner");
     if (s.is_human) classes.push("human");
+    const color = playerColor(s.index);
     return `
-      <div class="${classes.join(" ")}">
+      <div class="${classes.join(" ")}" style="--player-color:${color}">
         <span class="endgame-rank-name">
-          #${rank + 1} ${s.is_human ? "(You) " : ""}${s.name} — ${s.corporation}
+          #${rank + 1} ${s.name}${s.is_human ? " (You)" : ""} — ${s.corporation}
         </span>
         <span class="endgame-rank-nw">$${s.net_worth}</span>
       </div>`;

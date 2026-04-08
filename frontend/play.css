@@ -80,18 +80,30 @@ body {
 .opponent-card {
   background: #161b22;
   border: 1px solid #30363d;
+  border-left: 4px solid var(--player-color, #30363d);
   border-radius: 6px;
   padding: 12px;
 }
 .opponent-card.active {
-  border-color: #58a6ff;
-  box-shadow: 0 0 0 1px #58a6ff inset;
+  border-color: var(--player-color, #58a6ff);
+  border-left-color: var(--player-color, #58a6ff);
+  box-shadow: 0 0 0 1px var(--player-color, #58a6ff) inset;
 }
 .opponent-name {
-  color: #58a6ff;
+  color: var(--player-color, #58a6ff);
   font-weight: 600;
   font-size: 0.9rem;
   margin-bottom: 4px;
+}
+
+/* Per-player color dot used in the status bar's Active label. */
+.player-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
 }
 .opponent-corp {
   color: #8b949e;
@@ -148,6 +160,7 @@ body {
 #player-panel {
   background: #161b22;
   border: 1px solid #30363d;
+  border-left: 4px solid var(--player-color, #58a6ff);
   border-radius: 6px;
   padding: 16px;
   display: grid;
@@ -411,8 +424,9 @@ body {
   font-family: monospace;
 }
 .log-entry {
-  padding: 6px 0;
+  padding: 6px 8px;
   border-bottom: 1px solid #21262d;
+  border-left: 3px solid var(--player-color, #21262d);
 }
 .log-entry:last-child {
   border-bottom: none;
@@ -422,15 +436,12 @@ body {
   margin-right: 8px;
 }
 .log-entry .player-name {
-  color: #58a6ff;
+  color: var(--player-color, #58a6ff);
   margin-right: 6px;
   font-weight: 600;
 }
 .log-entry .event-tag {
   color: #f0883e;
-}
-.log-entry.human {
-  background: #0d1f2d;
 }
 
 /* End-game overlay */
@@ -466,6 +477,7 @@ body {
   margin-bottom: 8px;
   background: #21262d;
   border-radius: 6px;
+  border-left: 4px solid var(--player-color, #30363d);
   font-size: 0.9rem;
 }
 .endgame-rank.winner {
@@ -574,6 +586,16 @@ body {
 .seat-row > span {
   width: 60px;
   color: #8b949e;
+}
+.seat-row .seat-name {
+  width: 110px;
+  background: #21262d;
+  border: 1px solid #30363d;
+  color: #c9d1d9;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-family: inherit;
 }
 .seat-row select {
   flex: 1;

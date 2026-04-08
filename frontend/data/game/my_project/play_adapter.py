@@ -84,6 +84,9 @@ class PlayableGame:
     num_players: int = 3
     human_index: int = 0
     seats: list[str] | None = None
+    # Optional per-seat display names. Empty string / missing entries fall
+    # back to the engine's `Player_{i+1}` default.
+    names: list[str] | None = None
     max_turns: int = DEFAULT_MAX_TURNS
     data_dir: Path = field(default_factory=lambda: DEFAULT_DATA_DIR)
 
@@ -136,6 +139,17 @@ class PlayableGame:
             max_turns=self.max_turns,
             randomize_market=True,
         )
+        # Apply custom names if provided. Strict length check, empty entries
+        # silently keep the engine's `Player_{i+1}` default so the UI can pass
+        # a same-length parallel array without filtering empties first.
+        if self.names is not None:
+            if len(self.names) != self.num_players:
+                raise ValueError(
+                    f"names length {len(self.names)} != num_players {self.num_players}"
+                )
+            for i, n in enumerate(self.names):
+                if n:
+                    self.state.players[i].name = n
         # Seed history with the starting market so the UI chart has a turn-0 anchor.
         self._snapshot_market(turn=0)
 
