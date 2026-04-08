@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mars Colony — Play</title>
+  <link rel="stylesheet" href="report.css">
+  <link rel="stylesheet" href="play.css">
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.27.0/full/pyodide.js"></script>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>Mars Colony</h1>
+      <p class="subtitle">
+        1 human vs 2 smart AI. 8 rounds, 3 actions per turn max.
+        <a href="compare.html" style="color:#58a6ff;">Analytics</a> ·
+        <a href="report.html" style="color:#58a6ff;">Contract Report</a>
+      </p>
+    </header>
+
+    <div id="loading" class="loading-panel">
+      <div class="loading-title">Loading game engine…</div>
+      <div class="loading-detail" id="loading-detail">Starting Pyodide…</div>
+      <div class="loading-hint">First load downloads ~6 MB of Python runtime. This is cached for next time.</div>
+    </div>
+
+    <div id="game-root" style="display:none;">
+      <!-- Status bar -->
+      <div id="status-bar">
+        <div class="status-cell">
+          <span class="status-label">Round</span>
+          <span class="status-value" id="round-indicator">—</span>
+        </div>
+        <div class="status-cell">
+          <span class="status-label">Turn</span>
+          <span class="status-value" id="turn-indicator">—</span>
+        </div>
+        <div class="status-cell">
+          <span class="status-label">Active</span>
+          <span class="status-value" id="active-player">—</span>
+        </div>
+        <div class="status-cell">
+          <span class="status-label">Seed</span>
+          <span class="status-value" id="seed-display">—</span>
+        </div>
+        <button id="new-game-btn" class="primary-btn">New Game</button>
+      </div>
+
+      <!-- Opponents strip -->
+      <section id="opponents-section">
+        <h2>Opponents</h2>
+        <div id="opponents-strip"></div>
+      </section>
+
+      <!-- Market -->
+      <section id="market-section">
+        <h2>Market</h2>
+        <div id="market-grid"></div>
+      </section>
+
+      <!-- Human player panel -->
+      <section id="player-section">
+        <h2 id="player-heading">You</h2>
+        <div id="player-panel"></div>
+      </section>
+
+      <!-- Contracts -->
+      <section id="contracts-section">
+        <h2>Available Contracts</h2>
+        <div id="contracts-grid"></div>
+      </section>
+
+      <!-- Pool (swap-with-hand area) -->
+      <section id="pool-section">
+        <h2>Pool</h2>
+        <p class="subtitle" id="pool-hint">
+          Pool swaps are free and unlimited during your turn. Click a pool card,
+          then click a hand card to swap them. Swap any time — before, between, or after your actions.
+        </p>
+        <div id="pool-grid"></div>
+      </section>
+
+      <!-- Hand -->
+      <section id="hand-section">
+        <h2>Your Hand</h2>
+        <div id="hand-grid"></div>
+      </section>
+
+      <!-- Action bar -->
+      <section id="action-section">
+        <h2>Actions</h2>
+        <div id="action-instructions" class="subtitle"></div>
+        <div id="build-estimate" class="subtitle" style="min-height:20px; margin-bottom:8px;"></div>
+        <div id="action-bar">
+          <button id="build-btn" class="action-btn" disabled>Build Selected</button>
+          <button id="sell-btn" class="action-btn" disabled>Sell Selected</button>
+          <button id="contract-btn" class="action-btn" disabled>Fulfill Contract</button>
+          <button id="pass-btn" class="action-btn">Pass / End Turn</button>
+        </div>
+      </section>
+
+      <!-- Turn log -->
+      <section id="log-section">
+        <h2>Turn Log</h2>
+        <div id="turn-log"></div>
+      </section>
+    </div>
+
+    <!-- End-game overlay -->
+    <div id="endgame-overlay" style="display:none;">
+      <div id="endgame-panel">
+        <h2>Game Over</h2>
+        <div id="endgame-results"></div>
+        <button id="play-again-btn" class="primary-btn">Play Again</button>
+      </div>
+    </div>
+  </div>
+  <script src="play.js"></script>
+</body>
+</html>

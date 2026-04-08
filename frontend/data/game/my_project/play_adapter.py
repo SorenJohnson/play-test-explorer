@@ -1,0 +1,490 @@
+"""Stepwise adapter around the simulation engine for interactive play.
+
+The headless simulation (`run_game`/`run_turn`) calls a strategy callback
+to pick actions until the player passes. A human player needs to pick
+actions interactively, so this module splits a turn into explicit phases
+that a UI can drive:
+
+    game = PlayableGame(seed=123)
+    while not game.is_over():
+        if game.is_human_turn():
+            # UI loop: show state, collect action, apply, repeat until pass
+            for action in game.legal_actions():
+                ...
+            game.apply_human_action(action_dict)
+            game.end_human_turn()  # draws back to hand, fires event
+        else:
+            game.step_ai_turn()  # runs full AI turn + event
+
+State is serialized to a plain dict via `state_dict()` — no dataclass
+references leak to the JS side. Upcoming events are hidden; only the
+event that just fired is exposed as `last_event`.
+"""
+
+from __future__ import annotations
+
+import random
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from my_project.models import Card, Contract, Resource
+from my_project.parsing import parse_cards, parse_contracts
+from my_project.simulation import (
+    Action,
+    ActionType,
+    DEFAULT_MAX_TURNS,
+    DEFAULT_START_MONEY,
+    EventType,
+    GameState,
+    HAND_SIZE,
+    Player,
+    compute_build_deficit,
+    execute_build,
+    execute_contract,
+    execute_event,
+    execute_sell,
+    swap_pool_card,
+)
+from my_project.strategies import smart_greedy_strategy
+
+
+# Default asset paths (can be overridden when constructing PlayableGame)
+DEFAULT_DATA_DIR = Path(__file__).parent / "data"
+
+
+@dataclass
+class PlayableGame:
+    """Stepwise game driver for a single human vs multiple AI players."""
+
+    seed: int = 0
+    num_players: int = 3
+    human_index: int = 0
+    max_turns: int = DEFAULT_MAX_TURNS
+    data_dir: Path = field(default_factory=lambda: DEFAULT_DATA_DIR)
+
+    state: GameState = field(init=False)
+    last_event: str = field(default="", init=False)
+    last_ai_actions: list[dict] = field(default_factory=list, init=False)
+    human_turn_in_progress: bool = field(default=False, init=False)
+    _turn_action_records: list = field(default_factory=list, init=False)
+
+    def __post_init__(self) -> None:
+        random.seed(self.seed)
+        cards = parse_cards(self.data_dir / "Cards.csv")
+        contracts = parse_contracts(self.data_dir / "Contracts.csv")
+        self.state = GameState.create(
+            all_cards=cards,
+            all_contracts=contracts,
+            num_players=self.num_players,
+            start_money=DEFAULT_START_MONEY,
+            max_turns=self.max_turns,
+        )
+
+    # --- Status queries ---
+
+    def is_over(self) -> bool:
+        return self.state.event_idx >= len(self.state.event_deck)
+
+    def current_player_index(self) -> int:
+        """Index of the player whose turn is now active (0-based)."""
+        return self.state.event_idx % self.num_players
+
+    def is_human_turn(self) -> bool:
+        return self.current_player_index() == self.human_index and not self.is_over()
+
+    def current_player(self) -> Player:
+        return self.state.players[self.current_player_index()]
+
+    def turn_number(self) -> int:
+        """1-indexed player turn number (out of max_turns * num_players)."""
+        return self.state.event_idx + 1
+
+    def round_number(self) -> int:
+        """1-indexed round (1..max_turns). Each round is num_players player-turns."""
+        return (self.state.event_idx // self.num_players) + 1
+
+    # --- Human turn control ---
+
+    def begin_human_turn(self) -> None:
+        """Mark the turn as started. Must be called before apply_human_action."""
+        if self.human_turn_in_progress:
+            return
+        if not self.is_human_turn():
+            raise RuntimeError("Not currently the human's turn")
+        self.state.turn += 1
+        self.human_turn_in_progress = True
+        self._turn_action_records = []
+        # Reset per-turn state (rule: one build action per turn)
+        self.current_player().has_built_this_turn = False
+
+    def end_human_turn(self) -> dict:
+        """Complete the human turn: draw back to hand size, fire the event.
+
+        Returns a dict describing the fired event so the UI can render it.
+        """
+        if not self.human_turn_in_progress:
+            raise RuntimeError("begin_human_turn was not called")
+
+        player = self.current_player()
+
+        # Draw back to hand size
+        needed = player.hand_size - len(player.hand)
+        if needed > 0:
+            player.hand.extend(self.state.deck.draw(needed))
+
+        # Execute the event for this player-turn slot
+        event = self.state.event_deck[self.state.event_idx]
+        event_detail = execute_event(self.state, event, player)
+        self.state.event_idx += 1
+        self.last_event = event_detail
+
+        self.human_turn_in_progress = False
+        return {"type": event.value, "detail": event_detail}
+
+    def apply_human_action(self, action: dict) -> dict:
+        """Apply a single action for the human player.
+
+        `action` is a dict with at minimum `type` in {build, sell, contract, pass}.
+        Additional keys per type:
+          - build: build_cards (list[int]), discard_cards (list[int])
+          - sell: card_idx (int)
+          - contract: card_idx (int), contract_idx (int)
+
+        Returns a dict describing what happened (action record-like) or
+        `{"ok": False, "reason": "..."}` if the action was illegal.
+        """
+        if not self.human_turn_in_progress:
+            self.begin_human_turn()
+
+        player = self.current_player()
+        atype = action.get("type", "")
+
+        if atype == "pass":
+            return {"ok": True, "type": "pass", "detail": "Pass"}
+
+        if atype == "build":
+            if player.has_built_this_turn:
+                return {"ok": False, "reason": "Already built this turn"}
+            build_idx = list(action.get("build_cards") or [])
+            discard_idx = list(action.get("discard_cards") or [])
+            if not build_idx:
+                return {"ok": False, "reason": "No cards selected"}
+            record = execute_build(self.state, player, build_idx, discard_idx)
+            if record is None:
+                return {"ok": False, "reason": "Cannot afford build"}
+            self._turn_action_records.append(record)
+            return _record_to_dict(record, ok=True)
+
+        if atype == "sell":
+            idx = action.get("card_idx", -1)
+            if idx < 0 or idx >= len(player.hand):
+                return {"ok": False, "reason": "Invalid card"}
+            card = player.hand[idx]
+            if not card.can_sell:
+                return {"ok": False, "reason": "Card cannot sell"}
+            record = execute_sell(self.state, player, idx)
+            self._turn_action_records.append(record)
+            return _record_to_dict(record, ok=True)
+
+        if atype == "contract":
+            card_idx = action.get("card_idx", -1)
+            contract_idx = action.get("contract_idx", -1)
+            if card_idx < 0 or card_idx >= len(player.hand):
+                return {"ok": False, "reason": "Invalid card"}
+            if not player.hand[card_idx].can_fulfill_contract:
+                return {"ok": False, "reason": "Card has no contract icon"}
+            if contract_idx < 0 or contract_idx >= len(self.state.available_contracts):
+                return {"ok": False, "reason": "Invalid contract"}
+            record = execute_contract(self.state, player, card_idx, contract_idx)
+            if record is None:
+                return {"ok": False, "reason": "Cannot fulfill contract (missing rates)"}
+            self._turn_action_records.append(record)
+            return _record_to_dict(record, ok=True)
+
+        return {"ok": False, "reason": f"Unknown action type: {atype}"}
+
+    def human_pool_swap(self, hand_idx: int, pool_idx: int) -> dict:
+        """Swap a card from the human's hand with one from the pool.
+
+        Pool swaps are free and unlimited — allowed any time during the
+        human's turn, before or between actions. Auto-begins the turn if
+        the caller hasn't already.
+        """
+        if not self.is_human_turn():
+            return {"ok": False, "reason": "Not human turn"}
+        if not self.human_turn_in_progress:
+            self.begin_human_turn()
+        player = self.current_player()
+        if hand_idx < 0 or hand_idx >= len(player.hand):
+            return {"ok": False, "reason": "Invalid hand index"}
+        if pool_idx < 0 or pool_idx >= len(self.state.pool):
+            return {"ok": False, "reason": "Invalid pool index"}
+        swap_pool_card(self.state, player, hand_idx, pool_idx)
+        return {"ok": True}
+
+    def can_pool_swap(self) -> bool:
+        """True iff the human can currently perform a pool swap.
+
+        Pool swaps are free and unlimited during the human's own turn.
+        """
+        return self.is_human_turn()
+
+    # --- AI turn ---
+
+    def step_ai_turn(self) -> dict:
+        """Run one complete AI turn (pool swap + actions + draw + event).
+
+        Returns a dict with the action log and event result.
+        """
+        if self.is_over():
+            return {"ok": False, "reason": "Game is over"}
+        if self.is_human_turn():
+            return {"ok": False, "reason": "It's the human's turn"}
+
+        player = self.current_player()
+        event = self.state.event_deck[self.state.event_idx]
+
+        # Snapshot hand-before so we can diff action records into a log
+        actions_log: list[dict] = []
+
+        # Reset per-turn state (rule: one build action per turn)
+        player.has_built_this_turn = False
+
+        # Pool swap phase
+        swap_fn = getattr(smart_greedy_strategy, "pool_swap", None)
+        if swap_fn:
+            swap_fn(self.state, player)
+
+        # Action phase
+        self.state.turn += 1
+        actions_taken = 0
+        max_actions = 10  # mirrors MAX_ACTIONS_PER_TURN
+        while player.hand and actions_taken < max_actions:
+            action = smart_greedy_strategy(self.state, player)
+            if action.action_type == ActionType.PASS:
+                break
+            record = self._execute_ai_action(player, action)
+            if record is not None:
+                actions_log.append(_record_to_dict(record, ok=True))
+            actions_taken += 1
+
+        # Draw
+        needed = player.hand_size - len(player.hand)
+        if needed > 0:
+            player.hand.extend(self.state.deck.draw(needed))
+
+        # Event
+        event_detail = execute_event(self.state, event, player)
+        self.state.event_idx += 1
+        self.last_event = event_detail
+        self.last_ai_actions = actions_log
+
+        return {
+            "ok": True,
+            "player_index": self.current_player_index_before_increment(),
+            "actions": actions_log,
+            "event": {"type": event.value, "detail": event_detail},
+        }
+
+    def current_player_index_before_increment(self) -> int:
+        # event_idx was just incremented for the previous turn — this returns
+        # the index of the player who just acted.
+        return (self.state.event_idx - 1) % self.num_players
+
+    def _execute_ai_action(self, player: Player, action: Action):
+        if action.action_type == ActionType.BUILD and action.build_cards:
+            return execute_build(self.state, player, action.build_cards, action.discard_cards)
+        if action.action_type == ActionType.SELL and action.sell_card >= 0:
+            return execute_sell(self.state, player, action.sell_card)
+        if action.action_type == ActionType.CONTRACT and action.contract_card >= 0:
+            return execute_contract(self.state, player, action.contract_card, action.contract_idx)
+        return None
+
+    # --- Serialization ---
+
+    def state_dict(self) -> dict:
+        """Serialize the game state to a plain dict suitable for the UI.
+
+        CRITICAL: does NOT include `state.event_deck[event_idx:]` — upcoming
+        events are hidden from the player.
+        """
+        s = self.state
+        cur_idx = self.current_player_index() if not self.is_over() else -1
+        human_already_built = (
+            cur_idx == self.human_index
+            and s.players[self.human_index].has_built_this_turn
+        )
+        return {
+            "seed": self.seed,
+            "round": self.round_number(),
+            "max_rounds": self.max_turns,
+            "turn_index": self.state.event_idx,
+            "total_turns": len(s.event_deck),
+            "is_over": self.is_over(),
+            "current_player_index": cur_idx,
+            "human_index": self.human_index,
+            "human_already_built": human_already_built,
+            "can_pool_swap": self.can_pool_swap(),
+            "market": {r.value: s.market.price(r) for r in Resource},
+            "market_positions": {r.value: s.market.positions[r] for r in Resource},
+            "players": [_player_dict(p, i == self.human_index) for i, p in enumerate(s.players)],
+            "available_contracts": [_contract_dict(c) for c in s.available_contracts],
+            "pool": [_card_dict(c) for c in s.pool],
+            "last_event": self.last_event,
+            "last_ai_actions": self.last_ai_actions,
+        }
+
+    # --- Legal action enumeration (for UI hinting) ---
+
+    def legal_human_actions(self) -> dict:
+        """Summarize what actions the human can currently take.
+
+        Returns a dict with:
+          - already_built: bool — True if a build action has already been taken
+          - affordable_single_builds: list of {card_idx, cost} for single-card
+            builds that are currently affordable (UI hint only; real build is
+            a multi-card action).
+          - can_sell: list of card indices sellable this turn
+          - can_contract: list of {card_idx, contract_idx} pairs currently legal
+        """
+        if not self.is_human_turn():
+            return {
+                "already_built": False,
+                "affordable_single_builds": [],
+                "can_sell": [],
+                "can_contract": [],
+            }
+        player = self.current_player()
+        already_built = player.has_built_this_turn
+
+        # Affordable single-card builds (only meaningful if not already built)
+        affordable = []
+        if not already_built:
+            for i, card in enumerate(player.hand):
+                result = compute_build_deficit([card], player, 0, self.state.market)
+                if result is not None:
+                    _, cost = result
+                    affordable.append({"card_idx": i, "cost": cost})
+
+        # Sellable cards
+        can_sell = []
+        for i, card in enumerate(player.hand):
+            if not card.can_sell:
+                continue
+            if any(player.rate(r) > 0 for r in card.can_sell):
+                can_sell.append(i)
+
+        # Contract-fulfillable combinations
+        can_contract = []
+        for i, card in enumerate(player.hand):
+            if not card.can_fulfill_contract:
+                continue
+            for j, contract in enumerate(self.state.available_contracts):
+                if all(player.rate(req.resource) >= req.amount for req in contract.requirements):
+                    can_contract.append({"card_idx": i, "contract_idx": j})
+
+        return {
+            "already_built": already_built,
+            "affordable_single_builds": affordable,
+            "can_sell": can_sell,
+            "can_contract": can_contract,
+        }
+
+    def estimate_build_cost(self, build_indices: list[int], discard_indices: list[int]) -> dict:
+        """Estimate the market cost of a proposed multi-card build.
+
+        Used by the UI to show live feedback as the user selects cards.
+        Returns {"ok": True, "cost": int, "deficit": {resource: amount}} if
+        affordable, or {"ok": False, "reason": str} otherwise.
+        """
+        if not self.is_human_turn():
+            return {"ok": False, "reason": "Not your turn"}
+        player = self.current_player()
+        if player.has_built_this_turn:
+            return {"ok": False, "reason": "Already built this turn"}
+        if not build_indices:
+            return {"ok": False, "reason": "No cards selected"}
+        cards = [player.hand[i] for i in build_indices]
+        result = compute_build_deficit(cards, player, len(discard_indices), self.state.market)
+        if result is None:
+            return {"ok": False, "reason": "Cannot afford", "cost": -1}
+        deficit, cost = result
+        return {
+            "ok": True,
+            "cost": cost,
+            "deficit": {r.value: amt for r, amt in deficit.items()},
+        }
+
+    def final_scores(self) -> list[dict]:
+        """Return final ranking when game is over."""
+        scores = [
+            {
+                "index": i,
+                "name": p.name,
+                "corporation": p.corporation,
+                "net_worth": p.net_worth(),
+                "money": p.money,
+                "debt": p.debt,
+                "contracts_fulfilled": p.contracts_fulfilled,
+                "buildings_played": list(p.buildings_played),
+                "is_human": i == self.human_index,
+            }
+            for i, p in enumerate(self.state.players)
+        ]
+        scores.sort(key=lambda d: -d["net_worth"])
+        return scores
+
+
+def _card_dict(card: Card) -> dict:
+    return {
+        "building": card.building,
+        "slot": card.slot,
+        "alternate": card.alternate,
+        "costs": [{"resource": ra.resource.value, "amount": ra.amount} for ra in card.costs],
+        "rates": [{"resource": ra.resource.value, "amount": ra.amount} for ra in card.rates],
+        "effect": card.effect,
+        "can_sell": [r.value for r in card.can_sell],
+        "can_fulfill_contract": card.can_fulfill_contract,
+    }
+
+
+def _contract_dict(contract: Contract) -> dict:
+    return {
+        "requirements": [
+            {"resource": ra.resource.value, "amount": ra.amount} for ra in contract.requirements
+        ],
+        "reward": contract.reward,
+        "label": ", ".join(f"{ra.amount} {ra.resource.value}" for ra in contract.requirements),
+    }
+
+
+def _player_dict(player: Player, is_human: bool) -> dict:
+    return {
+        "name": player.name,
+        "corporation": player.corporation,
+        "money": player.money,
+        "debt": player.debt,
+        "net_worth": player.net_worth(),
+        "rates": {r.value: v for r, v in player.rates.items()},
+        "buildings_played": list(player.buildings_played),
+        "contracts_fulfilled": player.contracts_fulfilled,
+        "hand_size": len(player.hand),
+        "hand": [_card_dict(c) for c in player.hand] if is_human else [],
+        "is_human": is_human,
+    }
+
+
+def _record_to_dict(record, ok: bool = True) -> dict:
+    return {
+        "ok": ok,
+        "type": record.action_type,
+        "detail": record.detail,
+        "buildings": list(record.buildings),
+        "build_money_spent": record.build_money_spent,
+        "rates_gained": dict(record.rates_gained),
+        "sell_resource": record.sell_resource,
+        "sell_amount": record.sell_amount,
+        "sell_revenue": record.sell_revenue,
+        "contract_label": record.contract_label,
+        "contract_reward": record.contract_reward,
+    }

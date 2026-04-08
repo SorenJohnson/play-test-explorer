@@ -158,6 +158,28 @@ def cmd_analyze() -> None:
                   f"range=[${tc['min']:.0f}-${tc['max']:.0f}]")
 
 
+def cmd_sync_play() -> None:
+    """Copy Python sources + CSVs into frontend/data/game/ so Pyodide can load them."""
+    import shutil
+    src_root = Path(__file__).parent
+    dst_root = Path("frontend/data/game/my_project")
+    dst_root.mkdir(parents=True, exist_ok=True)
+    (dst_root / "data").mkdir(parents=True, exist_ok=True)
+
+    py_files = [
+        "__init__.py", "accounting.py", "models.py", "parsing.py",
+        "play_adapter.py", "simulation.py", "strategies.py",
+    ]
+    for name in py_files:
+        shutil.copy2(src_root / name, dst_root / name)
+
+    csv_files = ["Cards.csv", "Contracts.csv", "market.csv"]
+    for name in csv_files:
+        shutil.copy2(src_root / "data" / name, dst_root / "data" / name)
+
+    print(f"Synced {len(py_files)} Python files + {len(csv_files)} CSV files to {dst_root}/")
+
+
 def cmd_publish(args: argparse.Namespace) -> None:
     """Create trimmed simulation files for GitHub Pages deployment."""
     full_files = list(FULL_DIR.glob("sim_*.json"))
@@ -228,6 +250,9 @@ def main() -> None:
     pub = sub.add_parser("publish", help="Create trimmed sim files for deployment")
     pub.add_argument("-g", "--games", type=int, default=50, help="Games to keep per scenario")
 
+    # sync-play (copy Python sources to frontend/data/game for Pyodide)
+    sub.add_parser("sync-play", help="Copy Python sources + CSVs to frontend/data/game/ for the playable page")
+
     args = parser.parse_args()
 
     match args.command:
@@ -241,6 +266,8 @@ def main() -> None:
             cmd_analyze()
         case "publish":
             cmd_publish(args)
+        case "sync-play":
+            cmd_sync_play()
         case _:
             parser.print_help()
 
