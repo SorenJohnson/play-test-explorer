@@ -569,8 +569,8 @@ function renderMarketDynamics() {
           <td>${valFmt(boughtUnits)}</td>
           <td>${valFmt(s.total_sold)}</td>
           <td>${unitSign}${valFmt(netUnits)}</td>
-          <td>${cashFmt(boughtCash)}</td>
-          <td>${cashFmt(s.total_sell_revenue)}</td>
+          <td>${boughtCash > 0 ? `<span class="negative">${cashFmt(boughtCash)}</span>` : "-"}</td>
+          <td>${s.total_sell_revenue > 0 ? `<span class="positive">${cashFmt(s.total_sell_revenue)}</span>` : "-"}</td>
           <td>${futuresPaid > 0 ? `<span class="negative">${cashFmt(futuresPaid)}</span>` : "-"}</td>
           <td class="${netClass}">${netSignCash}${cashFmt(netFlowCash)}</td>
         </tr>`;
