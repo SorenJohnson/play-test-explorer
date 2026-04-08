@@ -88,14 +88,19 @@ async function loadPythonSources() {
   // Create the my_project package structure in Pyodide's virtual FS
   pyodide.FS.mkdirTree("/home/pyodide/my_project/data");
 
+  // cache: "no-cache" forces the browser to revalidate with the server on
+  // every load. GitHub Pages returns ETag-based 304s when nothing changed
+  // (cheap), but a fresh deploy is picked up immediately — without this
+  // these .py files can stay cached for ~10 minutes after a deploy and
+  // Pyodide ends up running stale Python while play.js runs the new JS.
   for (const name of PY_FILES) {
-    const resp = await fetch(`data/game/my_project/${name}`);
+    const resp = await fetch(`data/game/my_project/${name}`, { cache: "no-cache" });
     if (!resp.ok) throw new Error(`Failed to fetch ${name}: ${resp.status}`);
     const text = await resp.text();
     pyodide.FS.writeFile(`/home/pyodide/my_project/${name}`, text);
   }
   for (const name of CSV_FILES) {
-    const resp = await fetch(`data/game/my_project/data/${name}`);
+    const resp = await fetch(`data/game/my_project/data/${name}`, { cache: "no-cache" });
     if (!resp.ok) throw new Error(`Failed to fetch ${name}: ${resp.status}`);
     const text = await resp.text();
     pyodide.FS.writeFile(`/home/pyodide/my_project/data/${name}`, text);
