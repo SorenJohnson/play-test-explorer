@@ -1175,6 +1175,33 @@ def _hook_carbon_scrubbing(state: GameState, player: Player, card: Card) -> None
     ]
 
 
+def _hook_energy_vault(state: GameState, player: Player, card: Card) -> None:
+    """Energy Vault: 10 PWR stockpile, consumed during Power Bill.
+
+    The vault absorbs negative PWR rates from new builds — instead of the
+    -PWR hitting the player's rate, it drains the vault. Vault absorbs as
+    much of a single -PWR rate as it can; the remainder hits the rate.
+    Once exhausted, the patent has no further build-time effect; the next
+    Power Bill pays out whatever's left in the vault and exhausts it.
+    """
+    vault = player.patent_state.get("energy_vault", 0)
+    if vault <= 0:
+        return
+    new_rates: list[ResourceAmount] = []
+    for ra in card.rates:
+        if ra.resource == Resource.PWR and ra.amount < 0 and vault > 0:
+            absorbed = min(vault, abs(ra.amount))
+            vault -= absorbed
+            new_amount = ra.amount + absorbed  # less negative
+            if new_amount != 0:
+                new_rates.append(ResourceAmount(resource=Resource.PWR, amount=new_amount))
+            # if new_amount == 0, we drop the rate entirely
+        else:
+            new_rates.append(ra)
+    card.rates = new_rates
+    player.patent_state["energy_vault"] = vault
+
+
 # Patent name → build hook (signature: (state, player, card) -> None).
 # Only patents that mutate a card at build time go here. Passive event hooks
 # (Financial Instruments, Virtual Reality) and active patents (Water Engine,
@@ -1185,7 +1212,29 @@ PATENT_BUILD_HOOKS = {
     "Slant Drilling": _hook_slant_drilling,
     "Perpetual Motion": _hook_perpetual_motion,
     "Carbon Scrubbing": _hook_carbon_scrubbing,
+    "Energy Vault": _hook_energy_vault,
 }
+
+
+def _apply_patent_acquisition(state: GameState, player: Player, patent: Card) -> None:
+    """Run any one-shot/initialization effects when a player WINS a patent.
+
+    Called from settle_silent_auction after the patent is appended to
+    buildings_played but before normal apply_rates would (which is also
+    called by settle for any inherent rate effects, though most CSV
+    patents have empty rates).
+
+    Currently handles:
+      - Energy Vault: initialize the 10-PWR vault
+      - Thinking Machines: draw 1 card and bump hand_size by 1
+    """
+    if patent.building == "Energy Vault":
+        player.patent_state["energy_vault"] = 10
+    elif patent.building == "Thinking Machines":
+        # Draw 1 card immediately
+        player.hand.extend(state.deck.draw(1))
+        # Permanently bump hand_size so future draws keep one extra
+        player.hand_size += 1
 
 
 # Pleasure Dome bonus tiers: indexed by GLOBAL number of PDs in play - 1.
@@ -1211,11 +1260,18 @@ def _pleasure_dome_bonus(state: GameState, player: Player) -> int:
     The tier is keyed on the GLOBAL number of PDs in play, not on this
     player's count. Each owner who has at least one PD gets the same
     per-owner amount from that tier.
+
+    Virtual Reality patent doubles this bonus for its owner (only if they
+    also own a Pleasure Dome — no PD = no doubling because there's nothing
+    to double).
     """
     if _count_buildings(player, "Pleasure Dome") == 0:
         return 0
     total = _global_dome_count(state)
-    return PLEASURE_DOME_TIERS[min(total - 1, len(PLEASURE_DOME_TIERS) - 1)]
+    bonus = PLEASURE_DOME_TIERS[min(total - 1, len(PLEASURE_DOME_TIERS) - 1)]
+    if _player_owns_patent(player, "Virtual Reality"):
+        bonus *= 2
+    return bonus
 
 
 def _patent_office_trigger(state: GameState, player: Player) -> None:
@@ -1331,6 +1387,8 @@ def do_power_bill(state: GameState) -> None:
     """Power bill event: positive PWR earns money, negative PWR adds debt.
 
     Pleasure Dome owners also get a flat per-dome bonus on every power bill.
+    Energy Vault owners get whatever's left in their vault paid out as
+    cash, after which the vault is exhausted.
     """
     pwr_price = state.market.price(Resource.PWR)
     for player in state.players:
@@ -1357,15 +1415,38 @@ def do_power_bill(state: GameState) -> None:
         bonus = _pleasure_dome_bonus(state, player)
         if bonus > 0:
             player.money += bonus
+        # Energy Vault payout: whatever's left in the vault converts to cash
+        # at the current PWR price, then the vault is exhausted.
+        vault = player.patent_state.get("energy_vault", 0)
+        if vault > 0:
+            payout = vault * pwr_price
+            player.money += payout
+            state.pwr_total_earned += payout
+            player.patent_state["energy_vault"] = 0
 
 
 def do_debt_collection(state: GameState) -> None:
-    """Increase debt by $1 per DEBT_INTEREST_DIVISOR owed (minus contract value)."""
-    for player in state.players:
+    """Increase debt by $1 per DEBT_INTEREST_DIVISOR owed (minus contract value).
+
+    Financial Instruments hook: each owner of FI gains cash equal to the
+    sum of debt added to OTHER players (not themselves) this round.
+    """
+    debt_added: dict[int, int] = {}
+    for idx, player in enumerate(state.players):
         contract_offset = player.contracts_fulfilled * CONTRACT_REWARD
         effective_debt = max(0, player.debt - contract_offset)
         interest = effective_debt // DEBT_INTEREST_DIVISOR
         player.debt += interest
+        debt_added[idx] = interest
+
+    # Financial Instruments payout: for each owner, gain cash equal to the
+    # sum of debt added to OTHER players this round.
+    for idx, player in enumerate(state.players):
+        if not _player_owns_patent(player, "Financial Instruments"):
+            continue
+        bonus = sum(amt for other_idx, amt in debt_added.items() if other_idx != idx)
+        if bonus > 0:
+            player.money += bonus
 
 
 def do_futures_settlement(state: GameState) -> None:
@@ -1569,10 +1650,15 @@ def settle_silent_auction(
 
     # Pay runner_up + 5 (as debt)
     amount_paid = runner_up_bid + 5
-    state.players[winner_idx].debt += amount_paid
-    state.players[winner_idx].buildings_played.append(patent)
-    # Apply the patent's rates to the winner's accumulated rates
-    state.players[winner_idx].apply_rates(patent)
+    winner = state.players[winner_idx]
+    winner.debt += amount_paid
+    winner.buildings_played.append(patent)
+    # Apply the patent's rates to the winner's accumulated rates (most CSV
+    # patents have empty rates; the mechanical effects are wired via hooks)
+    winner.apply_rates(patent)
+    # Run any one-shot acquisition effects (Energy Vault init, Thinking
+    # Machines draw + hand_size, etc.)
+    _apply_patent_acquisition(state, winner, patent)
     return (winner_idx, amount_paid)
 
 

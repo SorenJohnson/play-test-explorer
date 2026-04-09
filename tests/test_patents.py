@@ -13,10 +13,14 @@ from my_project.simulation import (
     GameState,
     PATENT_BUILD_HOOKS,
     Player,
+    _apply_patent_acquisition,
     _bump_rate,
     _player_owns_patent,
     building_tags,
+    do_debt_collection,
+    do_power_bill,
     execute_build,
+    settle_silent_auction,
 )
 
 
@@ -410,3 +414,237 @@ class TestPatentsCsv:
         patents = parse_patents(DATA / "Patents.csv")
         sc = next(p for p in patents if p.building == "Superconductors")
         assert "PWR" in sc.effect or "Power" in sc.effect
+
+
+# --- Energy Vault ---
+
+
+class TestEnergyVault:
+    def test_acquisition_initializes_vault_to_10(self):
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        # Use the auction path so _apply_patent_acquisition fires
+        patent = _patent("Energy Vault")
+        settle_silent_auction(state, patent, bids={0: 5})
+        assert p.patent_state.get("energy_vault") == 10
+
+    def test_build_with_negative_pwr_drains_vault(self):
+        state, p = _setup_player_with_patent("Energy Vault")
+        p.patent_state["energy_vault"] = 10
+        # Build a card that costs -3 PWR per turn
+        card = _build_card("PowerHog", rates=[(Resource.PWR, -3)])
+        pwr_before = p.rate(Resource.PWR)
+        _execute_single_build(state, p, card)
+        # The -3 PWR was absorbed by the vault → player's rate unchanged
+        assert p.rate(Resource.PWR) == pwr_before
+        # Vault drained from 10 to 7
+        assert p.patent_state["energy_vault"] == 7
+
+    def test_partial_absorption_when_vault_almost_empty(self):
+        """Vault has 2; build is -5 PWR → vault absorbs 2, rate gets -3."""
+        state, p = _setup_player_with_patent("Energy Vault")
+        p.patent_state["energy_vault"] = 2
+        card = _build_card("BigDrain", rates=[(Resource.PWR, -5)])
+        pwr_before = p.rate(Resource.PWR)
+        _execute_single_build(state, p, card)
+        assert p.rate(Resource.PWR) == pwr_before - 3
+        assert p.patent_state["energy_vault"] == 0
+
+    def test_empty_vault_does_not_absorb(self):
+        state, p = _setup_player_with_patent("Energy Vault")
+        p.patent_state["energy_vault"] = 0
+        card = _build_card("Drain", rates=[(Resource.PWR, -2)])
+        pwr_before = p.rate(Resource.PWR)
+        _execute_single_build(state, p, card)
+        assert p.rate(Resource.PWR) == pwr_before - 2
+
+    def test_vault_does_not_affect_positive_pwr(self):
+        state, p = _setup_player_with_patent("Energy Vault")
+        p.patent_state["energy_vault"] = 10
+        card = _build_card("Solar", rates=[(Resource.PWR, 2)])
+        pwr_before = p.rate(Resource.PWR)
+        _execute_single_build(state, p, card)
+        assert p.rate(Resource.PWR) == pwr_before + 2
+        # Vault unchanged
+        assert p.patent_state["energy_vault"] == 10
+
+    def test_power_bill_pays_out_remainder(self):
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        p.buildings_played.append(_patent("Energy Vault"))
+        p.patent_state["energy_vault"] = 7
+        # Force PWR rate to 0 so the only earnings are from the vault
+        p.rates[Resource.PWR] = 0
+        money_before = p.money
+        do_power_bill(state)
+        pwr_price = state.market.price(Resource.PWR)
+        assert p.money == money_before + 7 * pwr_price
+        # Vault is now exhausted
+        assert p.patent_state["energy_vault"] == 0
+
+    def test_power_bill_pays_out_only_once(self):
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        p.buildings_played.append(_patent("Energy Vault"))
+        p.patent_state["energy_vault"] = 5
+        p.rates[Resource.PWR] = 0
+        do_power_bill(state)
+        money_after_first_bill = p.money
+        # Second power bill: vault is empty, no extra payout
+        do_power_bill(state)
+        assert p.money == money_after_first_bill
+
+
+# --- Financial Instruments ---
+
+
+class TestFinancialInstruments:
+    def test_owner_gets_paid_for_others_debt_interest(self):
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        # Player 0 owns FI
+        state.players[0].buildings_played.append(_patent("Financial Instruments"))
+        # Players 1 and 2 have debt; player 0 has none
+        state.players[0].debt = 0
+        state.players[1].debt = 100  # interest = 10
+        state.players[2].debt = 50   # interest = 5
+        money_before = state.players[0].money
+        do_debt_collection(state)
+        # Owner gains 10 + 5 = 15 cash from others' debt interest
+        assert state.players[0].money == money_before + 15
+
+    def test_owner_does_not_count_own_debt_interest(self):
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        state.players[0].buildings_played.append(_patent("Financial Instruments"))
+        state.players[0].debt = 100  # owner's own debt → 10 interest, no bonus
+        state.players[1].debt = 0
+        state.players[2].debt = 0
+        money_before = state.players[0].money
+        do_debt_collection(state)
+        assert state.players[0].money == money_before  # no bonus from own debt
+
+    def test_no_owner_no_bonus(self):
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        state.players[0].debt = 50
+        state.players[1].debt = 50
+        money_before = [p.money for p in state.players]
+        do_debt_collection(state)
+        # No FI ownership → no bonuses
+        assert [p.money for p in state.players] == money_before
+
+    def test_contracts_offset_other_players_interest(self):
+        """The interest other players pay is reduced by their contract count.
+        FI bonus tracks the actual interest, not the gross."""
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        state.players[0].buildings_played.append(_patent("Financial Instruments"))
+        state.players[0].debt = 0
+        # Player 1: $100 debt, 1 contract → effective debt = max(0, 100-50) = 50 → interest = 5
+        state.players[1].debt = 100
+        state.players[1].contracts_fulfilled = 1
+        money_before = state.players[0].money
+        do_debt_collection(state)
+        assert state.players[0].money == money_before + 5
+
+
+# --- Virtual Reality ---
+
+
+class TestVirtualReality:
+    def test_doubles_pleasure_dome_bonus(self):
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        # Player 0 owns Pleasure Dome AND Virtual Reality (one PD globally → $20 base)
+        from my_project.simulation import SUPPORTED_SPECIAL_EFFECTS
+        # Build a fake Pleasure Dome card directly into buildings_played
+        pd_card = Card(
+            alternate="GLS/ELX",
+            slot=4,
+            building="Pleasure Dome",
+            costs=[],
+            rates=[],
+            effect="passive",
+            can_sell=[],
+            can_fulfill_contract=False,
+        )
+        p.buildings_played.append(pd_card)
+        p.buildings_played.append(_patent("Virtual Reality"))
+        # Zero PWR rate so the only money change is from the dome bonus
+        p.rates[Resource.PWR] = 0
+        money_before = p.money
+        do_power_bill(state)
+        # 1 PD globally → $20 base; doubled by VR → $40
+        assert p.money == money_before + 40
+
+    def test_no_pd_no_vr_bonus(self):
+        """VR alone (no Pleasure Dome) gives no bonus — there's nothing to double."""
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        p.buildings_played.append(_patent("Virtual Reality"))
+        p.rates[Resource.PWR] = 0
+        money_before = p.money
+        do_power_bill(state)
+        assert p.money == money_before
+
+    def test_pd_only_no_vr_normal_bonus(self):
+        """Just Pleasure Dome, no VR → normal $20 bonus."""
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        pd_card = Card(
+            alternate="GLS/ELX",
+            slot=4,
+            building="Pleasure Dome",
+            costs=[],
+            rates=[],
+            effect="passive",
+            can_sell=[],
+            can_fulfill_contract=False,
+        )
+        p.buildings_played.append(pd_card)
+        p.rates[Resource.PWR] = 0
+        money_before = p.money
+        do_power_bill(state)
+        assert p.money == money_before + 20
+
+
+# --- Thinking Machines ---
+
+
+class TestThinkingMachines:
+    def test_acquisition_draws_one_card(self):
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        hand_before = len(p.hand)
+        patent = _patent("Thinking Machines")
+        settle_silent_auction(state, patent, bids={0: 5})
+        # Drew 1 card → hand grew by 1
+        assert len(p.hand) == hand_before + 1
+
+    def test_acquisition_bumps_hand_size(self):
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        hand_size_before = p.hand_size
+        patent = _patent("Thinking Machines")
+        settle_silent_auction(state, patent, bids={0: 5})
+        assert p.hand_size == hand_size_before + 1
+
+    def test_apply_patent_acquisition_directly(self):
+        """Calling _apply_patent_acquisition directly works (doesn't depend on auction)."""
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        hand_before = len(p.hand)
+        hand_size_before = p.hand_size
+        _apply_patent_acquisition(state, p, _patent("Thinking Machines"))
+        assert len(p.hand) == hand_before + 1
+        assert p.hand_size == hand_size_before + 1
