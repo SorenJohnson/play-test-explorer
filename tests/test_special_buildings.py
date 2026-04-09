@@ -43,29 +43,37 @@ class TestPleasureDome:
     def test_no_dome_no_bonus(self):
         cards, contracts = _load()
         state = GameState.create(cards, contracts, num_players=3)
-        assert _pleasure_dome_bonus(state.players[0]) == 0
+        assert _pleasure_dome_bonus(state, state.players[0]) == 0
 
-    def test_one_dome_pays_20(self):
+    def test_one_dome_globally_pays_20(self):
+        """1 PD in play → that owner gets $20."""
         cards, contracts = _load()
         state = GameState.create(cards, contracts, num_players=3)
         state.players[0].buildings_played.append(_build_special("Pleasure Dome"))
-        assert _pleasure_dome_bonus(state.players[0]) == 20
+        assert _pleasure_dome_bonus(state, state.players[0]) == 20
+        # Other players (no dome) get nothing.
+        assert _pleasure_dome_bonus(state, state.players[1]) == 0
 
-    def test_two_domes_pay_30(self):
-        """Two domes: 2 × $15 = $30 per the diminishing-tier interpretation."""
+    def test_two_domes_split_two_owners_each_get_15(self):
+        """2 PDs in play, one each on two players → each owner gets $15."""
         cards, contracts = _load()
         state = GameState.create(cards, contracts, num_players=3)
         dome = _build_special("Pleasure Dome")
-        state.players[0].buildings_played.extend([dome, dome])
-        assert _pleasure_dome_bonus(state.players[0]) == 30
+        state.players[0].buildings_played.append(dome)
+        state.players[1].buildings_played.append(dome)
+        assert _pleasure_dome_bonus(state, state.players[0]) == 15
+        assert _pleasure_dome_bonus(state, state.players[1]) == 15
+        assert _pleasure_dome_bonus(state, state.players[2]) == 0
 
-    def test_three_domes_pay_30(self):
-        """Three domes: 3 × $10 = $30."""
+    def test_three_domes_split_three_owners_each_get_10(self):
+        """3 PDs in play, one each on three players → each owner gets $10."""
         cards, contracts = _load()
         state = GameState.create(cards, contracts, num_players=3)
         dome = _build_special("Pleasure Dome")
-        state.players[0].buildings_played.extend([dome, dome, dome])
-        assert _pleasure_dome_bonus(state.players[0]) == 30
+        for i in range(3):
+            state.players[i].buildings_played.append(dome)
+        for i in range(3):
+            assert _pleasure_dome_bonus(state, state.players[i]) == 10
 
     def test_power_bill_pays_dome_bonus(self):
         """do_power_bill adds the Pleasure Dome bonus on top of regular pay."""
@@ -78,6 +86,75 @@ class TestPleasureDome:
         p.buildings_played.append(_build_special("Pleasure Dome"))
         do_power_bill(state)
         assert p.money == money_before + 20
+
+    def test_power_bill_with_two_pd_owners(self):
+        """do_power_bill pays each owner $15 when 2 PDs are in play."""
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        # Zero PWR for everyone so the bill is just the dome bonus
+        for p in state.players:
+            p.rates[Resource.PWR] = 0
+        dome = _build_special("Pleasure Dome")
+        state.players[0].buildings_played.append(dome)
+        state.players[1].buildings_played.append(dome)
+        money_before = [p.money for p in state.players]
+        do_power_bill(state)
+        assert state.players[0].money == money_before[0] + 15
+        assert state.players[1].money == money_before[1] + 15
+        assert state.players[2].money == money_before[2]  # no dome
+
+
+# --- One-of-each gate ---
+
+
+class TestOneOfEach:
+    def test_cannot_build_two_pleasure_domes(self):
+        """Building a second Pleasure Dome (when one is already owned) fails."""
+        from my_project.simulation import execute_build
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        p.buildings_played.append(_build_special("Pleasure Dome"))
+        # Stick a Pleasure Dome card in hand and try to build it
+        p.hand = [_build_special("Pleasure Dome")]
+        # Make sure player can afford it
+        p.money = 100
+        for r in Resource:
+            p.rates[r] = 5
+        record = execute_build(state, p, build_indices=[0], discard_indices=[])
+        assert record is None
+
+    def test_can_build_first_special(self):
+        """The first copy of a special is allowed."""
+        from my_project.simulation import execute_build
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        p.hand = [_build_special("Pleasure Dome")]
+        p.money = 100
+        for r in Resource:
+            p.rates[r] = 5
+        record = execute_build(state, p, build_indices=[0], discard_indices=[])
+        assert record is not None
+        assert any(c.building == "Pleasure Dome" for c in p.buildings_played)
+
+    def test_ordinary_buildings_can_still_dupe(self):
+        """The constraint is slot-4 only — non-special duplicates are still fine."""
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        # Find any non-special card
+        ordinary = next(c for c in cards if not c.effect)
+        # Already owns one of these
+        p.buildings_played.append(ordinary)
+        # No exception expected; the gate skips cards without `effect`
+        from my_project.simulation import execute_build
+        p.hand = [ordinary]
+        p.money = 100
+        for r in Resource:
+            p.rates[r] = 5
+        record = execute_build(state, p, build_indices=[0], discard_indices=[])
+        assert record is not None
 
 
 # --- Space Elevator ---

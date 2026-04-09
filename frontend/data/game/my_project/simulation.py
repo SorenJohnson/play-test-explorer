@@ -714,6 +714,20 @@ def execute_build(
     build_cards = [player.hand[i] for i in build_indices]
     num_discards = len(discard_indices)
 
+    # One-of-each special-building constraint: a player can only ever own
+    # ONE copy of any slot-4 special. The `effect` field is the slot-4
+    # marker (it's empty for ordinary buildings). This also rejects
+    # multi-card builds that include duplicates of the same special.
+    seen_specials_this_build: set[str] = set()
+    for card in build_cards:
+        if not card.effect:
+            continue
+        if _count_buildings(player, card.building) > 0:
+            return None
+        if card.building in seen_specials_this_build:
+            return None
+        seen_specials_this_build.add(card.building)
+
     result = compute_build_deficit(build_cards, player, num_discards, state.market)
     if result is None:
         return None
@@ -908,23 +922,34 @@ def _count_buildings(player: Player, name: str) -> int:
     return sum(1 for c in player.buildings_played if c.building == name)
 
 
-# Pleasure Dome bonus tiers: index = number of PDs the player owns minus 1.
+# Pleasure Dome bonus tiers: indexed by GLOBAL number of PDs in play - 1.
 # Source: Cards.csv "Power Bill: $20/$15/$10 if 1/2/3 PD in play".
-# Interpretation: per-PD payout, diminishing per dome owned.
-#   1 PD → $20 (= $20)
-#   2 PDs → $15 each ($30 total)
-#   3 PDs → $10 each ($30 total)
-# Beyond 3, the per-PD bonus stays at $10.
+# Each owner who has at least one PD receives the same per-owner amount
+# from the tier — so:
+#   1 PD globally  → that owner gets $20
+#   2 PDs globally → each owner gets $15
+#   3+ PDs globally → each owner gets $10
+# With one-of-each enforcement, "PDs globally" == number of distinct
+# owners (each owner has 0 or 1 PD).
 PLEASURE_DOME_TIERS = [20, 15, 10]
 
 
-def _pleasure_dome_bonus(player: Player) -> int:
-    """Compute the Pleasure Dome power-bill bonus for this player."""
-    n = _count_buildings(player, "Pleasure Dome")
-    if n == 0:
+def _global_dome_count(state: GameState) -> int:
+    """Total number of Pleasure Domes across all players."""
+    return sum(_count_buildings(p, "Pleasure Dome") for p in state.players)
+
+
+def _pleasure_dome_bonus(state: GameState, player: Player) -> int:
+    """Per-owner power-bill bonus from Pleasure Dome.
+
+    The tier is keyed on the GLOBAL number of PDs in play, not on this
+    player's count. Each owner who has at least one PD gets the same
+    per-owner amount from that tier.
+    """
+    if _count_buildings(player, "Pleasure Dome") == 0:
         return 0
-    per_dome = PLEASURE_DOME_TIERS[min(n - 1, len(PLEASURE_DOME_TIERS) - 1)]
-    return per_dome * n
+    total = _global_dome_count(state)
+    return PLEASURE_DOME_TIERS[min(total - 1, len(PLEASURE_DOME_TIERS) - 1)]
 
 
 def _patent_office_trigger(state: GameState, player: Player) -> None:
@@ -1027,7 +1052,7 @@ def do_power_bill(state: GameState) -> None:
             player.flow_bought_units[Resource.PWR] += shortage
             player.flow_buy_cost[Resource.PWR] += cost
         # Pleasure Dome bonus is added on top of normal bill processing.
-        bonus = _pleasure_dome_bonus(player)
+        bonus = _pleasure_dome_bonus(state, player)
         if bonus > 0:
             player.money += bonus
 
