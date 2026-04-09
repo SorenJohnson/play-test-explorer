@@ -41,6 +41,7 @@ from my_project.simulation import (
     HAND_SIZE,
     Player,
     compute_build_deficit,
+    effective_contract_requirements,
     execute_build,
     execute_contract,
     execute_event_with_redraws,
@@ -526,13 +527,14 @@ class PlayableGame:
             if any(player.rate(r) > 0 for r in card.can_sell):
                 can_sell.append(i)
 
-        # Contract-fulfillable combinations
+        # Contract-fulfillable combinations (Space Elevator discount applies)
         can_contract = []
         for i, card in enumerate(player.hand):
             if not card.can_fulfill_contract:
                 continue
             for j, contract in enumerate(self.state.available_contracts):
-                if all(player.rate(req.resource) >= req.amount for req in contract.requirements):
+                effective = effective_contract_requirements(player, contract)
+                if all(player.rate(req.resource) >= req.amount for req in effective):
                     can_contract.append({"card_idx": i, "contract_idx": j})
 
         return {

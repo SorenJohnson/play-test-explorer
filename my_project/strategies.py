@@ -19,6 +19,7 @@ from my_project.simulation import (
     GameState,
     Player,
     compute_build_deficit,
+    effective_contract_requirements,
     swap_pool_card,
 )
 
@@ -61,8 +62,9 @@ def _score_card(card, player: Player, state) -> float:
     contract_value = 0.0
     if card.can_fulfill_contract:
         for contract in state.available_contracts:
+            effective = effective_contract_requirements(player, contract)
             can_afford = all(
-                player.rate(req.resource) >= req.amount for req in contract.requirements
+                player.rate(req.resource) >= req.amount for req in effective
             )
             if can_afford:
                 score = _score_contract(state, player, contract)
@@ -136,13 +138,14 @@ def random_strategy(state: GameState, player: Player) -> Action:
                     options.append(Action(ActionType.SELL, sell_card=i))
                     break
 
-    # Contract
+    # Contract (Space Elevator discount applies to the affordability check)
     for i, card in enumerate(player.hand):
         if card.can_fulfill_contract:
             for ci, contract in enumerate(state.available_contracts):
+                effective = effective_contract_requirements(player, contract)
                 can_afford = all(
                     player.rate(req.resource) >= req.amount
-                    for req in contract.requirements
+                    for req in effective
                 )
                 if can_afford:
                     options.append(Action(ActionType.CONTRACT, contract_card=i, contract_idx=ci))

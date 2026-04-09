@@ -37,6 +37,16 @@ DEBT_COLLECTION_RANGE = (2, 4)
 FUTURES_SETTLEMENT_RANGE = (3, 4)
 PWR_ADJUST_FRACTION = 0.5  # fraction of remaining slots
 
+# Slot-4 special buildings whose effects are wired up. Cards in Cards.csv
+# with `effect` strings are excluded from the deck unless their `Building`
+# name appears here. Add to this set when implementing a new special-
+# building handler so the deck starts dealing it.
+SUPPORTED_SPECIAL_EFFECTS: set[str] = {
+    "Pleasure Dome",        # passive: power-bill bonus per dome owned
+    "Optimization Center",  # passive: pre-futures rate boost
+    "Space Elevator",       # passive: -1 to all contract requirements
+}
+
 
 # Corporations (name, starting rates)
 CORPORATIONS: list[tuple[str, dict[str, int]]] = [
@@ -527,9 +537,16 @@ class GameState:
                 roll = random.choice([3, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, -2, -2, -2, -3, -3, -4, -4, 0])
                 market.adjust(r, roll)
 
-        # Filter out special-effect cards (Slot 4 with effects)
-        basic_cards = [c for c in all_cards if not c.effect]
-        deck = Deck.from_cards(basic_cards)
+        # Filter the deck to only include cards whose effect we know how to
+        # handle. Slot-4 buildings live in Cards.csv with non-empty `effect`
+        # strings; SUPPORTED_SPECIAL_EFFECTS gates which ones are wired up.
+        # Anything with an unrecognized effect is silently excluded so the
+        # deck can't deal "broken" cards.
+        playable_cards = [
+            c for c in all_cards
+            if not c.effect or c.building in SUPPORTED_SPECIAL_EFFECTS
+        ]
+        deck = Deck.from_cards(playable_cards)
 
         # Draw contracts
         contracts = list(all_contracts)
@@ -798,24 +815,27 @@ def execute_contract(
     Returns ActionRecord on success, None if player can't afford it.
     """
     contract = state.available_contracts[contract_idx]
+    # Apply Space Elevator discount: each SE reduces every requirement by 1.
+    effective_reqs = effective_contract_requirements(player, contract)
 
-    # Check if player can afford the rate costs
-    for req in contract.requirements:
+    # Check if player can afford the (discounted) rate costs
+    for req in effective_reqs:
         if player.rate(req.resource) < req.amount:
             return None
 
-    # Compute costs from ledger before spending rates
-    contract_true_cost = player.ledger.contract_cost(contract.requirements)
-    contract_gross_cost = player.ledger.contract_gross_cost(contract.requirements)
+    # Compute costs from ledger before spending rates (uses discounted reqs)
+    contract_true_cost = player.ledger.contract_cost(effective_reqs)
+    contract_gross_cost = player.ledger.contract_gross_cost(effective_reqs)
 
-    # Spend rates permanently
+    # Spend rates permanently (the effective amount, not the original)
     rates_spent: dict[str, int] = {}
-    for req in contract.requirements:
-        player.rates[req.resource] -= req.amount
-        rates_spent[req.resource.value] = req.amount
+    for req in effective_reqs:
+        if req.amount > 0:
+            player.rates[req.resource] -= req.amount
+            rates_spent[req.resource.value] = req.amount
 
     # Record in ledger
-    player.ledger.record_contract(contract.requirements)
+    player.ledger.record_contract(effective_reqs)
 
     # Contracts pay off debt, not give cash. Remaining value is end-game net worth.
     debt_payoff = min(player.debt, contract.reward)
@@ -823,6 +843,8 @@ def execute_contract(
     player.contracts_fulfilled += 1
     state.deck.discard.append(player.hand.pop(card_idx))
 
+    # Display label uses the ORIGINAL requirements so the log is consistent
+    # (the discount is reflected in rates_spent for analytics).
     req_str = ", ".join(f"{r.amount} {r.resource.value}" for r in contract.requirements)
     label = req_str
 
@@ -842,6 +864,51 @@ def execute_contract(
     )
 
 
+# --- Special-building helpers ---
+
+def _count_buildings(player: Player, name: str) -> int:
+    """Number of copies of `name` in the player's buildings_played."""
+    return sum(1 for c in player.buildings_played if c.building == name)
+
+
+# Pleasure Dome bonus tiers: index = number of PDs the player owns minus 1.
+# Source: Cards.csv "Power Bill: $20/$15/$10 if 1/2/3 PD in play".
+# Interpretation: per-PD payout, diminishing per dome owned.
+#   1 PD → $20 (= $20)
+#   2 PDs → $15 each ($30 total)
+#   3 PDs → $10 each ($30 total)
+# Beyond 3, the per-PD bonus stays at $10.
+PLEASURE_DOME_TIERS = [20, 15, 10]
+
+
+def _pleasure_dome_bonus(player: Player) -> int:
+    """Compute the Pleasure Dome power-bill bonus for this player."""
+    n = _count_buildings(player, "Pleasure Dome")
+    if n == 0:
+        return 0
+    per_dome = PLEASURE_DOME_TIERS[min(n - 1, len(PLEASURE_DOME_TIERS) - 1)]
+    return per_dome * n
+
+
+def effective_contract_requirements(
+    player: Player,
+    contract: Contract,
+) -> list[ResourceAmount]:
+    """Apply Space Elevator's -1 to each contract requirement (floor 0).
+
+    Each Space Elevator the player owns reduces every contract requirement
+    by 1, down to a minimum of 0. Returns a fresh list of ResourceAmount
+    so callers can use it without mutating the original contract.
+    """
+    discount = _count_buildings(player, "Space Elevator")
+    if discount == 0:
+        return list(contract.requirements)
+    return [
+        ResourceAmount(resource=req.resource, amount=max(0, req.amount - discount))
+        for req in contract.requirements
+    ]
+
+
 # --- Events ---
 
 def do_pwr_adjust(state: GameState, player: Player) -> None:
@@ -857,7 +924,10 @@ def do_pwr_adjust(state: GameState, player: Player) -> None:
 
 
 def do_power_bill(state: GameState) -> None:
-    """Power bill event: positive PWR earns money, negative PWR adds debt."""
+    """Power bill event: positive PWR earns money, negative PWR adds debt.
+
+    Pleasure Dome owners also get a flat per-dome bonus on every power bill.
+    """
     pwr_price = state.market.price(Resource.PWR)
     for player in state.players:
         pwr_rate = player.rate(Resource.PWR)
@@ -879,6 +949,10 @@ def do_power_bill(state: GameState) -> None:
             # Per-player: power bill debt counts as "bought" PWR
             player.flow_bought_units[Resource.PWR] += shortage
             player.flow_buy_cost[Resource.PWR] += cost
+        # Pleasure Dome bonus is added on top of normal bill processing.
+        bonus = _pleasure_dome_bonus(player)
+        if bonus > 0:
+            player.money += bonus
 
 
 def do_debt_collection(state: GameState) -> None:
@@ -895,10 +969,28 @@ def do_futures_settlement(state: GameState) -> None:
 
     All players pay the price at the start of settlement. Then the market
     rises by the total negative rates across all players for each resource.
+
+    Optimization Center owners get +1 to a positive non-PWR rate per OC,
+    applied BEFORE the settlement is calculated. The chosen rate is the
+    highest-priced one the player currently has (max value boost).
     """
     # Snapshot prices before any market shifts
     starting_prices = {r: state.market.price(r) for r in Resource if r != Resource.PWR}
     total_negatives: dict[Resource, int] = {r: 0 for r in starting_prices}
+
+    # Optimization Center: pre-settlement rate boost
+    for player in state.players:
+        oc_count = _count_buildings(player, "Optimization Center")
+        for _ in range(oc_count):
+            # Pick the highest-priced positive non-PWR rate to boost.
+            candidates = [
+                r for r in starting_prices
+                if player.rate(r) > 0
+            ]
+            if not candidates:
+                continue
+            best = max(candidates, key=lambda r: starting_prices[r])
+            player.rates[best] = player.rate(best) + 1
 
     # All players pay debt at the snapshot price
     for player in state.players:
