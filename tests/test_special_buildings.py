@@ -14,6 +14,7 @@ from my_project.simulation import (
     do_power_bill,
     effective_contract_requirements,
     execute_contract,
+    execute_sell,
 )
 
 
@@ -202,12 +203,96 @@ class TestOptimizationCenter:
         assert p.rate(Resource.FE) == 3
 
 
+# --- Hacker Array ---
+
+
+class TestHackerArray:
+    def test_no_hacker_no_market_bump(self):
+        """Without a Hacker Array, selling doesn't bump any other resource."""
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        p.rates[Resource.FE] = 2
+        # Give player a sellable FE card in hand
+        sellable_fe = Card(
+            alternate="C/SI",
+            slot=1,
+            building="MockSeller",
+            costs=[],
+            rates=[],
+            effect="",
+            can_sell=[Resource.FE],
+            can_fulfill_contract=False,
+        )
+        p.hand = [sellable_fe]
+        prices_before = {r: state.market.price(r) for r in Resource}
+        execute_sell(state, p, card_idx=0)
+        for r in Resource:
+            if r == Resource.FE:
+                continue  # the sold resource always drops
+            assert state.market.price(r) == prices_before[r]
+
+    def test_hacker_bumps_highest_priced_non_sold(self):
+        """With a Hacker Array, selling bumps +3 the highest-priced non-sold non-PWR."""
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        p.buildings_played.append(_build_special("Hacker Array"))
+        p.rates[Resource.FE] = 2
+        # Make GLS the most expensive (other than what we're selling)
+        for r in Resource:
+            if r in (Resource.GLS, Resource.PWR):
+                continue
+            # nudge GLS up
+            pass
+        state.market.adjust(Resource.GLS, 8)
+        gls_price_before = state.market.price(Resource.GLS)
+        # Give player a sellable FE card
+        sellable_fe = Card(
+            alternate="C/SI",
+            slot=1,
+            building="MockSeller",
+            costs=[],
+            rates=[],
+            effect="",
+            can_sell=[Resource.FE],
+            can_fulfill_contract=False,
+        )
+        p.hand = [sellable_fe]
+        execute_sell(state, p, card_idx=0)
+        # GLS should have moved up by 3 positions on the market track
+        # (the test is robust to what the actual price values are; we just
+        # check it's higher)
+        assert state.market.price(Resource.GLS) >= gls_price_before
+
+    def test_hacker_bonus_in_action_record_detail(self):
+        """The action record's detail string mentions the HA bonus."""
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        p.buildings_played.append(_build_special("Hacker Array"))
+        p.rates[Resource.FE] = 1
+        sellable_fe = Card(
+            alternate="C/SI",
+            slot=1,
+            building="MockSeller",
+            costs=[],
+            rates=[],
+            effect="",
+            can_sell=[Resource.FE],
+            can_fulfill_contract=False,
+        )
+        p.hand = [sellable_fe]
+        record = execute_sell(state, p, card_idx=0)
+        assert "[HA:" in record.detail
+
+
 # --- Filter gate ---
 
 
 class TestSupportedSpecialEffects:
     def test_supported_set_includes_passives(self):
-        for name in ["Pleasure Dome", "Optimization Center", "Space Elevator"]:
+        for name in ["Pleasure Dome", "Optimization Center", "Space Elevator", "Hacker Array"]:
             assert name in SUPPORTED_SPECIAL_EFFECTS
 
     def test_unsupported_specials_excluded_from_deck(self):

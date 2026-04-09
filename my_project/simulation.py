@@ -45,6 +45,7 @@ SUPPORTED_SPECIAL_EFFECTS: set[str] = {
     "Pleasure Dome",        # passive: power-bill bonus per dome owned
     "Optimization Center",  # passive: pre-futures rate boost
     "Space Elevator",       # passive: -1 to all contract requirements
+    "Hacker Array",         # passive on sell: +3 to highest-priced non-sold resource
 }
 
 
@@ -798,9 +799,22 @@ def execute_sell(state: GameState, player: Player, card_idx: int) -> ActionRecor
     player.flow_sold_units[best_resource] += rate
     player.flow_sell_revenue[best_resource] += revenue
     state.deck.discard.append(player.hand.pop(card_idx))
+
+    # Hacker Array bonus: passive effect that fires on every sell. The owner
+    # bumps the highest-priced resource (other than the one just sold) by +3.
+    # Auto-targeted for now; an explicit picker UI is a future improvement.
+    detail_extra = ""
+    ha_count = _count_buildings(player, "Hacker Array")
+    if ha_count > 0:
+        candidates = [r for r in Resource if r != best_resource and r != Resource.PWR]
+        if candidates:
+            target = max(candidates, key=lambda r: state.market.price(r))
+            state.market.adjust(target, 3)
+            detail_extra = f" [HA: +3 {target.value}]"
+
     return ActionRecord(
         action_type="sell",
-        detail=f"Sold {rate} {best_resource.value} for ${revenue}",
+        detail=f"Sold {rate} {best_resource.value} for ${revenue}{detail_extra}",
         sell_resource=best_resource.value,
         sell_amount=rate,
         sell_revenue=revenue,
