@@ -53,6 +53,14 @@ let selectedBuildIdxs = new Set();
 let selectedDiscardIdxs = new Set();
 let selectedContractIdx = null;
 let pendingPoolSwapIdx = null;
+// Special-building per-action toggles:
+// useElevatorThisFulfill: apply Space Elevator -1 on the next contract action
+// useLaunchPadThisFulfill: use Launch Pad as the contract icon (no card needed)
+// hackerTarget / hackerDirection: Hacker Array picker for the next sell
+let useElevatorThisFulfill = false;
+let useLaunchPadThisFulfill = false;
+let hackerTarget = "";
+let hackerDirection = 0;
 
 // --- Boot ---
 
@@ -381,6 +389,10 @@ function clearSelection() {
   selectedDiscardIdxs.clear();
   selectedContractIdx = null;
   pendingPoolSwapIdx = null;
+  useElevatorThisFulfill = false;
+  useLaunchPadThisFulfill = false;
+  hackerTarget = "";
+  hackerDirection = 0;
 }
 
 function refreshState() {
@@ -420,6 +432,7 @@ function render() {
   renderPool();
   renderHand();
   renderActionBar();
+  renderOcSection();
   renderPatentSection();
   renderLog();
 }
@@ -878,15 +891,27 @@ function renderActionBar() {
   const canSell = singleSelected !== null && canSellIdxs.has(singleSelected);
   sellBtn.disabled = !canSell;
 
-  // Contract: requires exactly one card selected + a contract selected, pair must be legal
-  const validContractPairs = new Set(
-    (legal.can_contract || []).map((c) => `${c.card_idx}-${c.contract_idx}`)
-  );
+  // Contract: legal if a contract is selected and EITHER:
+  //   (a) a hand-card is selected and the (card,contract) pair is in can_contract
+  //   (b) Launch Pad toggle is on, owned, unused, and (-1,contract) is in can_contract
+  // Either path can compose with the Space Elevator toggle.
+  const canContractList = legal.can_contract || [];
+  const matchKey = (entry) =>
+    `${entry.card_idx}-${entry.contract_idx}-${entry.use_elevator ? 1 : 0}-${entry.use_launch_pad ? 1 : 0}`;
+  const validKeys = new Set(canContractList.map(matchKey));
+  const targetCardIdx = useLaunchPadThisFulfill ? -1 : singleSelected;
   const canContract =
-    singleSelected !== null &&
     selectedContractIdx !== null &&
-    validContractPairs.has(`${singleSelected}-${selectedContractIdx}`);
+    targetCardIdx !== null &&
+    targetCardIdx !== undefined &&
+    (useLaunchPadThisFulfill || singleSelected !== null) &&
+    validKeys.has(
+      `${targetCardIdx}-${selectedContractIdx}-${useElevatorThisFulfill ? 1 : 0}-${useLaunchPadThisFulfill ? 1 : 0}`
+    );
   contractBtn.disabled = !canContract;
+
+  // Render the special-building toggles (SE / LP / HA picker)
+  renderSpecialToggles(legal, singleSelected);
 
   // Hint text
   if (alreadyBuilt && selectedBuildIdxs.size === 0 && selectedContractIdx === null) {
@@ -901,6 +926,142 @@ function renderActionBar() {
     instr.textContent = "Choose Build, Sell, or (with a contract selected) Fulfill Contract.";
   } else if (selectedContractIdx !== null) {
     instr.textContent = "Now select a hand card with a contract icon to fulfill this contract.";
+  }
+}
+
+function renderSpecialToggles(legal, singleSelected) {
+  const host = document.getElementById("special-toggles");
+  if (!host) return;
+  const seStatus = (legal && legal.space_elevator_status) || {};
+  const lpStatus = (legal && legal.launch_pad_status) || {};
+  const haStatus = (legal && legal.hacker_array_status) || {};
+
+  const parts = [];
+
+  // Hacker Array picker — only relevant when a sell candidate is selected
+  if (haStatus.owned && singleSelected !== null && singleSelected !== undefined) {
+    const dirSign = hackerDirection > 0 ? "+3" : hackerDirection < 0 ? "-3" : "0";
+    const dirColor = hackerDirection > 0 ? "#3fb950" : hackerDirection < 0 ? "#f85149" : "#8b949e";
+    parts.push(`
+      <div class="toggle-row">
+        <span class="toggle-label">Hacker Array:</span>
+        <select id="ha-target" class="toggle-select">
+          <option value="">— skip bonus —</option>
+          <option value="PWR" ${hackerTarget === "PWR" ? "selected" : ""}>PWR</option>
+          <option value="H2O" ${hackerTarget === "H2O" ? "selected" : ""}>H2O</option>
+          <option value="FE" ${hackerTarget === "FE" ? "selected" : ""}>FE</option>
+          <option value="C" ${hackerTarget === "C" ? "selected" : ""}>C</option>
+          <option value="SI" ${hackerTarget === "SI" ? "selected" : ""}>SI</option>
+          <option value="O2" ${hackerTarget === "O2" ? "selected" : ""}>O2</option>
+          <option value="FOOD" ${hackerTarget === "FOOD" ? "selected" : ""}>FOOD</option>
+          <option value="GLS" ${hackerTarget === "GLS" ? "selected" : ""}>GLS</option>
+          <option value="ELX" ${hackerTarget === "ELX" ? "selected" : ""}>ELX</option>
+        </select>
+        <button id="ha-up" class="action-btn ${hackerDirection > 0 ? "active" : ""}">↑ +3</button>
+        <button id="ha-down" class="action-btn ${hackerDirection < 0 ? "active" : ""}">↓ -3</button>
+        <span style="color:${dirColor}; font-size:0.8rem;">${hackerTarget ? `${hackerTarget} ${dirSign}` : "no bonus"}</span>
+      </div>
+    `);
+  }
+
+  // Space Elevator toggle — visible whenever owned. Disabled if used.
+  if (seStatus.owned) {
+    const used = !!seStatus.used;
+    parts.push(`
+      <div class="toggle-row">
+        <label class="toggle-checkbox-label">
+          <input type="checkbox" id="se-toggle" ${useElevatorThisFulfill && !used ? "checked" : ""} ${used ? "disabled" : ""}>
+          <span>Use Space Elevator (-1 to all contract reqs)</span>
+        </label>
+        ${used ? '<span style="color:#8b949e; font-size:0.75rem;">already used this turn</span>' : ''}
+      </div>
+    `);
+  }
+
+  // Launch Pad toggle — visible whenever owned. Disabled if used.
+  if (lpStatus.owned) {
+    const used = !!lpStatus.used;
+    parts.push(`
+      <div class="toggle-row">
+        <label class="toggle-checkbox-label">
+          <input type="checkbox" id="lp-toggle" ${useLaunchPadThisFulfill && !used ? "checked" : ""} ${used ? "disabled" : ""}>
+          <span>Use Launch Pad (free contract icon)</span>
+        </label>
+        ${used ? '<span style="color:#8b949e; font-size:0.75rem;">already used this turn</span>' : ''}
+      </div>
+    `);
+  }
+
+  host.innerHTML = parts.join("");
+
+  // Wire HA picker
+  const haTargetEl = document.getElementById("ha-target");
+  if (haTargetEl) {
+    haTargetEl.addEventListener("change", (e) => {
+      hackerTarget = e.target.value;
+      if (!hackerTarget) hackerDirection = 0;
+      render();
+    });
+  }
+  const haUpEl = document.getElementById("ha-up");
+  if (haUpEl) {
+    haUpEl.addEventListener("click", () => {
+      hackerDirection = hackerDirection === 1 ? 0 : 1;
+      render();
+    });
+  }
+  const haDownEl = document.getElementById("ha-down");
+  if (haDownEl) {
+    haDownEl.addEventListener("click", () => {
+      hackerDirection = hackerDirection === -1 ? 0 : -1;
+      render();
+    });
+  }
+
+  // Wire SE/LP toggles
+  const seToggleEl = document.getElementById("se-toggle");
+  if (seToggleEl) {
+    seToggleEl.addEventListener("change", (e) => {
+      useElevatorThisFulfill = e.target.checked;
+      render();
+    });
+  }
+  const lpToggleEl = document.getElementById("lp-toggle");
+  if (lpToggleEl) {
+    lpToggleEl.addEventListener("change", (e) => {
+      useLaunchPadThisFulfill = e.target.checked;
+      render();
+    });
+  }
+}
+
+function renderOcSection() {
+  const s = currentState;
+  const legal = currentLegal || {};
+  const section = document.getElementById("oc-section");
+  if (!section) return;
+  const youIdx = activeHumanIndex(s);
+  const isHumanTurn = (s.human_indices || []).includes(s.current_player_index);
+  if (!isHumanTurn || !legal.optimization_center_owned) {
+    section.style.display = "none";
+    return;
+  }
+  section.style.display = "block";
+  const pendingPicks = s.pending_oc_picks || {};
+  const myPick = pendingPicks[youIdx];
+  const status = document.getElementById("oc-status");
+  if (status) {
+    if (myPick) {
+      status.textContent = `Target declared: ${myPick}`;
+      status.style.color = "#3fb950";
+    } else {
+      status.textContent = "No target declared (will auto-pick highest-priced)";
+      status.style.color = "#8b949e";
+    }
+  }
+  const input = document.getElementById("oc-target-input");
+  if (input && myPick && document.activeElement !== input) {
+    input.value = myPick;
   }
 }
 
@@ -1040,6 +1201,29 @@ function wireButtons() {
       refreshState();
     });
   }
+
+  // Optimization Center picker
+  const ocSetBtn = document.getElementById("oc-set-btn");
+  if (ocSetBtn) {
+    ocSetBtn.addEventListener("click", () => {
+      const input = document.getElementById("oc-target-input");
+      if (!input || !game) return;
+      const youIdx = activeHumanIndex(currentState);
+      const value = input.value;
+      if (!value) return;
+      game.set_oc_pick(youIdx, value);
+      refreshState();
+    });
+  }
+  const ocClearBtn = document.getElementById("oc-clear-btn");
+  if (ocClearBtn) {
+    ocClearBtn.addEventListener("click", () => {
+      if (!game) return;
+      const youIdx = activeHumanIndex(currentState);
+      game.clear_oc_pick(youIdx);
+      refreshState();
+    });
+  }
 }
 
 function onBuild() {
@@ -1059,7 +1243,12 @@ function onBuild() {
 function onSell() {
   if (selectedBuildIdxs.size !== 1) return;
   const cardIdx = [...selectedBuildIdxs][0];
-  const action = { type: "sell", card_idx: cardIdx };
+  const action = {
+    type: "sell",
+    card_idx: cardIdx,
+    hacker_target: hackerTarget || "",
+    hacker_direction: hackerDirection,
+  };
   applyHumanAction(action, (result) => {
     if (result.ok && result.sell_resource) {
       logHumanAction(`Sold ${result.sell_amount} ${result.sell_resource} for $${result.sell_revenue}`);
@@ -1070,12 +1259,18 @@ function onSell() {
 }
 
 function onContract() {
-  if (selectedBuildIdxs.size !== 1 || selectedContractIdx === null) return;
-  const cardIdx = [...selectedBuildIdxs][0];
+  // With Launch Pad, no hand card is required.
+  if (selectedContractIdx === null) return;
+  if (!useLaunchPadThisFulfill && selectedBuildIdxs.size !== 1) return;
+  const cardIdx = useLaunchPadThisFulfill
+    ? -1
+    : [...selectedBuildIdxs][0];
   const action = {
     type: "contract",
     card_idx: cardIdx,
     contract_idx: selectedContractIdx,
+    use_elevator: useElevatorThisFulfill,
+    use_launch_pad: useLaunchPadThisFulfill,
   };
   applyHumanAction(action, (result) => {
     if (result.ok) {

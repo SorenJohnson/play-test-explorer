@@ -240,8 +240,11 @@ class PlayableGame:
         # Record which player is acting via _turn_count, BEFORE incrementing it.
         self._active_player_idx = self._turn_count % self.num_players
         self._turn_count += 1
-        # Reset per-turn state (rule: one build action per turn)
-        self.state.players[self._active_player_idx].has_built_this_turn = False
+        # Reset per-turn state
+        active = self.state.players[self._active_player_idx]
+        active.has_built_this_turn = False
+        active.has_used_space_elevator_this_turn = False
+        active.has_used_launch_pad_this_turn = False
         # Pre-advance event_idx and stash the current turn's event so that
         # state.remaining_events() does NOT reveal it to the UI or any helper
         # that inspects remaining events during the action phase.
@@ -305,7 +308,7 @@ class PlayableGame:
                 return {"ok": False, "reason": "No cards selected"}
             record = execute_build(self.state, player, build_idx, discard_idx)
             if record is None:
-                return {"ok": False, "reason": "Cannot afford build"}
+                return {"ok": False, "reason": "Cannot afford build (or duplicate special)"}
             self._turn_action_records.append(record)
             return _record_to_dict(record, ok=True)
 
@@ -316,22 +319,38 @@ class PlayableGame:
             card = player.hand[idx]
             if not card.can_sell:
                 return {"ok": False, "reason": "Card cannot sell"}
-            record = execute_sell(self.state, player, idx)
+            record = execute_sell(
+                self.state,
+                player,
+                idx,
+                hacker_target=action.get("hacker_target") or None,
+                hacker_direction=int(action.get("hacker_direction", 0) or 0),
+            )
             self._turn_action_records.append(record)
             return _record_to_dict(record, ok=True)
 
         if atype == "contract":
             card_idx = action.get("card_idx", -1)
             contract_idx = action.get("contract_idx", -1)
-            if card_idx < 0 or card_idx >= len(player.hand):
-                return {"ok": False, "reason": "Invalid card"}
-            if not player.hand[card_idx].can_fulfill_contract:
-                return {"ok": False, "reason": "Card has no contract icon"}
+            use_elevator = bool(action.get("use_elevator", False))
+            use_launch_pad = bool(action.get("use_launch_pad", False))
+            if not use_launch_pad:
+                if card_idx < 0 or card_idx >= len(player.hand):
+                    return {"ok": False, "reason": "Invalid card"}
+                if not player.hand[card_idx].can_fulfill_contract:
+                    return {"ok": False, "reason": "Card has no contract icon"}
             if contract_idx < 0 or contract_idx >= len(self.state.available_contracts):
                 return {"ok": False, "reason": "Invalid contract"}
-            record = execute_contract(self.state, player, card_idx, contract_idx)
+            record = execute_contract(
+                self.state,
+                player,
+                card_idx,
+                contract_idx,
+                use_elevator=use_elevator,
+                use_launch_pad=use_launch_pad,
+            )
             if record is None:
-                return {"ok": False, "reason": "Cannot fulfill contract (missing rates)"}
+                return {"ok": False, "reason": "Cannot fulfill contract"}
             self._turn_action_records.append(record)
             return _record_to_dict(record, ok=True)
 
@@ -384,6 +403,25 @@ class PlayableGame:
         self.state.pending_bids.pop(seat_idx, None)
         return {"ok": True}
 
+    def set_oc_pick(self, seat_idx: int, resource: str) -> dict:
+        """Set a human seat's Optimization Center target for the next futures
+        settlement. Validated against Resource enum and excludes PWR."""
+        if seat_idx not in self._human_indices:
+            return {"ok": False, "reason": "Seat is not human"}
+        try:
+            res = Resource(resource)
+        except ValueError:
+            return {"ok": False, "reason": f"Invalid resource: {resource}"}
+        if res == Resource.PWR:
+            return {"ok": False, "reason": "PWR is not a valid OC target"}
+        self.state.pending_oc_picks[seat_idx] = res.value
+        return {"ok": True, "resource": res.value}
+
+    def clear_oc_pick(self, seat_idx: int) -> dict:
+        """Clear a previously declared OC target."""
+        self.state.pending_oc_picks.pop(seat_idx, None)
+        return {"ok": True}
+
     # --- AI turn ---
 
     def step_ai_turn(self) -> dict:
@@ -410,8 +448,10 @@ class PlayableGame:
         # Snapshot hand-before so we can diff action records into a log
         actions_log: list[dict] = []
 
-        # Reset per-turn state (rule: one build action per turn)
+        # Reset per-turn state
         player.has_built_this_turn = False
+        player.has_used_space_elevator_this_turn = False
+        player.has_used_launch_pad_this_turn = False
 
         # Look up this seat's strategy. seats is fully populated by __post_init__.
         strategy_fn = _resolve_strategy(self.seats[acting_player_idx])
@@ -515,6 +555,8 @@ class PlayableGame:
             # Patent state for the auction UI
             "patent_pile_remaining": max(0, len(s.patent_pile) - s.patent_idx),
             "pending_bids": dict(s.pending_bids),
+            # Optimization Center pre-declared picks (seat → resource string)
+            "pending_oc_picks": dict(s.pending_oc_picks),
         }
 
     # --- Legal action enumeration (for UI hinting) ---
@@ -536,14 +578,23 @@ class PlayableGame:
                 "affordable_single_builds": [],
                 "can_sell": [],
                 "can_contract": [],
+                "space_elevator_status": {"owned": False, "used": False},
+                "launch_pad_status": {"owned": False, "used": False},
+                "hacker_array_status": {"owned": False},
+                "optimization_center_owned": False,
             }
         player = self.current_player()
         already_built = player.has_built_this_turn
 
-        # Affordable single-card builds (only meaningful if not already built)
+        from my_project.simulation import _count_buildings
+
+        # Affordable single-card builds (only meaningful if not already built).
+        # Skips slot-4 specials the player already owns (one-of-each rule).
         affordable = []
         if not already_built:
             for i, card in enumerate(player.hand):
+                if card.effect and _count_buildings(player, card.building) > 0:
+                    continue  # already owns this special
                 result = compute_build_deficit([card], player, 0, self.state.market)
                 if result is not None:
                     _, cost = result
@@ -557,21 +608,62 @@ class PlayableGame:
             if any(player.rate(r) > 0 for r in card.can_sell):
                 can_sell.append(i)
 
-        # Contract-fulfillable combinations (Space Elevator discount applies)
+        # Special-building consumable status
+        se_owned = _count_buildings(player, "Space Elevator") > 0
+        se_used = player.has_used_space_elevator_this_turn
+        lp_owned = _count_buildings(player, "Launch Pad") > 0
+        lp_used = player.has_used_launch_pad_this_turn
+        ha_owned = _count_buildings(player, "Hacker Array") > 0
+        oc_owned = _count_buildings(player, "Optimization Center") > 0
+
+        # Contract-fulfillable combinations. Each entry includes flags for
+        # which special-building paths it requires (if any).
         can_contract = []
-        for i, card in enumerate(player.hand):
-            if not card.can_fulfill_contract:
+        for j, contract in enumerate(self.state.available_contracts):
+            plain_reqs = effective_contract_requirements(player, contract, apply_elevator=False)
+            plain_ok = all(player.rate(req.resource) >= req.amount for req in plain_reqs)
+            disc_reqs = effective_contract_requirements(player, contract, apply_elevator=True)
+            disc_ok = se_owned and not se_used and all(
+                player.rate(req.resource) >= req.amount for req in disc_reqs
+            )
+            if not plain_ok and not disc_ok:
                 continue
-            for j, contract in enumerate(self.state.available_contracts):
-                effective = effective_contract_requirements(player, contract)
-                if all(player.rate(req.resource) >= req.amount for req in effective):
-                    can_contract.append({"card_idx": i, "contract_idx": j})
+            # Real hand cards
+            for i, card in enumerate(player.hand):
+                if not card.can_fulfill_contract:
+                    continue
+                if plain_ok:
+                    can_contract.append({
+                        "card_idx": i, "contract_idx": j,
+                        "use_elevator": False, "use_launch_pad": False,
+                    })
+                if disc_ok:
+                    can_contract.append({
+                        "card_idx": i, "contract_idx": j,
+                        "use_elevator": True, "use_launch_pad": False,
+                    })
+            # Launch Pad path (no hand card needed)
+            if lp_owned and not lp_used:
+                if plain_ok:
+                    can_contract.append({
+                        "card_idx": -1, "contract_idx": j,
+                        "use_elevator": False, "use_launch_pad": True,
+                    })
+                if disc_ok:
+                    can_contract.append({
+                        "card_idx": -1, "contract_idx": j,
+                        "use_elevator": True, "use_launch_pad": True,
+                    })
 
         return {
             "already_built": already_built,
             "affordable_single_builds": affordable,
             "can_sell": can_sell,
             "can_contract": can_contract,
+            "space_elevator_status": {"owned": se_owned, "used": se_used},
+            "launch_pad_status": {"owned": lp_owned, "used": lp_used},
+            "hacker_array_status": {"owned": ha_owned},
+            "optimization_center_owned": oc_owned,
         }
 
     def estimate_build_cost(self, build_indices: list[int], discard_indices: list[int]) -> dict:

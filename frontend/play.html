@@ -104,11 +104,39 @@
         <h2>Actions</h2>
         <div id="action-instructions" class="subtitle"></div>
         <div id="build-estimate" class="subtitle" style="min-height:20px; margin-bottom:8px;"></div>
+        <div id="special-toggles" style="margin-bottom:8px; min-height:1px;"></div>
         <div id="action-bar">
           <button id="build-btn" class="action-btn" disabled>Build Selected</button>
           <button id="sell-btn" class="action-btn" disabled>Sell Selected</button>
           <button id="contract-btn" class="action-btn" disabled>Fulfill Contract</button>
           <button id="pass-btn" class="action-btn">Pass / End Turn</button>
+        </div>
+      </section>
+
+      <!-- Optimization Center pre-declared rate target -->
+      <section id="oc-section" style="display:none;">
+        <h2>Optimization Center: Futures Rate Target</h2>
+        <p class="subtitle" id="oc-info">
+          Pick a positive non-PWR rate to boost by +1 on the next Futures
+          Settlement. Your declaration is used the next time the event fires.
+        </p>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <label for="oc-target-input" style="font-size:0.85rem;">Target:</label>
+          <select id="oc-target-input"
+                  style="background:#21262d; border:1px solid #30363d; color:#c9d1d9; padding:4px 8px; border-radius:4px; font-size:0.85rem;">
+            <option value="">— pick a resource —</option>
+            <option value="H2O">H2O</option>
+            <option value="FE">FE</option>
+            <option value="C">C</option>
+            <option value="SI">SI</option>
+            <option value="O2">O2</option>
+            <option value="FOOD">FOOD</option>
+            <option value="GLS">GLS</option>
+            <option value="ELX">ELX</option>
+          </select>
+          <button id="oc-set-btn" class="action-btn">Set</button>
+          <button id="oc-clear-btn" class="action-btn">Clear</button>
+          <span id="oc-status" style="color:#8b949e; font-size:0.8rem;"></span>
         </div>
       </section>
 

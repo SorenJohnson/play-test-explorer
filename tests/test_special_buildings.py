@@ -160,22 +160,49 @@ class TestOneOfEach:
 # --- Space Elevator ---
 
 
+def _make_contract_card() -> Card:
+    return Card(
+        alternate="Contract",
+        slot=1,
+        building="MockContract",
+        costs=[],
+        rates=[],
+        effect="",
+        can_sell=[],
+        can_fulfill_contract=True,
+    )
+
+
 class TestSpaceElevator:
     def test_no_elevator_no_discount(self):
         cards, contracts = _load()
         state = GameState.create(cards, contracts, num_players=3)
         contract = state.available_contracts[0]
-        effective = effective_contract_requirements(state.players[0], contract)
+        # Even with apply_elevator=True, the player doesn't own one
+        effective = effective_contract_requirements(state.players[0], contract, apply_elevator=True)
         assert [(r.resource, r.amount) for r in effective] == [
             (r.resource, r.amount) for r in contract.requirements
         ]
+
+    def test_apply_elevator_false_returns_original(self):
+        """Even if the player owns SE, apply_elevator=False returns original reqs."""
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        p.buildings_played.append(_build_special("Space Elevator"))
+        contract = Contract(
+            requirements=[ResourceAmount(resource=Resource.FOOD, amount=2)],
+            reward=50,
+            count=1,
+        )
+        effective = effective_contract_requirements(p, contract, apply_elevator=False)
+        assert effective[0].amount == 2
 
     def test_elevator_reduces_each_requirement_by_one(self):
         cards, contracts = _load()
         state = GameState.create(cards, contracts, num_players=3)
         p = state.players[0]
         p.buildings_played.append(_build_special("Space Elevator"))
-        # Hand-craft a contract so the test is deterministic
         contract = Contract(
             requirements=[
                 ResourceAmount(resource=Resource.FOOD, amount=2),
@@ -184,34 +211,29 @@ class TestSpaceElevator:
             reward=50,
             count=1,
         )
-        effective = effective_contract_requirements(p, contract)
+        effective = effective_contract_requirements(p, contract, apply_elevator=True)
         amounts = {r.resource: r.amount for r in effective}
         assert amounts[Resource.FOOD] == 1
         assert amounts[Resource.GLS] == 0
 
     def test_elevator_floor_at_zero(self):
-        """Reduction can't make a requirement negative."""
-        cards, contracts = _load()
-        state = GameState.create(cards, contracts, num_players=3)
-        p = state.players[0]
-        # Two elevators: -2 to each req
-        elevator = _build_special("Space Elevator")
-        p.buildings_played.extend([elevator, elevator])
-        contract = Contract(
-            requirements=[ResourceAmount(resource=Resource.FOOD, amount=1)],
-            reward=10,
-            count=1,
-        )
-        effective = effective_contract_requirements(p, contract)
-        assert effective[0].amount == 0
-
-    def test_elevator_lets_player_fulfill_otherwise_unaffordable(self):
-        """A contract that would normally be unaffordable can be fulfilled with SE."""
         cards, contracts = _load()
         state = GameState.create(cards, contracts, num_players=3)
         p = state.players[0]
         p.buildings_played.append(_build_special("Space Elevator"))
-        # Set a contract requiring 1 FOOD when the player only has 0 FOOD rate
+        contract = Contract(
+            requirements=[ResourceAmount(resource=Resource.FOOD, amount=0)],
+            reward=10,
+            count=1,
+        )
+        effective = effective_contract_requirements(p, contract, apply_elevator=True)
+        assert effective[0].amount == 0
+
+    def test_elevator_lets_player_fulfill_otherwise_unaffordable(self):
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        p.buildings_played.append(_build_special("Space Elevator"))
         p.rates[Resource.FOOD] = 0
         custom_contract = Contract(
             requirements=[ResourceAmount(resource=Resource.FOOD, amount=1)],
@@ -219,22 +241,62 @@ class TestSpaceElevator:
             count=1,
         )
         state.available_contracts[0] = custom_contract
-        # Give the player a card with the contract icon
-        from my_project.models import Card as _Card
-        contract_card = _Card(
-            alternate="Contract",
-            slot=1,
-            building="MockContract",
-            costs=[],
-            rates=[],
-            effect="",
-            can_sell=[],
-            can_fulfill_contract=True,
-        )
-        p.hand = [contract_card]
-        record = execute_contract(state, p, card_idx=0, contract_idx=0)
+        p.hand = [_make_contract_card()]
+        record = execute_contract(state, p, card_idx=0, contract_idx=0, use_elevator=True)
         assert record is not None
         assert p.contracts_fulfilled == 1
+        assert p.has_used_space_elevator_this_turn
+
+    def test_elevator_use_blocked_after_first_use(self):
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        p.buildings_played.append(_build_special("Space Elevator"))
+        p.has_used_space_elevator_this_turn = True
+        custom_contract = Contract(
+            requirements=[ResourceAmount(resource=Resource.FOOD, amount=1)],
+            reward=10,
+            count=1,
+        )
+        state.available_contracts[0] = custom_contract
+        p.rates[Resource.FOOD] = 0
+        p.hand = [_make_contract_card()]
+        record = execute_contract(state, p, card_idx=0, contract_idx=0, use_elevator=True)
+        assert record is None  # already used this turn
+
+    def test_elevator_use_rejected_when_not_owned(self):
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        # Doesn't own Space Elevator
+        custom_contract = Contract(
+            requirements=[ResourceAmount(resource=Resource.FOOD, amount=1)],
+            reward=10,
+            count=1,
+        )
+        state.available_contracts[0] = custom_contract
+        p.rates[Resource.FOOD] = 0
+        p.hand = [_make_contract_card()]
+        record = execute_contract(state, p, card_idx=0, contract_idx=0, use_elevator=True)
+        assert record is None
+
+    def test_elevator_default_off_does_not_discount(self):
+        """When use_elevator is not passed, the discount doesn't apply even if owned."""
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        p.buildings_played.append(_build_special("Space Elevator"))
+        custom_contract = Contract(
+            requirements=[ResourceAmount(resource=Resource.FOOD, amount=1)],
+            reward=10,
+            count=1,
+        )
+        state.available_contracts[0] = custom_contract
+        p.rates[Resource.FOOD] = 0
+        p.hand = [_make_contract_card()]
+        # Without use_elevator, the FOOD requirement isn't discounted
+        record = execute_contract(state, p, card_idx=0, contract_idx=0)
+        assert record is None  # 0 < 1, can't afford
 
 
 # --- Optimization Center ---
@@ -270,100 +332,134 @@ class TestOptimizationCenter:
         assert p.rate(Resource.GLS) == 2
         assert p.rate(Resource.FE) == 2
 
-    def test_two_ocs_apply_twice(self):
+    def test_oc_uses_pre_declared_pick(self):
+        """When state.pending_oc_picks has the player's pick, that resource gets the boost."""
         cards, contracts = _load()
         state = GameState.create(cards, contracts, num_players=3)
         p = state.players[0]
         p.rates[Resource.FE] = 1
-        oc = _build_special("Optimization Center")
-        p.buildings_played.extend([oc, oc])
+        p.rates[Resource.GLS] = 2
+        # Set up so GLS is most expensive (the auto-pick) but pick FE explicitly
+        state.market.adjust(Resource.GLS, 8)
+        p.buildings_played.append(_build_special("Optimization Center"))
+        state.pending_oc_picks[0] = "FE"
         do_futures_settlement(state)
-        # Both OCs boosted the only positive rate
+        # The explicit pick wins over the auto-pick
+        assert p.rate(Resource.FE) == 2
+        assert p.rate(Resource.GLS) == 2  # not boosted
+
+    def test_pending_oc_pick_consumed(self):
+        """The pick is consumed (popped) after the settlement fires."""
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        p.rates[Resource.FE] = 1
+        p.buildings_played.append(_build_special("Optimization Center"))
+        state.pending_oc_picks[0] = "FE"
+        do_futures_settlement(state)
+        assert 0 not in state.pending_oc_picks
+
+    def test_invalid_pick_falls_back_to_auto(self):
+        """Picking PWR / a 0-rate resource / a bad string falls back to auto-pick."""
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        p.rates[Resource.FE] = 2
+        p.buildings_played.append(_build_special("Optimization Center"))
+        # Pick a resource the player doesn't actually have a positive rate for
+        state.pending_oc_picks[0] = "GLS"
+        do_futures_settlement(state)
+        # Should fall back to auto-pick (FE, the only positive rate)
         assert p.rate(Resource.FE) == 3
 
 
 # --- Hacker Array ---
 
 
+def _make_sellable_fe() -> Card:
+    return Card(
+        alternate="C/SI",
+        slot=1,
+        building="MockSeller",
+        costs=[],
+        rates=[],
+        effect="",
+        can_sell=[Resource.FE],
+        can_fulfill_contract=False,
+    )
+
+
 class TestHackerArray:
     def test_no_hacker_no_market_bump(self):
-        """Without a Hacker Array, selling doesn't bump any other resource."""
+        """Without a Hacker Array, supplying hacker_target+direction is a no-op."""
         cards, contracts = _load()
         state = GameState.create(cards, contracts, num_players=3)
         p = state.players[0]
         p.rates[Resource.FE] = 2
-        # Give player a sellable FE card in hand
-        sellable_fe = Card(
-            alternate="C/SI",
-            slot=1,
-            building="MockSeller",
-            costs=[],
-            rates=[],
-            effect="",
-            can_sell=[Resource.FE],
-            can_fulfill_contract=False,
-        )
-        p.hand = [sellable_fe]
+        p.hand = [_make_sellable_fe()]
         prices_before = {r: state.market.price(r) for r in Resource}
-        execute_sell(state, p, card_idx=0)
+        execute_sell(state, p, card_idx=0, hacker_target="GLS", hacker_direction=1)
         for r in Resource:
             if r == Resource.FE:
                 continue  # the sold resource always drops
             assert state.market.price(r) == prices_before[r]
 
-    def test_hacker_bumps_highest_priced_non_sold(self):
-        """With a Hacker Array, selling bumps +3 the highest-priced non-sold non-PWR."""
+    def test_hacker_with_no_target_no_bonus(self):
+        """Owning HA but not supplying target+direction = no bonus (player chose to skip)."""
         cards, contracts = _load()
         state = GameState.create(cards, contracts, num_players=3)
         p = state.players[0]
         p.buildings_played.append(_build_special("Hacker Array"))
         p.rates[Resource.FE] = 2
-        # Make GLS the most expensive (other than what we're selling)
+        p.hand = [_make_sellable_fe()]
+        prices_before = {r: state.market.price(r) for r in Resource}
+        record = execute_sell(state, p, card_idx=0)  # no hacker params
+        assert "[HA:" not in record.detail
         for r in Resource:
-            if r in (Resource.GLS, Resource.PWR):
+            if r == Resource.FE:
                 continue
-            # nudge GLS up
-            pass
-        state.market.adjust(Resource.GLS, 8)
-        gls_price_before = state.market.price(Resource.GLS)
-        # Give player a sellable FE card
-        sellable_fe = Card(
-            alternate="C/SI",
-            slot=1,
-            building="MockSeller",
-            costs=[],
-            rates=[],
-            effect="",
-            can_sell=[Resource.FE],
-            can_fulfill_contract=False,
-        )
-        p.hand = [sellable_fe]
-        execute_sell(state, p, card_idx=0)
-        # GLS should have moved up by 3 positions on the market track
-        # (the test is robust to what the actual price values are; we just
-        # check it's higher)
-        assert state.market.price(Resource.GLS) >= gls_price_before
+            assert state.market.price(r) == prices_before[r]
 
-    def test_hacker_bonus_in_action_record_detail(self):
-        """The action record's detail string mentions the HA bonus."""
+    def test_hacker_picks_resource_and_direction_up(self):
+        """Player picks GLS / +1 → GLS market moves up."""
         cards, contracts = _load()
         state = GameState.create(cards, contracts, num_players=3)
         p = state.players[0]
         p.buildings_played.append(_build_special("Hacker Array"))
-        p.rates[Resource.FE] = 1
-        sellable_fe = Card(
-            alternate="C/SI",
-            slot=1,
-            building="MockSeller",
-            costs=[],
-            rates=[],
-            effect="",
-            can_sell=[Resource.FE],
-            can_fulfill_contract=False,
-        )
-        p.hand = [sellable_fe]
-        record = execute_sell(state, p, card_idx=0)
-        assert "[HA:" in record.detail
+        p.rates[Resource.FE] = 2
+        p.hand = [_make_sellable_fe()]
+        gls_pos_before = state.market.positions[Resource.GLS]
+        record = execute_sell(state, p, card_idx=0, hacker_target="GLS", hacker_direction=1)
+        gls_pos_after = state.market.positions[Resource.GLS]
+        assert gls_pos_after == gls_pos_before + 3
+        assert "[HA: +3 GLS]" in record.detail
+
+    def test_hacker_picks_resource_and_direction_down(self):
+        """Player picks H2O / -1 → H2O market moves down."""
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        p.buildings_played.append(_build_special("Hacker Array"))
+        p.rates[Resource.FE] = 2
+        # Push H2O up first so we can see it drop
+        state.market.adjust(Resource.H2O, 5)
+        p.hand = [_make_sellable_fe()]
+        h2o_pos_before = state.market.positions[Resource.H2O]
+        record = execute_sell(state, p, card_idx=0, hacker_target="H2O", hacker_direction=-1)
+        h2o_pos_after = state.market.positions[Resource.H2O]
+        assert h2o_pos_after == h2o_pos_before - 3
+        assert "[HA: -3 H2O]" in record.detail
+
+    def test_hacker_target_same_as_sold_no_bonus(self):
+        """Trying to bump the same resource you sold is forbidden — no-op."""
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        p.buildings_played.append(_build_special("Hacker Array"))
+        p.rates[Resource.FE] = 2
+        p.hand = [_make_sellable_fe()]
+        record = execute_sell(state, p, card_idx=0, hacker_target="FE", hacker_direction=1)
+        assert "[HA:" not in record.detail
 
 
 # --- Patent Office ---
@@ -443,12 +539,123 @@ class TestPatentOffice:
         assert state.patent_idx == 1
 
 
+# --- Launch Pad ---
+
+
+class TestLaunchPad:
+    def test_owned_lets_fulfill_without_card(self):
+        """With Launch Pad, fulfill a contract with no contract-icon hand card."""
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        p.buildings_played.append(_build_special("Launch Pad"))
+        custom_contract = Contract(
+            requirements=[ResourceAmount(resource=Resource.FE, amount=1)],
+            reward=10,
+            count=1,
+        )
+        state.available_contracts[0] = custom_contract
+        p.rates[Resource.FE] = 2
+        p.hand = []  # no contract-icon card
+        record = execute_contract(
+            state, p, card_idx=-1, contract_idx=0, use_launch_pad=True
+        )
+        assert record is not None
+        assert p.contracts_fulfilled == 1
+        assert p.has_used_launch_pad_this_turn
+
+    def test_used_twice_in_one_turn_blocked(self):
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        p.buildings_played.append(_build_special("Launch Pad"))
+        p.has_used_launch_pad_this_turn = True
+        custom_contract = Contract(
+            requirements=[ResourceAmount(resource=Resource.FE, amount=1)],
+            reward=10,
+            count=1,
+        )
+        state.available_contracts[0] = custom_contract
+        p.rates[Resource.FE] = 2
+        record = execute_contract(
+            state, p, card_idx=-1, contract_idx=0, use_launch_pad=True
+        )
+        assert record is None
+
+    def test_not_owned_blocked(self):
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        # Doesn't own Launch Pad
+        custom_contract = Contract(
+            requirements=[ResourceAmount(resource=Resource.FE, amount=1)],
+            reward=10,
+            count=1,
+        )
+        state.available_contracts[0] = custom_contract
+        p.rates[Resource.FE] = 2
+        record = execute_contract(
+            state, p, card_idx=-1, contract_idx=0, use_launch_pad=True
+        )
+        assert record is None
+
+    def test_player_still_spends_rates(self):
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        p.buildings_played.append(_build_special("Launch Pad"))
+        custom_contract = Contract(
+            requirements=[
+                ResourceAmount(resource=Resource.FE, amount=2),
+                ResourceAmount(resource=Resource.GLS, amount=1),
+            ],
+            reward=20,
+            count=1,
+        )
+        state.available_contracts[0] = custom_contract
+        p.rates[Resource.FE] = 3
+        p.rates[Resource.GLS] = 1
+        execute_contract(state, p, card_idx=-1, contract_idx=0, use_launch_pad=True)
+        assert p.rate(Resource.FE) == 1  # 3 - 2
+        assert p.rate(Resource.GLS) == 0  # 1 - 1
+
+    def test_launch_pad_combos_with_space_elevator(self):
+        """Both flags can apply to the same fulfillment."""
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        p.buildings_played.append(_build_special("Launch Pad"))
+        p.buildings_played.append(_build_special("Space Elevator"))
+        custom_contract = Contract(
+            requirements=[ResourceAmount(resource=Resource.FE, amount=1)],
+            reward=10,
+            count=1,
+        )
+        state.available_contracts[0] = custom_contract
+        # Player has 0 FE — only the SE discount makes it affordable
+        p.rates[Resource.FE] = 0
+        record = execute_contract(
+            state, p, card_idx=-1, contract_idx=0,
+            use_launch_pad=True, use_elevator=True,
+        )
+        assert record is not None
+        assert p.has_used_launch_pad_this_turn
+        assert p.has_used_space_elevator_this_turn
+
+
 # --- Filter gate ---
 
 
 class TestSupportedSpecialEffects:
-    def test_supported_set_includes_passives(self):
-        for name in ["Pleasure Dome", "Optimization Center", "Space Elevator", "Hacker Array", "Patent Office"]:
+    def test_supported_set_includes_all(self):
+        for name in [
+            "Pleasure Dome",
+            "Optimization Center",
+            "Space Elevator",
+            "Hacker Array",
+            "Patent Office",
+            "Launch Pad",
+        ]:
             assert name in SUPPORTED_SPECIAL_EFFECTS
 
     def test_unsupported_specials_excluded_from_deck(self):

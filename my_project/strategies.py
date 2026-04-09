@@ -18,6 +18,7 @@ from my_project.simulation import (
     EventType,
     GameState,
     Player,
+    _count_buildings,
     compute_build_deficit,
     effective_contract_requirements,
     swap_pool_card,
@@ -61,8 +62,16 @@ def _score_card(card, player: Player, state) -> float:
     # Contract card value = best affordable contract score
     contract_value = 0.0
     if card.can_fulfill_contract:
+        # AI considers contracts both with and without the Space Elevator
+        # discount when valuing pool-swap candidates.
+        se_available = (
+            _count_buildings(player, "Space Elevator") > 0
+            and not player.has_used_space_elevator_this_turn
+        )
         for contract in state.available_contracts:
-            effective = effective_contract_requirements(player, contract)
+            effective = effective_contract_requirements(
+                player, contract, apply_elevator=se_available
+            )
             can_afford = all(
                 player.rate(req.resource) >= req.amount for req in effective
             )
@@ -130,25 +139,78 @@ def random_strategy(state: GameState, player: Player) -> Action:
                     options.append(Action(ActionType.BUILD, build_cards=[i], discard_cards=list(discard_list)))
                     break  # found cheapest affordable discard level
 
-    # Sell: any card whose sell alternates match a positive rate
+    # Sell: any card whose sell alternates match a positive rate.
+    # Hacker Array: AI auto-targets the highest-priced non-sold non-PWR
+    # resource and bumps it +3 (the old auto-pick behavior). Humans get
+    # the picker UI; AI keeps the simple heuristic.
+    has_hacker = _count_buildings(player, "Hacker Array") > 0
     for i, card in enumerate(player.hand):
         if card.can_sell:
             for sell_res in card.can_sell:
                 if player.rate(sell_res) > 0:
-                    options.append(Action(ActionType.SELL, sell_card=i))
+                    action = Action(ActionType.SELL, sell_card=i)
+                    if has_hacker:
+                        candidates = [
+                            r for r in state.market.positions
+                            if r != sell_res and r.value != "PWR"
+                        ]
+                        if candidates:
+                            target = max(candidates, key=lambda r: state.market.price(r))
+                            action.hacker_target = target.value
+                            action.hacker_direction = 1
+                    options.append(action)
                     break
 
-    # Contract (Space Elevator discount applies to the affordability check)
-    for i, card in enumerate(player.hand):
-        if card.can_fulfill_contract:
-            for ci, contract in enumerate(state.available_contracts):
-                effective = effective_contract_requirements(player, contract)
-                can_afford = all(
-                    player.rate(req.resource) >= req.amount
-                    for req in effective
-                )
-                if can_afford:
-                    options.append(Action(ActionType.CONTRACT, contract_card=i, contract_idx=ci))
+    # Contract enumeration: try the standard path AND (if available) the
+    # Space Elevator and Launch Pad paths. Each path is a separate Action
+    # candidate so the AI can pick the best one.
+    se_available = (
+        _count_buildings(player, "Space Elevator") > 0
+        and not player.has_used_space_elevator_this_turn
+    )
+    lp_available = (
+        _count_buildings(player, "Launch Pad") > 0
+        and not player.has_used_launch_pad_this_turn
+    )
+    for ci, contract in enumerate(state.available_contracts):
+        # Reqs without elevator
+        plain_reqs = effective_contract_requirements(player, contract, apply_elevator=False)
+        plain_affordable = all(
+            player.rate(req.resource) >= req.amount for req in plain_reqs
+        )
+        # Reqs with elevator
+        if se_available:
+            disc_reqs = effective_contract_requirements(player, contract, apply_elevator=True)
+            disc_affordable = all(
+                player.rate(req.resource) >= req.amount for req in disc_reqs
+            )
+        else:
+            disc_affordable = False
+
+        # Real contract-icon hand cards
+        for i, card in enumerate(player.hand):
+            if not card.can_fulfill_contract:
+                continue
+            if disc_affordable:
+                options.append(Action(
+                    ActionType.CONTRACT, contract_card=i, contract_idx=ci, use_elevator=True
+                ))
+            elif plain_affordable:
+                options.append(Action(
+                    ActionType.CONTRACT, contract_card=i, contract_idx=ci
+                ))
+        # Launch Pad acts like a free contract icon — also offer as a candidate
+        if lp_available:
+            if disc_affordable:
+                options.append(Action(
+                    ActionType.CONTRACT, contract_card=-1, contract_idx=ci,
+                    use_launch_pad=True, use_elevator=True,
+                ))
+            elif plain_affordable:
+                options.append(Action(
+                    ActionType.CONTRACT, contract_card=-1, contract_idx=ci,
+                    use_launch_pad=True,
+                ))
 
     if not options:
         # No legal action — discard a non-contract card to cycle it
@@ -507,22 +569,93 @@ def smart_greedy_strategy(state: GameState, player: Player) -> Action:
                         best_score = score
                         best_action = Action(ActionType.BUILD, build_cards=bl, discard_cards=dl)
 
-    # Score sell options
+    # Score sell options. Hacker Array: AI auto-targets the highest-priced
+    # non-sold non-PWR resource and bumps it +3 (unchanged from old behavior).
+    has_hacker = _count_buildings(player, "Hacker Array") > 0
     for i, card in enumerate(player.hand):
         if card.can_sell:
             sell_score = _score_sell(state, player, card)
             if sell_score > best_score:
                 best_score = sell_score
-                best_action = Action(ActionType.SELL, sell_card=i)
+                action = Action(ActionType.SELL, sell_card=i)
+                if has_hacker:
+                    # Pick the sold resource the same way execute_sell does
+                    sold = max(
+                        (r for r in card.can_sell if player.rate(r) > 0),
+                        key=lambda r: state.market.price(r) * player.rate(r),
+                        default=None,
+                    )
+                    if sold is not None:
+                        candidates = [
+                            r for r in state.market.positions
+                            if r != sold and r.value != "PWR"
+                        ]
+                        if candidates:
+                            target = max(candidates, key=lambda r: state.market.price(r))
+                            action.hacker_target = target.value
+                            action.hacker_direction = 1
+                best_action = action
 
-    # Score contract options
-    for i, card in enumerate(player.hand):
-        if card.can_fulfill_contract:
-            for ci, contract in enumerate(state.available_contracts):
-                contract_score = _smart_score_contract(state, player, contract)
-                if contract_score is not None and contract_score > best_score:
-                    best_score = contract_score
-                    best_action = Action(ActionType.CONTRACT, contract_card=i, contract_idx=ci)
+    # Score contract options. AI uses Space Elevator and Launch Pad whenever
+    # they're available.
+    se_available = (
+        _count_buildings(player, "Space Elevator") > 0
+        and not player.has_used_space_elevator_this_turn
+    )
+    lp_available = (
+        _count_buildings(player, "Launch Pad") > 0
+        and not player.has_used_launch_pad_this_turn
+    )
+    for ci, contract in enumerate(state.available_contracts):
+        # Affordability with elevator
+        if se_available:
+            disc_reqs = effective_contract_requirements(player, contract, apply_elevator=True)
+            disc_affordable = all(
+                player.rate(req.resource) >= req.amount for req in disc_reqs
+            )
+        else:
+            disc_affordable = False
+        plain_affordable = all(
+            player.rate(req.resource) >= req.amount for req in contract.requirements
+        )
+
+        contract_score = _smart_score_contract(state, player, contract)
+        if contract_score is None and not disc_affordable:
+            continue
+        if contract_score is None:
+            # Affordable only with elevator — re-score using effective reqs
+            opportunity_cost = sum(
+                state.market.price(req.resource) * SELL_VALUE_MULTIPLIER * req.amount
+                for req in disc_reqs
+            )
+            contract_score = contract.reward - opportunity_cost
+        if contract_score <= best_score:
+            continue
+
+        use_elev = disc_affordable  # use it whenever it's needed/available
+        # Try a contract-icon hand card first
+        chosen = None
+        for i, card in enumerate(player.hand):
+            if card.can_fulfill_contract:
+                chosen = Action(
+                    ActionType.CONTRACT,
+                    contract_card=i,
+                    contract_idx=ci,
+                    use_elevator=use_elev and se_available,
+                )
+                break
+        # Fall back to Launch Pad if no contract-icon card available
+        if chosen is None and lp_available:
+            chosen = Action(
+                ActionType.CONTRACT,
+                contract_card=-1,
+                contract_idx=ci,
+                use_launch_pad=True,
+                use_elevator=use_elev and se_available,
+            )
+        if chosen is not None and (plain_affordable or disc_affordable):
+            best_score = contract_score
+            best_action = chosen
 
     return best_action
 

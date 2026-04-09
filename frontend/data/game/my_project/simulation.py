@@ -42,11 +42,12 @@ PWR_ADJUST_FRACTION = 0.5  # fraction of remaining slots
 # name appears here. Add to this set when implementing a new special-
 # building handler so the deck starts dealing it.
 SUPPORTED_SPECIAL_EFFECTS: set[str] = {
-    "Pleasure Dome",        # passive: power-bill bonus per dome owned
-    "Optimization Center",  # passive: pre-futures rate boost
-    "Space Elevator",       # passive: -1 to all contract requirements
-    "Hacker Array",         # passive on sell: +3 to highest-priced non-sold resource
-    "Patent Office",        # build-time: draw 2 patents, keep best, return other
+    "Pleasure Dome",        # passive: power-bill bonus, tier by global count
+    "Optimization Center",  # active: pre-declared rate target on futures
+    "Space Elevator",       # active: once-per-turn -1 contract requirement
+    "Hacker Array",         # active: per-sell market bump (player picks)
+    "Launch Pad",           # active: once-per-turn free contract icon
+    "Patent Office",        # build-time: draw 2 patents, keep best
 }
 
 
@@ -131,6 +132,10 @@ class Player:
     # are fine, but subsequent build actions are blocked). This prevents
     # rates from being reused as a free discount across separate actions.
     has_built_this_turn: bool = False
+    # Special-building per-turn flags (each is a "use once per turn"
+    # capability that refreshes between turns, NOT a one-shot consumable).
+    has_used_space_elevator_this_turn: bool = False
+    has_used_launch_pad_this_turn: bool = False
 
     def net_worth(self) -> int:
         return self.money - self.debt + self.contracts_fulfilled * CONTRACT_REWARD
@@ -440,6 +445,12 @@ class Action:
     sell_card: int = -1  # index of card to sell with
     contract_card: int = -1  # index of card to use for contract
     contract_idx: int = -1  # index into available_contracts
+    # Special-building flags carried through to execute_*:
+    use_elevator: bool = False     # consume Space Elevator's per-turn discount
+    use_launch_pad: bool = False   # use Launch Pad as the contract icon source
+    # Per-sell Hacker Array choice (used by execute_sell when set)
+    hacker_target: str = ""        # resource value (e.g. "GLS"); empty = no bonus
+    hacker_direction: int = 0      # +1 / -1 / 0 for no bonus
     detail: str = ""
 
 
@@ -501,6 +512,10 @@ class GameState:
     # play adapter to thread human-supplied bids in. Key = seat index,
     # value = bid in $5 increments. Defaults to None for "use AI heuristic".
     pending_bids: dict[int, int] = field(default_factory=dict)
+    # Per-player Optimization Center target picks for the next futures
+    # settlement. Key = seat index, value = resource value string (e.g. "FE").
+    # Consumed by do_futures_settlement.
+    pending_oc_picks: dict[int, str] = field(default_factory=dict)
     turn: int = 0
     event_idx: int = 0
     history: list[TurnRecord] = field(default_factory=list)
@@ -809,8 +824,20 @@ def execute_build(
     )
 
 
-def execute_sell(state: GameState, player: Player, card_idx: int) -> ActionRecord:
-    """Sell resources using a card's alternate sell types."""
+def execute_sell(
+    state: GameState,
+    player: Player,
+    card_idx: int,
+    hacker_target: str | None = None,
+    hacker_direction: int = 0,
+) -> ActionRecord:
+    """Sell resources using a card's alternate sell types.
+
+    `hacker_target` + `hacker_direction` are used by the Hacker Array picker:
+    if the player owns a Hacker Array, they can specify a non-sold resource
+    and a direction (+1 or -1) to bump the market by ±3. If the params
+    aren't supplied (or the player doesn't own an HA), no bonus fires.
+    """
     card = player.hand[card_idx]
     best_resource = None
     best_revenue = 0
@@ -837,17 +864,21 @@ def execute_sell(state: GameState, player: Player, card_idx: int) -> ActionRecor
     player.flow_sell_revenue[best_resource] += revenue
     state.deck.discard.append(player.hand.pop(card_idx))
 
-    # Hacker Array bonus: passive effect that fires on every sell. The owner
-    # bumps the highest-priced resource (other than the one just sold) by +3.
-    # Auto-targeted for now; an explicit picker UI is a future improvement.
+    # Hacker Array bonus: only fires if the player owns one AND supplied a
+    # target+direction (e.g. via the picker UI). A "no choice" sell skips
+    # the bonus entirely — that matches the rule "the player chooses".
     detail_extra = ""
     ha_count = _count_buildings(player, "Hacker Array")
-    if ha_count > 0:
-        candidates = [r for r in Resource if r != best_resource and r != Resource.PWR]
-        if candidates:
-            target = max(candidates, key=lambda r: state.market.price(r))
-            state.market.adjust(target, 3)
-            detail_extra = f" [HA: +3 {target.value}]"
+    if ha_count > 0 and hacker_target and hacker_direction != 0:
+        try:
+            target = Resource(hacker_target)
+            if target != best_resource:
+                delta = 3 if hacker_direction > 0 else -3
+                state.market.adjust(target, delta)
+                sign = "+" if delta >= 0 else ""
+                detail_extra = f" [HA: {sign}{delta} {target.value}]"
+        except ValueError:
+            pass
 
     return ActionRecord(
         action_type="sell",
@@ -859,15 +890,53 @@ def execute_sell(state: GameState, player: Player, card_idx: int) -> ActionRecor
 
 
 def execute_contract(
-    state: GameState, player: Player, card_idx: int, contract_idx: int,
+    state: GameState,
+    player: Player,
+    card_idx: int,
+    contract_idx: int,
+    use_elevator: bool = False,
+    use_launch_pad: bool = False,
 ) -> ActionRecord | None:
-    """Fulfill a contract. Requires contract icon on card.
+    """Fulfill a contract.
 
-    Returns ActionRecord on success, None if player can't afford it.
+    Normal mode: requires a hand card with `can_fulfill_contract`.
+
+    `use_launch_pad=True`: skips the hand-card requirement entirely
+    (Launch Pad acts as a free contract icon, once per turn). card_idx
+    is ignored in this branch.
+
+    `use_elevator=True`: applies a one-time -1 to every requirement
+    (Space Elevator's per-turn discount). Also gated by the per-turn flag.
+
+    Returns ActionRecord on success, None if any precondition fails.
     """
+    if contract_idx < 0 or contract_idx >= len(state.available_contracts):
+        return None
     contract = state.available_contracts[contract_idx]
-    # Apply Space Elevator discount: each SE reduces every requirement by 1.
-    effective_reqs = effective_contract_requirements(player, contract)
+
+    # Validate Launch Pad path
+    if use_launch_pad:
+        if player.has_used_launch_pad_this_turn:
+            return None
+        if _count_buildings(player, "Launch Pad") == 0:
+            return None
+    else:
+        if card_idx < 0 or card_idx >= len(player.hand):
+            return None
+        if not player.hand[card_idx].can_fulfill_contract:
+            return None
+
+    # Validate Space Elevator path
+    if use_elevator:
+        if player.has_used_space_elevator_this_turn:
+            return None
+        if _count_buildings(player, "Space Elevator") == 0:
+            return None
+
+    # Apply Space Elevator discount only if requested
+    effective_reqs = effective_contract_requirements(
+        player, contract, apply_elevator=use_elevator
+    )
 
     # Check if player can afford the (discounted) rate costs
     for req in effective_reqs:
@@ -892,12 +961,25 @@ def execute_contract(
     debt_payoff = min(player.debt, contract.reward)
     player.debt -= debt_payoff
     player.contracts_fulfilled += 1
-    state.deck.discard.append(player.hand.pop(card_idx))
+
+    # Burn the contract-icon card unless we used Launch Pad (free icon)
+    if not use_launch_pad:
+        state.deck.discard.append(player.hand.pop(card_idx))
+
+    # Set per-turn flags
+    if use_elevator:
+        player.has_used_space_elevator_this_turn = True
+    if use_launch_pad:
+        player.has_used_launch_pad_this_turn = True
 
     # Display label uses the ORIGINAL requirements so the log is consistent
     # (the discount is reflected in rates_spent for analytics).
     req_str = ", ".join(f"{r.amount} {r.resource.value}" for r in contract.requirements)
     label = req_str
+    if use_elevator:
+        label += " [SE -1]"
+    if use_launch_pad:
+        label += " [LP]"
 
     # Replace contract
     state.available_contracts.pop(contract_idx)
@@ -995,20 +1077,39 @@ def _patent_office_trigger(state: GameState, player: Player) -> None:
 def effective_contract_requirements(
     player: Player,
     contract: Contract,
+    apply_elevator: bool = False,
 ) -> list[ResourceAmount]:
-    """Apply Space Elevator's -1 to each contract requirement (floor 0).
+    """Return contract requirements, optionally with Space Elevator -1.
 
-    Each Space Elevator the player owns reduces every contract requirement
-    by 1, down to a minimum of 0. Returns a fresh list of ResourceAmount
-    so callers can use it without mutating the original contract.
+    The discount applies only if the player owns at least one Space Elevator
+    AND `apply_elevator` is True (caller controls the per-turn limit). One
+    Space Elevator gives -1 across the board (with floor 0). Owning more
+    than one is impossible under the one-of-each rule, but the function
+    is still safe if duplicates somehow exist — it always applies -1, not
+    -count.
     """
-    discount = _count_buildings(player, "Space Elevator")
-    if discount == 0:
+    if not apply_elevator or _count_buildings(player, "Space Elevator") == 0:
         return list(contract.requirements)
     return [
-        ResourceAmount(resource=req.resource, amount=max(0, req.amount - discount))
+        ResourceAmount(resource=req.resource, amount=max(0, req.amount - 1))
         for req in contract.requirements
     ]
+
+
+def can_use_space_elevator(player: Player) -> bool:
+    """True iff the player owns a Space Elevator and hasn't used it this turn."""
+    return (
+        _count_buildings(player, "Space Elevator") > 0
+        and not player.has_used_space_elevator_this_turn
+    )
+
+
+def can_use_launch_pad(player: Player) -> bool:
+    """True iff the player owns a Launch Pad and hasn't used it this turn."""
+    return (
+        _count_buildings(player, "Launch Pad") > 0
+        and not player.has_used_launch_pad_this_turn
+    )
 
 
 # --- Events ---
@@ -1072,27 +1173,35 @@ def do_futures_settlement(state: GameState) -> None:
     All players pay the price at the start of settlement. Then the market
     rises by the total negative rates across all players for each resource.
 
-    Optimization Center owners get +1 to a positive non-PWR rate per OC,
-    applied BEFORE the settlement is calculated. The chosen rate is the
-    highest-priced one the player currently has (max value boost).
+    Optimization Center owners get +1 to a positive non-PWR rate, applied
+    BEFORE the settlement is calculated. The target is the player's
+    pre-declared pick from `state.pending_oc_picks` if set; otherwise it
+    auto-falls back to the highest-priced positive non-PWR rate.
     """
     # Snapshot prices before any market shifts
     starting_prices = {r: state.market.price(r) for r in Resource if r != Resource.PWR}
     total_negatives: dict[Resource, int] = {r: 0 for r in starting_prices}
 
-    # Optimization Center: pre-settlement rate boost
-    for player in state.players:
-        oc_count = _count_buildings(player, "Optimization Center")
-        for _ in range(oc_count):
-            # Pick the highest-priced positive non-PWR rate to boost.
-            candidates = [
-                r for r in starting_prices
-                if player.rate(r) > 0
-            ]
+    # Optimization Center: pre-settlement rate boost (one OC per player max)
+    for idx, player in enumerate(state.players):
+        if _count_buildings(player, "Optimization Center") == 0:
+            continue
+        pending_pick = state.pending_oc_picks.pop(idx, None)
+        target = None
+        if pending_pick is not None:
+            try:
+                resource = Resource(pending_pick)
+                if resource != Resource.PWR and player.rate(resource) > 0:
+                    target = resource
+            except ValueError:
+                pass
+        if target is None:
+            # Auto-fallback: highest-priced positive non-PWR rate
+            candidates = [r for r in starting_prices if player.rate(r) > 0]
             if not candidates:
                 continue
-            best = max(candidates, key=lambda r: starting_prices[r])
-            player.rates[best] = player.rate(best) + 1
+            target = max(candidates, key=lambda r: starting_prices[r])
+        player.rates[target] = player.rate(target) + 1
 
     # All players pay debt at the snapshot price
     for player in state.players:
@@ -1381,10 +1490,26 @@ def _execute_action(state: GameState, player: Player, action: Action) -> ActionR
         return execute_build(state, player, action.build_cards, action.discard_cards)
 
     elif action.action_type == ActionType.SELL and action.sell_card >= 0:
-        return execute_sell(state, player, action.sell_card)
+        return execute_sell(
+            state,
+            player,
+            action.sell_card,
+            hacker_target=action.hacker_target or None,
+            hacker_direction=action.hacker_direction,
+        )
 
-    elif action.action_type == ActionType.CONTRACT and action.contract_card >= 0:
-        return execute_contract(state, player, action.contract_card, action.contract_idx)
+    elif action.action_type == ActionType.CONTRACT:
+        # Launch Pad path doesn't need a contract_card; the normal path does.
+        if not action.use_launch_pad and action.contract_card < 0:
+            return None
+        return execute_contract(
+            state,
+            player,
+            action.contract_card,
+            action.contract_idx,
+            use_elevator=action.use_elevator,
+            use_launch_pad=action.use_launch_pad,
+        )
 
     return None
 
@@ -1395,8 +1520,10 @@ def run_turn(state: GameState, player: Player, strategy, event: EventCard) -> No
     money_before = player.money
     action_records: list[ActionRecord] = []
 
-    # Reset per-turn state (rule: one build action per turn)
+    # Reset per-turn state
     player.has_built_this_turn = False
+    player.has_used_space_elevator_this_turn = False
+    player.has_used_launch_pad_this_turn = False
 
     # Pool swapping phase (free, before actions)
     swap_fn = getattr(strategy, 'pool_swap', None)
