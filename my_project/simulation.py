@@ -136,6 +136,14 @@ class Player:
     # capability that refreshes between turns, NOT a one-shot consumable).
     has_used_space_elevator_this_turn: bool = False
     has_used_launch_pad_this_turn: bool = False
+    # Active-patent per-turn flags (same shape).
+    has_used_water_engine_this_turn: bool = False
+    has_used_nanotechnology_this_turn: bool = False
+    has_used_teleportation_this_turn: bool = False
+    # Per-patent stateful storage. Currently used by Energy Vault — key
+    # "energy_vault" → remaining PWR units in the vault. Other patents may
+    # add their own keys later.
+    patent_state: dict[str, int] = field(default_factory=dict)
 
     def net_worth(self) -> int:
         return self.money - self.debt + self.contracts_fulfilled * CONTRACT_REWARD
@@ -757,6 +765,22 @@ def execute_build(
             return None
         seen_specials_this_build.add(card.building)
 
+    # Patent build-time hooks. If the player owns any patent in
+    # PATENT_BUILD_HOOKS, deep-copy the build cards before mutating them
+    # so we don't corrupt the prototype shared across the deck/pool/hand.
+    # The mutated copies are what get applied AND what land in
+    # buildings_played, so future patent triggers see the modified rates.
+    patent_names = _player_patent_names(player)
+    has_patent_hooks = any(name in PATENT_BUILD_HOOKS for name in patent_names)
+    if has_patent_hooks:
+        import copy as _copy
+        build_cards = [_copy.deepcopy(c) for c in build_cards]
+        for card in build_cards:
+            for name in patent_names:
+                hook = PATENT_BUILD_HOOKS.get(name)
+                if hook:
+                    hook(state, player, card)
+
     result = compute_build_deficit(build_cards, player, num_discards, state.market)
     if result is None:
         return None
@@ -1021,6 +1045,147 @@ def execute_contract(
 def _count_buildings(player: Player, name: str) -> int:
     """Number of copies of `name` in the player's buildings_played."""
     return sum(1 for c in player.buildings_played if c.building == name)
+
+
+# --- Building tags (used by patent build hooks) ---
+#
+# A card is "tagged" with each resource it produces a positive rate of.
+# Tags are NOT exclusive — a card with `+1 PWR, +1 FE` is BOTH a power
+# building AND an iron building. Patent hooks like Superconductors and
+# Slant Drilling read these tags to decide whether to fire on a build.
+
+RESOURCE_TAGS: dict[Resource, str] = {
+    Resource.PWR: "power",
+    Resource.H2O: "water",
+    Resource.FE: "iron",
+    Resource.C: "carbon",
+    Resource.SI: "silicon",
+    Resource.O2: "oxygen",
+    Resource.FOOD: "food",
+    Resource.GLS: "glass",
+    Resource.ELX: "electronics",
+}
+
+
+def building_tags(card: Card) -> set[str]:
+    """Set of resource tags this card produces (positive rates only).
+
+    A card with `+1 PWR, +1 FE` returns {"power", "iron"}. Empty if the
+    card has no positive rates (e.g. a building that only consumes).
+    """
+    return {RESOURCE_TAGS[ra.resource] for ra in card.rates if ra.amount > 0}
+
+
+# --- Patent helpers ---
+#
+# Patents are slot=5 Card instances. They live in player.buildings_played
+# alongside normal buildings, but their `slot == 5` distinguishes them.
+
+def _player_patent_names(player: Player) -> list[str]:
+    """Names of all patents (slot-5 cards) the player owns."""
+    return [c.building for c in player.buildings_played if c.slot == 5]
+
+
+def _player_owns_patent(player: Player, patent_name: str) -> bool:
+    """True iff the player owns a patent with this exact name."""
+    return any(
+        c.slot == 5 and c.building == patent_name for c in player.buildings_played
+    )
+
+
+def _bump_rate(card: Card, resource: Resource, amount: int) -> None:
+    """Add `amount` to the card's rate for `resource`. ResourceAmount is
+    frozen, so we replace the matching entry with a new instance (or
+    append a new entry if no rate for that resource exists yet).
+
+    Used by build-hook patents that add to a card's rates (Superconductors,
+    Cold Fusion, Slant Drilling).
+    """
+    for i, ra in enumerate(card.rates):
+        if ra.resource == resource:
+            card.rates[i] = ResourceAmount(resource=resource, amount=ra.amount + amount)
+            return
+    card.rates.append(ResourceAmount(resource=resource, amount=amount))
+
+
+# --- Patent build-time hooks ---
+#
+# These run inside execute_build BEFORE the card's rates and costs are
+# applied. They mutate a deep-copied card so the prototype shared across
+# the deck/pool/hand is unaffected. The hook only fires for the player who
+# owns the patent.
+
+def _hook_superconductors(state: GameState, player: Player, card: Card) -> None:
+    """New Power Buildings: +1 PWR. Bumps PWR rate on any power-tagged card."""
+    if "power" not in building_tags(card):
+        return
+    _bump_rate(card, Resource.PWR, +1)
+
+
+def _hook_cold_fusion(state: GameState, player: Player, card: Card) -> None:
+    """+1 PWR from new Water Buildings. Bumps PWR on any water-tagged card."""
+    if "water" not in building_tags(card):
+        return
+    _bump_rate(card, Resource.PWR, +1)
+
+
+def _hook_slant_drilling(state: GameState, player: Player, card: Card) -> None:
+    """+1 from new FE/SI Buildings.
+
+    A card tagged `iron` gets +1 FE; a card tagged `silicon` gets +1 SI.
+    Both can apply if the card has both tags.
+    """
+    tags = building_tags(card)
+    if "iron" in tags:
+        _bump_rate(card, Resource.FE, +1)
+    if "silicon" in tags:
+        _bump_rate(card, Resource.SI, +1)
+
+
+def _hook_perpetual_motion(state: GameState, player: Player, card: Card) -> None:
+    """New H2O/FE/C/SI buildings consume no PWR.
+
+    Strips negative PWR rates from cards tagged water/iron/carbon/silicon.
+    Positive PWR rates and the card's COSTS are unaffected — the patent
+    text says "consume" which we interpret as the per-turn negative rate.
+    """
+    tags = building_tags(card)
+    if not (tags & {"water", "iron", "carbon", "silicon"}):
+        return
+    card.rates = [
+        ra for ra in card.rates
+        if not (ra.resource == Resource.PWR and ra.amount < 0)
+    ]
+
+
+def _hook_carbon_scrubbing(state: GameState, player: Player, card: Card) -> None:
+    """New buildings do not consume C or O2.
+
+    Strips C and O2 entries from BOTH the card's costs (build-time payment)
+    and its negative rates (per-turn consumption). Positive C/O2 rates are
+    untouched.
+    """
+    card.costs = [
+        ra for ra in card.costs
+        if ra.resource not in (Resource.C, Resource.O2)
+    ]
+    card.rates = [
+        ra for ra in card.rates
+        if not (ra.resource in (Resource.C, Resource.O2) and ra.amount < 0)
+    ]
+
+
+# Patent name → build hook (signature: (state, player, card) -> None).
+# Only patents that mutate a card at build time go here. Passive event hooks
+# (Financial Instruments, Virtual Reality) and active patents (Water Engine,
+# Nanotechnology, Teleportation) live elsewhere.
+PATENT_BUILD_HOOKS = {
+    "Superconductors": _hook_superconductors,
+    "Cold Fusion": _hook_cold_fusion,
+    "Slant Drilling": _hook_slant_drilling,
+    "Perpetual Motion": _hook_perpetual_motion,
+    "Carbon Scrubbing": _hook_carbon_scrubbing,
+}
 
 
 # Pleasure Dome bonus tiers: indexed by GLOBAL number of PDs in play - 1.

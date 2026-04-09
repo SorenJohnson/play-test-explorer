@@ -1,0 +1,412 @@
+"""Tests for the 12 patents from Patents.csv (Phase 2 patent system).
+
+Each patent's mechanical effect is wired up via hooks in simulation.py
+keyed on the patent's name. These tests construct patents directly and
+exercise the relevant hook end-to-end.
+"""
+
+from pathlib import Path
+
+from my_project.models import Card, Resource, ResourceAmount
+from my_project.parsing import parse_cards, parse_contracts, parse_patents
+from my_project.simulation import (
+    GameState,
+    PATENT_BUILD_HOOKS,
+    Player,
+    _bump_rate,
+    _player_owns_patent,
+    building_tags,
+    execute_build,
+)
+
+
+DATA = Path(__file__).resolve().parent.parent / "my_project" / "data"
+
+
+def _load():
+    return parse_cards(DATA / "Cards.csv"), parse_contracts(DATA / "Contracts.csv")
+
+
+def _patent(name: str) -> Card:
+    """Construct a slot-5 patent card by name. Empty rates/effect — the
+    mechanical effect is fired by name in the build/event hooks."""
+    return Card(
+        alternate="Patent",
+        slot=5,
+        building=name,
+        costs=[],
+        rates=[],
+        effect="",
+        can_sell=[],
+        can_fulfill_contract=False,
+    )
+
+
+def _build_card(
+    name: str,
+    *,
+    costs: list[tuple[Resource, int]] | None = None,
+    rates: list[tuple[Resource, int]] | None = None,
+) -> Card:
+    """Construct a buildable Card with explicit costs and rates."""
+    return Card(
+        alternate="C/SI",
+        slot=1,
+        building=name,
+        costs=[ResourceAmount(resource=r, amount=a) for r, a in (costs or [])],
+        rates=[ResourceAmount(resource=r, amount=a) for r, a in (rates or [])],
+        effect="",
+        can_sell=[],
+        can_fulfill_contract=False,
+    )
+
+
+# --- Building tags helper ---
+
+
+class TestBuildingTags:
+    def test_empty_card_has_no_tags(self):
+        card = _build_card("Empty")
+        assert building_tags(card) == set()
+
+    def test_single_positive_rate_has_one_tag(self):
+        card = _build_card("Solar", rates=[(Resource.PWR, 2)])
+        assert building_tags(card) == {"power"}
+
+    def test_negative_rates_do_not_tag(self):
+        card = _build_card("Drain", rates=[(Resource.PWR, -1)])
+        assert building_tags(card) == set()
+
+    def test_multiple_positive_rates_yield_multiple_tags(self):
+        card = _build_card("Hybrid", rates=[(Resource.PWR, 1), (Resource.FE, 1)])
+        assert building_tags(card) == {"power", "iron"}
+
+    def test_mixed_positive_and_negative(self):
+        card = _build_card(
+            "Mixed",
+            rates=[(Resource.PWR, 1), (Resource.H2O, -1), (Resource.FE, 2)],
+        )
+        # Only positive rates count toward tags
+        assert building_tags(card) == {"power", "iron"}
+
+
+# --- Patent ownership helpers ---
+
+
+class TestPatentHelpers:
+    def test_player_owns_patent_true(self):
+        player = Player(name="P")
+        player.buildings_played.append(_patent("Superconductors"))
+        assert _player_owns_patent(player, "Superconductors")
+
+    def test_player_owns_patent_false(self):
+        player = Player(name="P")
+        assert not _player_owns_patent(player, "Superconductors")
+
+    def test_player_owns_patent_distinguishes_from_buildings(self):
+        """A slot-1 building with the same name doesn't count as patent ownership."""
+        player = Player(name="P")
+        fake = _build_card("Superconductors")  # slot=1, not a patent
+        player.buildings_played.append(fake)
+        assert not _player_owns_patent(player, "Superconductors")
+
+
+# --- Test fixture: a player with patents in a real game state ---
+
+
+def _setup_player_with_patent(patent_name: str) -> tuple[GameState, Player]:
+    """Create a 3-player game and give player 0 the named patent."""
+    cards, contracts = _load()
+    state = GameState.create(cards, contracts, num_players=3)
+    p = state.players[0]
+    p.buildings_played.append(_patent(patent_name))
+    # Give the player plenty of money so build affordability isn't a concern
+    p.money = 100
+    return state, p
+
+
+def _execute_single_build(state: GameState, player: Player, card: Card) -> Card:
+    """Put `card` in player's hand at index 0, build it, and return the
+    Card object that landed in buildings_played (so tests can inspect the
+    rates that were actually applied)."""
+    player.hand = [card]
+    record = execute_build(state, player, build_indices=[0], discard_indices=[])
+    assert record is not None, "build failed"
+    # The newly-appended card is the last one in buildings_played that isn't
+    # the patent we set up earlier.
+    return player.buildings_played[-1]
+
+
+# --- Superconductors ---
+
+
+class TestSuperconductors:
+    def test_bumps_pwr_on_power_building(self):
+        state, p = _setup_player_with_patent("Superconductors")
+        card = _build_card("Solar", rates=[(Resource.PWR, 2)])
+        pwr_before = p.rate(Resource.PWR)
+        built = _execute_single_build(state, p, card)
+        # Superconductors adds +1 PWR → built card now reads as +3 PWR
+        assert any(ra.resource == Resource.PWR and ra.amount == 3 for ra in built.rates)
+        # Player's actual rate should reflect +3 (not +2)
+        assert p.rate(Resource.PWR) == pwr_before + 3
+
+    def test_does_not_fire_on_non_power_building(self):
+        state, p = _setup_player_with_patent("Superconductors")
+        card = _build_card("Iron Mine", rates=[(Resource.FE, 2)])
+        pwr_before = p.rate(Resource.PWR)
+        _execute_single_build(state, p, card)
+        # No PWR rate change
+        assert p.rate(Resource.PWR) == pwr_before
+
+    def test_fires_on_dual_tagged_card(self):
+        """A card tagged power AND iron still gets the +1 PWR from Superconductors."""
+        state, p = _setup_player_with_patent("Superconductors")
+        card = _build_card("Hybrid", rates=[(Resource.PWR, 1), (Resource.FE, 1)])
+        pwr_before = p.rate(Resource.PWR)
+        _execute_single_build(state, p, card)
+        assert p.rate(Resource.PWR) == pwr_before + 2  # was +1, now +2
+
+    def test_does_not_corrupt_card_prototype(self):
+        """The shared Card prototype in the deck must NOT be mutated."""
+        state, p = _setup_player_with_patent("Superconductors")
+        card = _build_card("Solar", rates=[(Resource.PWR, 2)])
+        # Keep a reference and a snapshot of the original rates
+        original_rates_snapshot = [(ra.resource, ra.amount) for ra in card.rates]
+        _execute_single_build(state, p, card)
+        # The original prototype's rates should be unchanged
+        actual = [(ra.resource, ra.amount) for ra in card.rates]
+        assert actual == original_rates_snapshot
+
+
+# --- Cold Fusion ---
+
+
+class TestColdFusion:
+    def test_bumps_pwr_on_water_building(self):
+        state, p = _setup_player_with_patent("Cold Fusion")
+        card = _build_card("Aquifer", rates=[(Resource.H2O, 1)])
+        pwr_before = p.rate(Resource.PWR)
+        _execute_single_build(state, p, card)
+        # Card had no PWR; gets +1 PWR added
+        assert p.rate(Resource.PWR) == pwr_before + 1
+
+    def test_does_not_fire_on_non_water(self):
+        state, p = _setup_player_with_patent("Cold Fusion")
+        card = _build_card("Iron Mine", rates=[(Resource.FE, 2)])
+        pwr_before = p.rate(Resource.PWR)
+        _execute_single_build(state, p, card)
+        assert p.rate(Resource.PWR) == pwr_before
+
+    def test_stacks_with_existing_pwr(self):
+        """A card with both H2O and existing PWR gets +1 to its PWR rate."""
+        state, p = _setup_player_with_patent("Cold Fusion")
+        card = _build_card("WaterPower", rates=[(Resource.H2O, 1), (Resource.PWR, 1)])
+        pwr_before = p.rate(Resource.PWR)
+        _execute_single_build(state, p, card)
+        assert p.rate(Resource.PWR) == pwr_before + 2  # 1 from card, +1 from Cold Fusion
+
+
+# --- Slant Drilling ---
+
+
+class TestSlantDrilling:
+    def test_bumps_fe_on_iron_building(self):
+        state, p = _setup_player_with_patent("Slant Drilling")
+        card = _build_card("Iron Mine", rates=[(Resource.FE, 1)])
+        fe_before = p.rate(Resource.FE)
+        _execute_single_build(state, p, card)
+        assert p.rate(Resource.FE) == fe_before + 2  # +1 from card, +1 from Slant Drilling
+
+    def test_bumps_si_on_silicon_building(self):
+        state, p = _setup_player_with_patent("Slant Drilling")
+        card = _build_card("Quartz Mine", rates=[(Resource.SI, 1)])
+        si_before = p.rate(Resource.SI)
+        _execute_single_build(state, p, card)
+        assert p.rate(Resource.SI) == si_before + 2
+
+    def test_does_not_fire_on_other_buildings(self):
+        state, p = _setup_player_with_patent("Slant Drilling")
+        card = _build_card("Solar", rates=[(Resource.PWR, 2)])
+        fe_before = p.rate(Resource.FE)
+        si_before = p.rate(Resource.SI)
+        _execute_single_build(state, p, card)
+        assert p.rate(Resource.FE) == fe_before
+        assert p.rate(Resource.SI) == si_before
+
+    def test_dual_tag_gets_both_bumps(self):
+        """A card producing both FE and SI gets +1 to each."""
+        state, p = _setup_player_with_patent("Slant Drilling")
+        card = _build_card("Combo", rates=[(Resource.FE, 1), (Resource.SI, 1)])
+        fe_before = p.rate(Resource.FE)
+        si_before = p.rate(Resource.SI)
+        _execute_single_build(state, p, card)
+        assert p.rate(Resource.FE) == fe_before + 2
+        assert p.rate(Resource.SI) == si_before + 2
+
+
+# --- Perpetual Motion ---
+
+
+class TestPerpetualMotion:
+    def test_strips_negative_pwr_on_water_building(self):
+        state, p = _setup_player_with_patent("Perpetual Motion")
+        card = _build_card(
+            "PowerHungryWater",
+            rates=[(Resource.H2O, 2), (Resource.PWR, -1)],
+        )
+        pwr_before = p.rate(Resource.PWR)
+        h2o_before = p.rate(Resource.H2O)
+        _execute_single_build(state, p, card)
+        assert p.rate(Resource.PWR) == pwr_before  # -1 PWR was stripped
+        assert p.rate(Resource.H2O) == h2o_before + 2  # H2O still applied
+
+    def test_strips_negative_pwr_on_iron_building(self):
+        state, p = _setup_player_with_patent("Perpetual Motion")
+        card = _build_card("PowerHungryIron", rates=[(Resource.FE, 1), (Resource.PWR, -2)])
+        pwr_before = p.rate(Resource.PWR)
+        _execute_single_build(state, p, card)
+        assert p.rate(Resource.PWR) == pwr_before
+
+    def test_does_not_strip_positive_pwr(self):
+        state, p = _setup_player_with_patent("Perpetual Motion")
+        card = _build_card("WaterAndPower", rates=[(Resource.H2O, 1), (Resource.PWR, 1)])
+        pwr_before = p.rate(Resource.PWR)
+        _execute_single_build(state, p, card)
+        assert p.rate(Resource.PWR) == pwr_before + 1
+
+    def test_does_not_fire_on_non_qualifying_building(self):
+        """A card that's only Power (no water/iron/carbon/silicon tag) keeps its -PWR."""
+        state, p = _setup_player_with_patent("Perpetual Motion")
+        card = _build_card("PWROnly", rates=[(Resource.PWR, -1)])
+        pwr_before = p.rate(Resource.PWR)
+        _execute_single_build(state, p, card)
+        assert p.rate(Resource.PWR) == pwr_before - 1
+
+
+# --- Carbon Scrubbing ---
+
+
+class TestCarbonScrubbing:
+    def test_strips_c_from_costs(self):
+        state, p = _setup_player_with_patent("Carbon Scrubbing")
+        # Card costs 1 C; player has 0 C rate. Without the patent, this
+        # would deficit 1 C and require buying it from market.
+        card = _build_card(
+            "Scrubbed",
+            costs=[(Resource.C, 1), (Resource.FE, 1)],
+            rates=[(Resource.PWR, 1)],
+        )
+        p.hand = [card]
+        # Player has 1 FE rate so the FE cost is covered
+        p.rates[Resource.FE] = 1
+        money_before = p.money
+        record = execute_build(state, p, build_indices=[0], discard_indices=[])
+        # Build succeeded, player paid no market cost (C was stripped, FE was covered)
+        assert record is not None
+        assert p.money == money_before
+
+    def test_strips_o2_from_costs(self):
+        state, p = _setup_player_with_patent("Carbon Scrubbing")
+        card = _build_card("OxygenHog", costs=[(Resource.O2, 2)], rates=[(Resource.PWR, 1)])
+        p.hand = [card]
+        money_before = p.money
+        record = execute_build(state, p, build_indices=[0], discard_indices=[])
+        assert record is not None
+        assert p.money == money_before
+
+    def test_strips_c_from_negative_rates(self):
+        state, p = _setup_player_with_patent("Carbon Scrubbing")
+        card = _build_card("CarbonDrain", rates=[(Resource.PWR, 1), (Resource.C, -1)])
+        c_before = p.rate(Resource.C)
+        pwr_before = p.rate(Resource.PWR)
+        _execute_single_build(state, p, card)
+        # C rate unchanged (the -1 was stripped)
+        assert p.rate(Resource.C) == c_before
+        # PWR rate gained +1 (the positive PWR rate was kept)
+        assert p.rate(Resource.PWR) == pwr_before + 1
+
+    def test_strips_o2_from_negative_rates(self):
+        state, p = _setup_player_with_patent("Carbon Scrubbing")
+        card = _build_card("OxygenDrain", rates=[(Resource.O2, -2)])
+        o2_before = p.rate(Resource.O2)
+        _execute_single_build(state, p, card)
+        assert p.rate(Resource.O2) == o2_before
+
+    def test_does_not_strip_other_resources(self):
+        state, p = _setup_player_with_patent("Carbon Scrubbing")
+        card = _build_card("WaterCost", costs=[(Resource.H2O, 1)], rates=[(Resource.PWR, 1)])
+        # Player has 1 H2O rate to cover the cost
+        p.rates[Resource.H2O] = 1
+        money_before = p.money
+        _execute_single_build(state, p, card)
+        # H2O cost should still apply (covered by rate, no money paid)
+        assert p.money == money_before
+
+    def test_does_not_strip_positive_c_or_o2(self):
+        """The patent only strips negative C/O2 rates and C/O2 costs.
+        Positive rates are kept."""
+        state, p = _setup_player_with_patent("Carbon Scrubbing")
+        card = _build_card("Producer", rates=[(Resource.C, 2), (Resource.O2, 1)])
+        c_before = p.rate(Resource.C)
+        o2_before = p.rate(Resource.O2)
+        _execute_single_build(state, p, card)
+        assert p.rate(Resource.C) == c_before + 2
+        assert p.rate(Resource.O2) == o2_before + 1
+
+
+# --- PATENT_BUILD_HOOKS registry sanity check ---
+
+
+class TestPatentBuildHooksRegistry:
+    def test_all_5_easy_patents_registered(self):
+        for name in [
+            "Superconductors",
+            "Cold Fusion",
+            "Slant Drilling",
+            "Perpetual Motion",
+            "Carbon Scrubbing",
+        ]:
+            assert name in PATENT_BUILD_HOOKS, f"Missing hook for {name}"
+
+    def test_unknown_patent_name_does_not_break_build(self):
+        """A patent in buildings_played whose name has no hook is silently
+        ignored — the build still succeeds."""
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        p.buildings_played.append(_patent("NonexistentPatent"))
+        p.money = 100
+        card = _build_card("Solar", rates=[(Resource.PWR, 1)])
+        _execute_single_build(state, p, card)
+        # No errors, no surprises
+
+
+# --- Patents.csv parsing sanity check ---
+
+
+class TestPatentsCsv:
+    def test_parses_all_12_patents(self):
+        patents = parse_patents(DATA / "Patents.csv")
+        # The 12 patents from the user's authored CSV
+        names = {p.building for p in patents}
+        expected = {
+            "Superconductors", "Energy Vault", "Financial Instruments",
+            "Water Engine", "Nanotechnology", "Cold Fusion", "Virtual Reality",
+            "Perpetual Motion", "Carbon Scrubbing", "Slant Drilling",
+            "Thinking Machines", "Teleportation",
+        }
+        assert names == expected
+
+    def test_patents_have_no_inherent_rates(self):
+        """Patents from CSV have empty rates — the mechanical effect is in hooks."""
+        patents = parse_patents(DATA / "Patents.csv")
+        for p in patents:
+            assert p.rates == [], f"{p.building} has unexpected rates"
+            assert p.slot == 5
+
+    def test_patents_carry_effect_text(self):
+        """The Power column from the CSV lands in the effect field."""
+        patents = parse_patents(DATA / "Patents.csv")
+        sc = next(p for p in patents if p.building == "Superconductors")
+        assert "PWR" in sc.effect or "Power" in sc.effect

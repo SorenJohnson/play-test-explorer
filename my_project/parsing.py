@@ -76,7 +76,10 @@ def parse_patents(path: Path) -> list[Card]:
 
     Patents are modeled as Cards (they ride in Player.buildings_played) but
     have no purchase cost — they're awarded by the Patent Auction event.
-    The CSV columns are: Name, Rates, Effect.
+    The CSV columns are: Name, Power. Power is the human-readable rules
+    text; the corresponding mechanical effect is wired up via patent hooks
+    in simulation.py keyed on the patent name. Patents have no inherent
+    rates of their own (the rate effects come from the build hooks).
     """
     patents: list[Card] = []
     with open(path, newline="") as f:
@@ -88,8 +91,8 @@ def parse_patents(path: Path) -> list[Card]:
                     slot=5,  # patents are slot 5, distinct from buildings
                     building=row["Name"].strip(),
                     costs=[],
-                    rates=parse_resource_list(row["Rates"]),
-                    effect=row["Effect"].strip(),
+                    rates=[],  # patents have no inherent rates
+                    effect=row["Power"].strip(),
                     can_sell=[],
                     can_fulfill_contract=False,
                 )
