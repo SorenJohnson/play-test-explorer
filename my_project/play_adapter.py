@@ -41,6 +41,7 @@ from my_project.simulation import (
     HAND_SIZE,
     Player,
     _default_ai_bid,
+    _player_owns_patent,
     compute_build_deficit,
     effective_contract_requirements,
     execute_build,
@@ -255,6 +256,9 @@ class PlayableGame:
         active.has_built_this_turn = False
         active.has_used_space_elevator_this_turn = False
         active.has_used_launch_pad_this_turn = False
+        active.has_used_water_engine_this_turn = False
+        active.has_used_nanotechnology_this_turn = False
+        active.has_used_teleportation_this_turn = False
         # Pre-advance event_idx and stash the current turn's event so that
         # state.remaining_events() does NOT reveal it to the UI or any helper
         # that inspects remaining events during the action phase.
@@ -410,6 +414,79 @@ class PlayableGame:
         """
         return self.is_human_turn()
 
+    # --- Active patent free actions (once per turn each) ---
+
+    def use_water_engine(self, seat_idx: int) -> dict:
+        """Water Engine: -1 H2O rate, +2 PWR rate. Once per turn.
+        Requires owner has H2O rate >= 1.
+        """
+        if seat_idx not in self._human_indices:
+            return {"ok": False, "reason": "Not a human seat"}
+        player = self.state.players[seat_idx]
+        if not _player_owns_patent(player, "Water Engine"):
+            return {"ok": False, "reason": "No Water Engine"}
+        if player.has_used_water_engine_this_turn:
+            return {"ok": False, "reason": "Already used this turn"}
+        if player.rate(Resource.H2O) < 1:
+            return {"ok": False, "reason": "Need at least +1 H2O rate"}
+        player.rates[Resource.H2O] = player.rate(Resource.H2O) - 1
+        player.rates[Resource.PWR] = player.rate(Resource.PWR) + 2
+        player.has_used_water_engine_this_turn = True
+        return {"ok": True, "detail": "Water Engine: -1 H2O, +2 PWR"}
+
+    def use_nanotechnology(self, seat_idx: int) -> dict:
+        """Nanotechnology: discard the entire hand and draw the same number
+        of fresh cards. Once per turn."""
+        if seat_idx not in self._human_indices:
+            return {"ok": False, "reason": "Not a human seat"}
+        player = self.state.players[seat_idx]
+        if not _player_owns_patent(player, "Nanotechnology"):
+            return {"ok": False, "reason": "No Nanotechnology"}
+        if player.has_used_nanotechnology_this_turn:
+            return {"ok": False, "reason": "Already used this turn"}
+        n = len(player.hand)
+        if n == 0:
+            # Mark as used to prevent infinite UI clicks; otherwise no-op
+            player.has_used_nanotechnology_this_turn = True
+            return {"ok": True, "detail": "Nanotechnology: empty hand, no-op"}
+        # Discard entire hand
+        self.state.deck.discard.extend(player.hand)
+        player.hand = []
+        # Draw same number back
+        player.hand.extend(self.state.deck.draw(n))
+        player.has_used_nanotechnology_this_turn = True
+        return {"ok": True, "detail": f"Nanotechnology: discarded and redrew {n} cards"}
+
+    def use_teleportation(self, seat_idx: int, resource: str) -> dict:
+        """Teleportation: free sell action. Player picks any positive
+        resource, gains its current market price as cash. Cost: -1 PWR
+        rate (permanent). Does NOT decrement the sold rate.
+        Once per turn.
+        """
+        if seat_idx not in self._human_indices:
+            return {"ok": False, "reason": "Not a human seat"}
+        player = self.state.players[seat_idx]
+        if not _player_owns_patent(player, "Teleportation"):
+            return {"ok": False, "reason": "No Teleportation"}
+        if player.has_used_teleportation_this_turn:
+            return {"ok": False, "reason": "Already used this turn"}
+        try:
+            res = Resource(resource)
+        except ValueError:
+            return {"ok": False, "reason": f"Invalid resource: {resource}"}
+        if player.rate(res) < 1:
+            return {"ok": False, "reason": f"Need at least +1 {resource} rate"}
+        # Pay the PWR cost (the patent's "minus -1 PWR" — we permit the
+        # rate to go negative; the next power bill will collect the debt).
+        price = self.state.market.price(res)
+        player.money += price
+        player.rates[Resource.PWR] = player.rate(Resource.PWR) - 1
+        player.has_used_teleportation_this_turn = True
+        return {
+            "ok": True,
+            "detail": f"Teleportation: sold {resource} for ${price}, -1 PWR",
+        }
+
     # --- Mid-event prompt resolution ---
 
     def is_awaiting_prompt(self) -> bool:
@@ -517,6 +594,9 @@ class PlayableGame:
         player.has_built_this_turn = False
         player.has_used_space_elevator_this_turn = False
         player.has_used_launch_pad_this_turn = False
+        player.has_used_water_engine_this_turn = False
+        player.has_used_nanotechnology_this_turn = False
+        player.has_used_teleportation_this_turn = False
 
         # Look up this seat's strategy. seats is fully populated by __post_init__.
         strategy_fn = _resolve_strategy(self.seats[acting_player_idx])
@@ -684,6 +764,11 @@ class PlayableGame:
                 "launch_pad_status": {"owned": False, "used": False},
                 "hacker_array_status": {"owned": False},
                 "optimization_center_owned": False,
+                "patent_actions": {
+                    "water_engine": {"owned": False, "available": False},
+                    "nanotechnology": {"owned": False, "available": False},
+                    "teleportation": {"owned": False, "available": False, "valid_resources": []},
+                },
             }
         player = self.current_player()
         already_built = player.has_built_this_turn
@@ -771,6 +856,41 @@ class PlayableGame:
                         "elevator_target": target,
                     })
 
+        # Active patent status (Water Engine, Nanotechnology, Teleportation)
+        # Each entry: owned + available (owned & not used & any other gates).
+        we_owned = _player_owns_patent(player, "Water Engine")
+        nano_owned = _player_owns_patent(player, "Nanotechnology")
+        tele_owned = _player_owns_patent(player, "Teleportation")
+        # Teleportation needs the player to have at least one positive non-PWR
+        # rate to sell (and PWR rate may go negative — no constraint there).
+        tele_resources = [
+            r.value for r in Resource
+            if r != Resource.PWR and player.rate(r) > 0
+        ]
+        patent_actions = {
+            "water_engine": {
+                "owned": we_owned,
+                "available": (
+                    we_owned
+                    and not player.has_used_water_engine_this_turn
+                    and player.rate(Resource.H2O) >= 1
+                ),
+            },
+            "nanotechnology": {
+                "owned": nano_owned,
+                "available": nano_owned and not player.has_used_nanotechnology_this_turn,
+            },
+            "teleportation": {
+                "owned": tele_owned,
+                "available": (
+                    tele_owned
+                    and not player.has_used_teleportation_this_turn
+                    and len(tele_resources) > 0
+                ),
+                "valid_resources": tele_resources,
+            },
+        }
+
         return {
             "already_built": already_built,
             "affordable_single_builds": affordable,
@@ -780,6 +900,7 @@ class PlayableGame:
             "launch_pad_status": {"owned": lp_owned, "used": lp_used},
             "hacker_array_status": {"owned": ha_owned},
             "optimization_center_owned": oc_owned,
+            "patent_actions": patent_actions,
         }
 
     def estimate_build_cost(self, build_indices: list[int], discard_indices: list[int]) -> dict:

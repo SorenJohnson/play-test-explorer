@@ -431,6 +431,26 @@ body {
   gap: 6px;
   cursor: pointer;
 }
+
+/* Patent active-action rows */
+.patent-action-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  font-size: 0.85rem;
+  color: #c9d1d9;
+  flex-wrap: wrap;
+}
+.patent-action-row strong {
+  color: #58a6ff;
+}
+.patent-action-status {
+  color: #8b949e;
+  font-size: 0.75rem;
+  font-style: italic;
+}
+
 #pass-btn {
   background: #3d1f1f;
   border-color: #6e2020;

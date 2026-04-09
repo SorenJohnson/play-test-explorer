@@ -648,3 +648,212 @@ class TestThinkingMachines:
         _apply_patent_acquisition(state, p, _patent("Thinking Machines"))
         assert len(p.hand) == hand_before + 1
         assert p.hand_size == hand_size_before + 1
+
+
+# --- Active patents (Water Engine, Nanotechnology, Teleportation) ---
+
+
+from my_project.play_adapter import PlayableGame
+
+
+def _make_game_with_human() -> PlayableGame:
+    """A game with one human seat (idx 0) and disable_prompts=True."""
+    return PlayableGame(seed=42, max_turns=8, disable_prompts=True)
+
+
+class TestWaterEngine:
+    def test_use_consumes_h2o_yields_pwr(self):
+        game = _make_game_with_human()
+        p = game.state.players[0]
+        p.buildings_played.append(_patent("Water Engine"))
+        p.rates[Resource.H2O] = 1
+        p.rates[Resource.PWR] = 0
+        result = game.use_water_engine(0)
+        assert result["ok"]
+        assert p.rate(Resource.H2O) == 0
+        assert p.rate(Resource.PWR) == 2
+        assert p.has_used_water_engine_this_turn
+
+    def test_use_blocked_when_no_h2o(self):
+        game = _make_game_with_human()
+        p = game.state.players[0]
+        p.buildings_played.append(_patent("Water Engine"))
+        p.rates[Resource.H2O] = 0
+        result = game.use_water_engine(0)
+        assert not result["ok"]
+
+    def test_use_blocked_when_already_used(self):
+        game = _make_game_with_human()
+        p = game.state.players[0]
+        p.buildings_played.append(_patent("Water Engine"))
+        p.rates[Resource.H2O] = 5
+        game.use_water_engine(0)  # first use
+        result = game.use_water_engine(0)  # second use same turn
+        assert not result["ok"]
+
+    def test_use_blocked_when_not_owned(self):
+        game = _make_game_with_human()
+        result = game.use_water_engine(0)
+        assert not result["ok"]
+
+
+class TestNanotechnology:
+    def test_use_discards_and_redraws_same_count(self):
+        game = _make_game_with_human()
+        p = game.state.players[0]
+        p.buildings_played.append(_patent("Nanotechnology"))
+        # Snapshot the hand size and remember the original cards
+        n_before = len(p.hand)
+        original_cards = list(p.hand)
+        result = game.use_nanotechnology(0)
+        assert result["ok"]
+        assert len(p.hand) == n_before
+        # The hand should be different cards (drew from the deck)
+        # Note: this could theoretically be the same cards if the deck happens
+        # to have shuffled them back, but with 50+ cards in the deck the
+        # chance of collision on every slot is negligible.
+        assert p.hand != original_cards
+        assert p.has_used_nanotechnology_this_turn
+
+    def test_use_blocked_when_already_used(self):
+        game = _make_game_with_human()
+        p = game.state.players[0]
+        p.buildings_played.append(_patent("Nanotechnology"))
+        game.use_nanotechnology(0)
+        result = game.use_nanotechnology(0)
+        assert not result["ok"]
+
+    def test_empty_hand_no_op(self):
+        game = _make_game_with_human()
+        p = game.state.players[0]
+        p.buildings_played.append(_patent("Nanotechnology"))
+        p.hand = []
+        result = game.use_nanotechnology(0)
+        # Allowed but a no-op (hand stays empty); flag still gets set
+        assert result["ok"]
+        assert p.has_used_nanotechnology_this_turn
+        assert p.hand == []
+
+
+class TestTeleportation:
+    def test_sells_resource_for_market_price(self):
+        game = _make_game_with_human()
+        p = game.state.players[0]
+        p.buildings_played.append(_patent("Teleportation"))
+        p.rates[Resource.FE] = 2
+        money_before = p.money
+        fe_rate_before = p.rate(Resource.FE)
+        pwr_rate_before = p.rate(Resource.PWR)
+        result = game.use_teleportation(0, "FE")
+        assert result["ok"]
+        # Player got cash equal to FE market price
+        fe_price = game.state.market.price(Resource.FE)
+        assert p.money == money_before + fe_price
+        # FE rate UNCHANGED (the patent says "does not effect rates" for the sold resource)
+        assert p.rate(Resource.FE) == fe_rate_before
+        # PWR rate decreased by 1 (the patent's cost)
+        assert p.rate(Resource.PWR) == pwr_rate_before - 1
+        assert p.has_used_teleportation_this_turn
+
+    def test_blocked_when_no_positive_rate(self):
+        game = _make_game_with_human()
+        p = game.state.players[0]
+        p.buildings_played.append(_patent("Teleportation"))
+        # Player has no FE rate
+        p.rates[Resource.FE] = 0
+        result = game.use_teleportation(0, "FE")
+        assert not result["ok"]
+
+    def test_blocked_when_already_used(self):
+        game = _make_game_with_human()
+        p = game.state.players[0]
+        p.buildings_played.append(_patent("Teleportation"))
+        p.rates[Resource.FE] = 5
+        game.use_teleportation(0, "FE")
+        result = game.use_teleportation(0, "FE")
+        assert not result["ok"]
+
+    def test_blocked_when_not_owned(self):
+        game = _make_game_with_human()
+        p = game.state.players[0]
+        p.rates[Resource.FE] = 5
+        result = game.use_teleportation(0, "FE")
+        assert not result["ok"]
+
+    def test_invalid_resource_rejected(self):
+        game = _make_game_with_human()
+        p = game.state.players[0]
+        p.buildings_played.append(_patent("Teleportation"))
+        result = game.use_teleportation(0, "BOGUS")
+        assert not result["ok"]
+
+
+class TestPatentActionsLegalState:
+    def test_patent_actions_all_unowned(self):
+        game = _make_game_with_human()
+        game.begin_human_turn()
+        legal = game.legal_human_actions()
+        assert "patent_actions" in legal
+        for name in ["water_engine", "nanotechnology", "teleportation"]:
+            assert legal["patent_actions"][name]["owned"] is False
+            assert legal["patent_actions"][name]["available"] is False
+
+    def test_patent_actions_owned_and_available(self):
+        game = _make_game_with_human()
+        p = game.state.players[0]
+        p.buildings_played.append(_patent("Water Engine"))
+        p.rates[Resource.H2O] = 2
+        game.begin_human_turn()
+        legal = game.legal_human_actions()
+        assert legal["patent_actions"]["water_engine"]["owned"]
+        assert legal["patent_actions"]["water_engine"]["available"]
+
+    def test_water_engine_unavailable_after_use(self):
+        game = _make_game_with_human()
+        p = game.state.players[0]
+        p.buildings_played.append(_patent("Water Engine"))
+        p.rates[Resource.H2O] = 2
+        game.begin_human_turn()
+        game.use_water_engine(0)
+        legal = game.legal_human_actions()
+        assert legal["patent_actions"]["water_engine"]["owned"]
+        assert not legal["patent_actions"]["water_engine"]["available"]
+
+    def test_teleportation_valid_resources_filters_pwr_and_zero(self):
+        game = _make_game_with_human()
+        p = game.state.players[0]
+        p.buildings_played.append(_patent("Teleportation"))
+        # Reset all rates to 0, then give the player FE only
+        for r in Resource:
+            p.rates[r] = 0
+        p.rates[Resource.FE] = 3
+        p.rates[Resource.PWR] = 5  # PWR should NOT show up as a valid sell target
+        game.begin_human_turn()
+        legal = game.legal_human_actions()
+        valid = legal["patent_actions"]["teleportation"]["valid_resources"]
+        assert "FE" in valid
+        assert "PWR" not in valid
+        # Other zero-rate resources excluded
+        assert "GLS" not in valid
+
+
+class TestActivePatentFlagsResetEachTurn:
+    def test_water_engine_flag_resets(self):
+        """After ending a turn and starting a new one, the patent's per-turn
+        flag is cleared so it can be used again."""
+        game = _make_game_with_human()
+        p = game.state.players[0]
+        p.buildings_played.append(_patent("Water Engine"))
+        p.rates[Resource.H2O] = 5
+        game.begin_human_turn()
+        game.use_water_engine(0)
+        assert p.has_used_water_engine_this_turn
+        # End the human turn (with no event prompts since disable_prompts=True)
+        game.apply_human_action({"type": "pass"})
+        game.end_human_turn()
+        # Step through AI turns until human's turn comes back
+        while not game.is_human_turn() and not game.is_over():
+            game.step_ai_turn()
+        if not game.is_over():
+            game.begin_human_turn()
+            assert not p.has_used_water_engine_this_turn

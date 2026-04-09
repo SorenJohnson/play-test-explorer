@@ -1948,6 +1948,9 @@ def run_turn(state: GameState, player: Player, strategy, event: EventCard) -> No
     player.has_built_this_turn = False
     player.has_used_space_elevator_this_turn = False
     player.has_used_launch_pad_this_turn = False
+    player.has_used_water_engine_this_turn = False
+    player.has_used_nanotechnology_this_turn = False
+    player.has_used_teleportation_this_turn = False
 
     # Pool swapping phase (free, before actions)
     swap_fn = getattr(strategy, 'pool_swap', None)

@@ -444,6 +444,7 @@ function render() {
   renderPool();
   renderHand();
   renderActionBar();
+  renderPatentActions();
   renderLog();
 }
 
@@ -1209,6 +1210,123 @@ function submitPromptAnswer() {
     advanceUntilHuman();
   } else if (game.is_over()) {
     showEndgame();
+  }
+}
+
+function renderPatentActions() {
+  const s = currentState;
+  const legal = currentLegal || {};
+  const section = document.getElementById("patent-actions-section");
+  if (!section) return;
+  const pa = legal.patent_actions || {};
+  const ownsAny = pa.water_engine?.owned || pa.nanotechnology?.owned || pa.teleportation?.owned;
+  const isHumanTurn = (s.human_indices || []).includes(s.current_player_index);
+  if (!ownsAny || !isHumanTurn) {
+    section.style.display = "none";
+    return;
+  }
+  section.style.display = "block";
+
+  const host = document.getElementById("patent-actions-list");
+  if (!host) return;
+  const youIdx = activeHumanIndex(s);
+
+  const parts = [];
+
+  if (pa.water_engine?.owned) {
+    const avail = pa.water_engine.available;
+    const used = !avail && pa.water_engine.owned;
+    parts.push(`
+      <div class="patent-action-row">
+        <strong>Water Engine</strong> &mdash; spend 1 H2O for 2 PWR.
+        <button id="pa-water-engine-btn" class="action-btn"
+                ${avail ? "" : "disabled"}>
+          Use Water Engine
+        </button>
+        ${used ? '<span class="patent-action-status">already used</span>' : ''}
+      </div>
+    `);
+  }
+
+  if (pa.nanotechnology?.owned) {
+    const avail = pa.nanotechnology.available;
+    const used = !avail;
+    parts.push(`
+      <div class="patent-action-row">
+        <strong>Nanotechnology</strong> &mdash; discard your hand and draw fresh.
+        <button id="pa-nanotech-btn" class="action-btn"
+                ${avail ? "" : "disabled"}>
+          Discard &amp; Redraw
+        </button>
+        ${used ? '<span class="patent-action-status">already used</span>' : ''}
+      </div>
+    `);
+  }
+
+  if (pa.teleportation?.owned) {
+    const avail = pa.teleportation.available;
+    const used = pa.teleportation.owned && !avail && pa.teleportation.valid_resources?.length > 0;
+    const opts = (pa.teleportation.valid_resources || [])
+      .map((r) => `<option value="${r}">${r}</option>`)
+      .join("");
+    parts.push(`
+      <div class="patent-action-row">
+        <strong>Teleportation</strong> &mdash; sell any resource at market price (-1 PWR cost).
+        <select id="pa-tele-resource" class="toggle-select" ${avail ? "" : "disabled"}>
+          ${opts || '<option value="">— no valid resources —</option>'}
+        </select>
+        <button id="pa-tele-btn" class="action-btn" ${avail ? "" : "disabled"}>
+          Use Teleportation
+        </button>
+        ${used ? '<span class="patent-action-status">already used</span>' : ''}
+      </div>
+    `);
+  }
+
+  host.innerHTML = parts.join("");
+
+  // Wire button handlers
+  const weBtn = document.getElementById("pa-water-engine-btn");
+  if (weBtn) {
+    weBtn.addEventListener("click", () => {
+      const result = game.use_water_engine(youIdx).toJs({ dict_converter: Object.fromEntries });
+      if (result.ok) {
+        logHumanAction(result.detail || "Used Water Engine");
+      } else {
+        alert(`Water Engine failed: ${result.reason}`);
+      }
+      refreshState();
+    });
+  }
+  const nanoBtn = document.getElementById("pa-nanotech-btn");
+  if (nanoBtn) {
+    nanoBtn.addEventListener("click", () => {
+      const result = game.use_nanotechnology(youIdx).toJs({ dict_converter: Object.fromEntries });
+      if (result.ok) {
+        logHumanAction(result.detail || "Used Nanotechnology");
+      } else {
+        alert(`Nanotechnology failed: ${result.reason}`);
+      }
+      refreshState();
+    });
+  }
+  const teleBtn = document.getElementById("pa-tele-btn");
+  if (teleBtn) {
+    teleBtn.addEventListener("click", () => {
+      const sel = document.getElementById("pa-tele-resource");
+      if (!sel || !sel.value) {
+        alert("Pick a resource for Teleportation first.");
+        return;
+      }
+      const result = game.use_teleportation(youIdx, sel.value)
+        .toJs({ dict_converter: Object.fromEntries });
+      if (result.ok) {
+        logHumanAction(result.detail || "Used Teleportation");
+      } else {
+        alert(`Teleportation failed: ${result.reason}`);
+      }
+      refreshState();
+    });
   }
 }
 
