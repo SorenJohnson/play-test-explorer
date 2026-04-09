@@ -112,6 +112,25 @@
         </div>
       </section>
 
+      <!-- Patent auction bid (only shown when patents remain) -->
+      <section id="patent-section" style="display:none;">
+        <h2>Patent Auction Bid</h2>
+        <p class="subtitle" id="patent-info">
+          Set your bid for the next patent auction. Bids are in $5 increments
+          and paid as debt by the winner. Highest bidder wins (ties go to
+          earliest seat). Your bid is used the next time a Patent Auction
+          event fires.
+        </p>
+        <div id="patent-bid-controls" style="display:flex; gap:8px; align-items:center;">
+          <label for="patent-bid-input" style="font-size:0.85rem;">Your bid: $</label>
+          <input type="number" id="patent-bid-input" min="0" max="200" step="5" value="0"
+                 style="width:80px; background:#21262d; border:1px solid #30363d; color:#c9d1d9; padding:4px 8px; border-radius:4px; font-size:0.85rem;">
+          <button id="patent-bid-set-btn" class="action-btn">Set Bid</button>
+          <button id="patent-bid-clear-btn" class="action-btn">Clear</button>
+          <span id="patent-bid-status" style="color:#8b949e; font-size:0.8rem;"></span>
+        </div>
+      </section>
+
       <!-- Turn log -->
       <section id="log-section">
         <h2>Turn Log</h2>

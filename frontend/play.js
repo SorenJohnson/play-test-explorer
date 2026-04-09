@@ -420,6 +420,7 @@ function render() {
   renderPool();
   renderHand();
   renderActionBar();
+  renderPatentSection();
   renderLog();
 }
 
@@ -903,6 +904,53 @@ function renderActionBar() {
   }
 }
 
+function renderPatentSection() {
+  const s = currentState;
+  const section = document.getElementById("patent-section");
+  if (!section) return;
+  // Hide entirely if no patents are loaded.
+  const remaining = s.patent_pile_remaining || 0;
+  if (remaining === 0) {
+    section.style.display = "none";
+    return;
+  }
+  // Show only on a human's turn (in hot-seat the active human gets to declare).
+  const youIdx = activeHumanIndex(s);
+  const isHumanTurn = (s.human_indices || []).includes(s.current_player_index);
+  if (!isHumanTurn) {
+    section.style.display = "none";
+    return;
+  }
+  section.style.display = "block";
+
+  const info = document.getElementById("patent-info");
+  if (info) {
+    info.textContent =
+      `${remaining} patent${remaining === 1 ? "" : "s"} remaining. Set your bid for the next ` +
+      `auction. Bids are in $5 increments and paid as debt by the winner. Highest bidder wins ` +
+      `(ties go to earliest seat).`;
+  }
+
+  // Status: show whether the active human has already declared a bid.
+  const pendingBids = s.pending_bids || {};
+  const youBid = pendingBids[youIdx];
+  const status = document.getElementById("patent-bid-status");
+  const input = document.getElementById("patent-bid-input");
+  if (status) {
+    if (youBid !== undefined) {
+      status.textContent = `Bid declared: $${youBid}`;
+      status.style.color = "#3fb950";
+    } else {
+      status.textContent = "No bid declared (will use AI default)";
+      status.style.color = "#8b949e";
+    }
+  }
+  // Reflect the declared bid in the input so re-clicks update from a sensible value
+  if (input && youBid !== undefined && document.activeElement !== input) {
+    input.value = String(youBid);
+  }
+}
+
 function renderLog() {
   const el = document.getElementById("turn-log");
   if (turnLog.length === 0) {
@@ -964,6 +1012,34 @@ function wireButtons() {
   document.getElementById("ng-cancel-btn").addEventListener("click", () => {
     hideNewGameModal();
   });
+
+  // Patent auction bid controls
+  const bidSetBtn = document.getElementById("patent-bid-set-btn");
+  if (bidSetBtn) {
+    bidSetBtn.addEventListener("click", () => {
+      const input = document.getElementById("patent-bid-input");
+      if (!input || !game) return;
+      const youIdx = activeHumanIndex(currentState);
+      const amount = parseInt(input.value, 10) || 0;
+      const result = game.set_patent_bid(youIdx, amount).toJs({
+        dict_converter: Object.fromEntries,
+      });
+      if (result.ok) {
+        // The Python side may have rounded the amount; reflect that.
+        input.value = String(result.amount);
+      }
+      refreshState();
+    });
+  }
+  const bidClearBtn = document.getElementById("patent-bid-clear-btn");
+  if (bidClearBtn) {
+    bidClearBtn.addEventListener("click", () => {
+      if (!game) return;
+      const youIdx = activeHumanIndex(currentState);
+      game.clear_patent_bid(youIdx);
+      refreshState();
+    });
+  }
 }
 
 function onBuild() {

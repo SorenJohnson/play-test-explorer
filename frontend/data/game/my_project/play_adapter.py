@@ -363,6 +363,27 @@ class PlayableGame:
         """
         return self.is_human_turn()
 
+    def set_patent_bid(self, seat_idx: int, amount: int) -> dict:
+        """Set a human seat's bid for the next patent auction.
+
+        The bid is stored on `state.pending_bids` and consumed by the next
+        PATENT_AUCTION event (which could fire on this player's turn or any
+        later one). The bid is rounded down to the nearest $5 and clamped
+        to >= 0. Pre-declaring lets each human pick their bid in advance,
+        rather than mid-event modal interruptions.
+        """
+        if seat_idx not in self._human_indices:
+            return {"ok": False, "reason": "Seat is not human"}
+        amount = max(0, int(amount))
+        amount = (amount // 5) * 5
+        self.state.pending_bids[seat_idx] = amount
+        return {"ok": True, "amount": amount}
+
+    def clear_patent_bid(self, seat_idx: int) -> dict:
+        """Clear a previously declared bid for a human seat."""
+        self.state.pending_bids.pop(seat_idx, None)
+        return {"ok": True}
+
     # --- AI turn ---
 
     def step_ai_turn(self) -> dict:
@@ -491,6 +512,9 @@ class PlayableGame:
             "last_event": self.last_event,
             "last_ai_actions": self.last_ai_actions,
             "market_history": list(self.market_history),
+            # Patent state for the auction UI
+            "patent_pile_remaining": max(0, len(s.patent_pile) - s.patent_idx),
+            "pending_bids": dict(s.pending_bids),
         }
 
     # --- Legal action enumeration (for UI hinting) ---
