@@ -410,46 +410,6 @@ class PlayableGame:
         """
         return self.is_human_turn()
 
-    def set_patent_bid(self, seat_idx: int, amount: int) -> dict:
-        """Set a human seat's bid for the next patent auction.
-
-        The bid is stored on `state.pending_bids` and consumed by the next
-        PATENT_AUCTION event (which could fire on this player's turn or any
-        later one). The bid is rounded down to the nearest $5 and clamped
-        to >= 0. Pre-declaring lets each human pick their bid in advance,
-        rather than mid-event modal interruptions.
-        """
-        if seat_idx not in self._human_indices:
-            return {"ok": False, "reason": "Seat is not human"}
-        amount = max(0, int(amount))
-        amount = (amount // 5) * 5
-        self.state.pending_bids[seat_idx] = amount
-        return {"ok": True, "amount": amount}
-
-    def clear_patent_bid(self, seat_idx: int) -> dict:
-        """Clear a previously declared bid for a human seat."""
-        self.state.pending_bids.pop(seat_idx, None)
-        return {"ok": True}
-
-    def set_oc_pick(self, seat_idx: int, resource: str) -> dict:
-        """Set a human seat's Optimization Center target for the next futures
-        settlement. Validated against Resource enum and excludes PWR."""
-        if seat_idx not in self._human_indices:
-            return {"ok": False, "reason": "Seat is not human"}
-        try:
-            res = Resource(resource)
-        except ValueError:
-            return {"ok": False, "reason": f"Invalid resource: {resource}"}
-        if res == Resource.PWR:
-            return {"ok": False, "reason": "PWR is not a valid OC target"}
-        self.state.pending_oc_picks[seat_idx] = res.value
-        return {"ok": True, "resource": res.value}
-
-    def clear_oc_pick(self, seat_idx: int) -> dict:
-        """Clear a previously declared OC target."""
-        self.state.pending_oc_picks.pop(seat_idx, None)
-        return {"ok": True}
-
     # --- Mid-event prompt resolution ---
 
     def is_awaiting_prompt(self) -> bool:
@@ -694,17 +654,9 @@ class PlayableGame:
             "last_event": self.last_event,
             "last_ai_actions": self.last_ai_actions,
             "market_history": list(self.market_history),
-            # Patent state for the auction UI
+            # Patent state — patent_pile_remaining is just for stats / debug
+            # since the modal handles the bid flow at auction time.
             "patent_pile_remaining": max(0, len(s.patent_pile) - s.patent_idx),
-            "pending_bids": dict(s.pending_bids),
-            # The patent that will be auctioned next (peek without drawing)
-            "next_patent": (
-                _patent_card_dict(s.patent_pile[s.patent_idx])
-                if s.patent_idx < len(s.patent_pile)
-                else None
-            ),
-            # Optimization Center pre-declared picks (seat → resource string)
-            "pending_oc_picks": dict(s.pending_oc_picks),
             # Mid-event prompt (None when no prompt is active)
             "pending_prompt": dict(s.pending_prompt) if s.pending_prompt else None,
         }
@@ -885,15 +837,6 @@ def _card_dict(card: Card) -> dict:
         "effect": card.effect,
         "can_sell": [r.value for r in card.can_sell],
         "can_fulfill_contract": card.can_fulfill_contract,
-    }
-
-
-def _patent_card_dict(card: Card) -> dict:
-    """Slim card dict for patent UI: name, rates, effect."""
-    return {
-        "name": card.building,
-        "rates": [{"resource": ra.resource.value, "amount": ra.amount} for ra in card.rates],
-        "effect": card.effect,
     }
 
 

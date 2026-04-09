@@ -444,7 +444,6 @@ function render() {
   renderPool();
   renderHand();
   renderActionBar();
-  renderPatentSection();
   renderLog();
 }
 
@@ -1210,46 +1209,6 @@ function submitPromptAnswer() {
     advanceUntilHuman();
   } else if (game.is_over()) {
     showEndgame();
-  }
-}
-
-function renderPatentSection() {
-  const s = currentState;
-  const section = document.getElementById("patent-section");
-  if (!section) return;
-  // Hide entirely if no patents are loaded.
-  const remaining = s.patent_pile_remaining || 0;
-  if (remaining === 0) {
-    section.style.display = "none";
-    return;
-  }
-  section.style.display = "block";
-
-  const info = document.getElementById("patent-info");
-  if (info) {
-    info.textContent =
-      `${remaining} patent${remaining === 1 ? "" : "s"} remaining in the pile. ` +
-      `When the next Patent Auction event fires, you'll be prompted to bid on ` +
-      `the patent shown below.`;
-  }
-
-  // Show the next-up patent (peek without drawing)
-  const next = s.next_patent;
-  const preview = document.getElementById("patent-preview");
-  if (preview) {
-    if (next) {
-      const ratesStr = (next.rates || [])
-        .map((r) => `${r.amount > 0 ? "+" : ""}${r.amount} ${r.resource}`)
-        .join(", ") || "—";
-      const effectStr = next.effect || "(no effect)";
-      preview.innerHTML = `
-        <div><strong style="color:#58a6ff">Next up:</strong> ${next.name}</div>
-        <div style="margin-top:4px;"><span style="color:#8b949e">Rates:</span> ${ratesStr}</div>
-        <div><span style="color:#8b949e">Effect:</span> ${effectStr}</div>
-      `;
-    } else {
-      preview.innerHTML = '<em style="color:#484f58">No upcoming patent</em>';
-    }
   }
 }
 
