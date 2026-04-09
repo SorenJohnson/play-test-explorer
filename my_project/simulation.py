@@ -46,6 +46,7 @@ SUPPORTED_SPECIAL_EFFECTS: set[str] = {
     "Optimization Center",  # passive: pre-futures rate boost
     "Space Elevator",       # passive: -1 to all contract requirements
     "Hacker Array",         # passive on sell: +3 to highest-priced non-sold resource
+    "Patent Office",        # build-time: draw 2 patents, keep best, return other
 }
 
 
@@ -764,6 +765,10 @@ def execute_build(
     for card in build_cards:
         player.apply_rates(card)
         player.buildings_played.append(card)
+        # Patent Office build-time trigger: draw 2 patents, keep the better
+        # one (by total rate sum), put the other back on top of the pile.
+        if card.building == "Patent Office":
+            _patent_office_trigger(state, player)
 
     # Remove cards from hand (highest indices first to avoid shifting) → discard pile
     all_indices = sorted(set(build_indices) | set(discard_indices), reverse=True)
@@ -920,6 +925,46 @@ def _pleasure_dome_bonus(player: Player) -> int:
         return 0
     per_dome = PLEASURE_DOME_TIERS[min(n - 1, len(PLEASURE_DOME_TIERS) - 1)]
     return per_dome * n
+
+
+def _patent_office_trigger(state: GameState, player: Player) -> None:
+    """Build-time trigger: draw 2 patents, keep the better, return the other.
+
+    "Better" is the patent with the higher total positive rate sum (a simple
+    proxy for value). Ties pick the first drawn. If only 1 patent is left,
+    just take it. If 0, no-op.
+
+    The kept patent is appended to player.buildings_played and its rates
+    are applied. The returned patent goes back on TOP of the pile so the
+    next Patent Office (or other patent-related event) can pick it up.
+    """
+    # How many patents are still available?
+    available = len(state.patent_pile) - state.patent_idx
+    if available <= 0:
+        return
+    drawn: list[Card] = []
+    for _ in range(min(2, available)):
+        drawn.append(state.patent_pile[state.patent_idx])
+        state.patent_idx += 1
+
+    if len(drawn) == 1:
+        kept = drawn[0]
+    else:
+        a, b = drawn
+        score_a = sum(ra.amount for ra in a.rates if ra.amount > 0)
+        score_b = sum(ra.amount for ra in b.rates if ra.amount > 0)
+        if score_b > score_a:
+            kept, returned = b, a
+        else:
+            kept, returned = a, b
+        # Put the returned patent back on TOP of the pile (next card drawn).
+        # The cursor advanced past 2 cards; rewind it 1 and overwrite the
+        # slot just past the cursor with the returned card.
+        state.patent_idx -= 1
+        state.patent_pile[state.patent_idx] = returned
+
+    player.buildings_played.append(kept)
+    player.apply_rates(kept)
 
 
 def effective_contract_requirements(

@@ -9,10 +9,12 @@ from my_project.simulation import (
     Player,
     SUPPORTED_SPECIAL_EFFECTS,
     _count_buildings,
+    _patent_office_trigger,
     _pleasure_dome_bonus,
     do_futures_settlement,
     do_power_bill,
     effective_contract_requirements,
+    execute_build,
     execute_contract,
     execute_sell,
 )
@@ -287,12 +289,89 @@ class TestHackerArray:
         assert "[HA:" in record.detail
 
 
+# --- Patent Office ---
+
+
+def _patent(name: str, rate_amount: int = 1, rate_resource=Resource.PWR) -> Card:
+    return Card(
+        alternate="Patent",
+        slot=5,
+        building=name,
+        costs=[],
+        rates=[ResourceAmount(resource=rate_resource, amount=rate_amount)],
+        effect="",
+        can_sell=[],
+        can_fulfill_contract=False,
+    )
+
+
+class TestPatentOffice:
+    def test_no_patents_is_noop(self):
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        # patent_pile defaults to empty
+        p = state.players[0]
+        rates_before = dict(p.rates)
+        _patent_office_trigger(state, p)
+        # No patents added, no rate change
+        assert dict(p.rates) == rates_before
+
+    def test_draws_two_keeps_better(self):
+        cards, contracts = _load()
+        # Hand-crafted patent_pile so the test is deterministic
+        better = _patent("Better", rate_amount=3, rate_resource=Resource.PWR)
+        worse = _patent("Worse", rate_amount=1, rate_resource=Resource.PWR)
+        state = GameState.create(
+            cards, contracts, num_players=3, patent_pile=[better, worse]
+        )
+        # Override the post-shuffle order so the test is deterministic
+        state.patent_pile = [better, worse]
+        state.patent_idx = 0
+        p = state.players[0]
+        pwr_before = p.rate(Resource.PWR)
+        _patent_office_trigger(state, p)
+        # The better patent (3 PWR) should be in buildings_played
+        assert any(c.building == "Better" for c in p.buildings_played)
+        assert not any(c.building == "Worse" for c in p.buildings_played)
+        # The rate boost from the kept patent applied (+3 to whatever they had)
+        assert p.rate(Resource.PWR) == pwr_before + 3
+
+    def test_returned_patent_is_next_drawn(self):
+        cards, contracts = _load()
+        better = _patent("Better", rate_amount=3)
+        worse = _patent("Worse", rate_amount=1)
+        third = _patent("Third", rate_amount=2)
+        state = GameState.create(
+            cards, contracts, num_players=3, patent_pile=[better, worse, third]
+        )
+        state.patent_pile = [better, worse, third]
+        state.patent_idx = 0
+        p = state.players[0]
+        _patent_office_trigger(state, p)
+        # Worse was returned to top → next draw is Worse
+        next_drawn = state.patent_pile[state.patent_idx]
+        assert next_drawn.building == "Worse"
+
+    def test_one_patent_left_just_takes_it(self):
+        cards, contracts = _load()
+        only = _patent("Only", rate_amount=1)
+        state = GameState.create(
+            cards, contracts, num_players=3, patent_pile=[only]
+        )
+        state.patent_pile = [only]
+        state.patent_idx = 0
+        p = state.players[0]
+        _patent_office_trigger(state, p)
+        assert any(c.building == "Only" for c in p.buildings_played)
+        assert state.patent_idx == 1
+
+
 # --- Filter gate ---
 
 
 class TestSupportedSpecialEffects:
     def test_supported_set_includes_passives(self):
-        for name in ["Pleasure Dome", "Optimization Center", "Space Elevator", "Hacker Array"]:
+        for name in ["Pleasure Dome", "Optimization Center", "Space Elevator", "Hacker Array", "Patent Office"]:
             assert name in SUPPORTED_SPECIAL_EFFECTS
 
     def test_unsupported_specials_excluded_from_deck(self):
