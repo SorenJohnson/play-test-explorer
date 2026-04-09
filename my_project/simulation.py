@@ -448,6 +448,7 @@ class Action:
     # Special-building flags carried through to execute_*:
     use_elevator: bool = False     # consume Space Elevator's per-turn discount
     use_launch_pad: bool = False   # use Launch Pad as the contract icon source
+    elevator_target: str = ""      # which contract requirement to discount (resource value)
     # Per-sell Hacker Array choice (used by execute_sell when set)
     hacker_target: str = ""        # resource value (e.g. "GLS"); empty = no bonus
     hacker_direction: int = 0      # +1 / -1 / 0 for no bonus
@@ -896,6 +897,7 @@ def execute_contract(
     contract_idx: int,
     use_elevator: bool = False,
     use_launch_pad: bool = False,
+    elevator_target: str | None = None,
 ) -> ActionRecord | None:
     """Fulfill a contract.
 
@@ -905,8 +907,10 @@ def execute_contract(
     (Launch Pad acts as a free contract icon, once per turn). card_idx
     is ignored in this branch.
 
-    `use_elevator=True`: applies a one-time -1 to every requirement
-    (Space Elevator's per-turn discount). Also gated by the per-turn flag.
+    `use_elevator=True`: applies a one-time -1 to ONE resource (Space
+    Elevator's per-turn discount). The resource is `elevator_target`
+    (e.g. "FE"); if not provided, defaults to the first requirement.
+    Also gated by the per-turn flag.
 
     Returns ActionRecord on success, None if any precondition fails.
     """
@@ -935,7 +939,7 @@ def execute_contract(
 
     # Apply Space Elevator discount only if requested
     effective_reqs = effective_contract_requirements(
-        player, contract, apply_elevator=use_elevator
+        player, contract, apply_elevator=use_elevator, elevator_target=elevator_target
     )
 
     # Check if player can afford the (discounted) rate costs
@@ -977,7 +981,9 @@ def execute_contract(
     req_str = ", ".join(f"{r.amount} {r.resource.value}" for r in contract.requirements)
     label = req_str
     if use_elevator:
-        label += " [SE -1]"
+        # Pick which resource was discounted for the log
+        target = elevator_target or (contract.requirements[0].resource.value if contract.requirements else "")
+        label += f" [SE -1 {target}]" if target else " [SE -1]"
     if use_launch_pad:
         label += " [LP]"
 
@@ -1078,22 +1084,39 @@ def effective_contract_requirements(
     player: Player,
     contract: Contract,
     apply_elevator: bool = False,
+    elevator_target: str | None = None,
 ) -> list[ResourceAmount]:
     """Return contract requirements, optionally with Space Elevator -1.
 
-    The discount applies only if the player owns at least one Space Elevator
-    AND `apply_elevator` is True (caller controls the per-turn limit). One
-    Space Elevator gives -1 across the board (with floor 0). Owning more
-    than one is impossible under the one-of-each rule, but the function
-    is still safe if duplicates somehow exist — it always applies -1, not
-    -count.
+    Space Elevator gives -1 to ONE resource on the contract (player's pick),
+    not -1 across the board. The discount only applies if:
+      - the player owns a Space Elevator
+      - `apply_elevator` is True (caller controls per-turn limit)
+      - `elevator_target` is the resource value of one of the contract's
+        requirements (e.g. "FE" for a contract requiring 2 FE)
+
+    If `elevator_target` is None, the function falls back to discounting the
+    FIRST requirement on the contract — useful for AI players that don't pick.
+    Floor at 0.
     """
     if not apply_elevator or _count_buildings(player, "Space Elevator") == 0:
         return list(contract.requirements)
-    return [
-        ResourceAmount(resource=req.resource, amount=max(0, req.amount - 1))
-        for req in contract.requirements
-    ]
+    if not contract.requirements:
+        return []
+    # Pick which req to discount.
+    target_idx = 0
+    if elevator_target:
+        for i, req in enumerate(contract.requirements):
+            if req.resource.value == elevator_target:
+                target_idx = i
+                break
+    out: list[ResourceAmount] = []
+    for i, req in enumerate(contract.requirements):
+        if i == target_idx:
+            out.append(ResourceAmount(resource=req.resource, amount=max(0, req.amount - 1)))
+        else:
+            out.append(ResourceAmount(resource=req.resource, amount=req.amount))
+    return out
 
 
 def can_use_space_elevator(player: Player) -> bool:
@@ -1509,6 +1532,7 @@ def _execute_action(state: GameState, player: Player, action: Action) -> ActionR
             action.contract_idx,
             use_elevator=action.use_elevator,
             use_launch_pad=action.use_launch_pad,
+            elevator_target=action.elevator_target or None,
         )
 
     return None

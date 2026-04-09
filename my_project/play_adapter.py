@@ -334,6 +334,7 @@ class PlayableGame:
             contract_idx = action.get("contract_idx", -1)
             use_elevator = bool(action.get("use_elevator", False))
             use_launch_pad = bool(action.get("use_launch_pad", False))
+            elevator_target = action.get("elevator_target") or None
             if not use_launch_pad:
                 if card_idx < 0 or card_idx >= len(player.hand):
                     return {"ok": False, "reason": "Invalid card"}
@@ -348,6 +349,7 @@ class PlayableGame:
                 contract_idx,
                 use_elevator=use_elevator,
                 use_launch_pad=use_launch_pad,
+                elevator_target=elevator_target,
             )
             if record is None:
                 return {"ok": False, "reason": "Cannot fulfill contract"}
@@ -617,17 +619,27 @@ class PlayableGame:
         oc_owned = _count_buildings(player, "Optimization Center") > 0
 
         # Contract-fulfillable combinations. Each entry includes flags for
-        # which special-building paths it requires (if any).
+        # which special-building paths it requires. With the new SE semantics
+        # (-1 to ONE resource), we enumerate per-resource elevator picks too.
         can_contract = []
         for j, contract in enumerate(self.state.available_contracts):
             plain_reqs = effective_contract_requirements(player, contract, apply_elevator=False)
             plain_ok = all(player.rate(req.resource) >= req.amount for req in plain_reqs)
-            disc_reqs = effective_contract_requirements(player, contract, apply_elevator=True)
-            disc_ok = se_owned and not se_used and all(
-                player.rate(req.resource) >= req.amount for req in disc_reqs
-            )
-            if not plain_ok and not disc_ok:
+
+            # Per-resource SE picks: which targets make this contract affordable?
+            se_targets: list[str] = []
+            if se_owned and not se_used:
+                for req in contract.requirements:
+                    target = req.resource.value
+                    disc_reqs = effective_contract_requirements(
+                        player, contract, apply_elevator=True, elevator_target=target
+                    )
+                    if all(player.rate(r.resource) >= r.amount for r in disc_reqs):
+                        se_targets.append(target)
+
+            if not plain_ok and not se_targets:
                 continue
+
             # Real hand cards
             for i, card in enumerate(player.hand):
                 if not card.can_fulfill_contract:
@@ -636,11 +648,13 @@ class PlayableGame:
                     can_contract.append({
                         "card_idx": i, "contract_idx": j,
                         "use_elevator": False, "use_launch_pad": False,
+                        "elevator_target": "",
                     })
-                if disc_ok:
+                for target in se_targets:
                     can_contract.append({
                         "card_idx": i, "contract_idx": j,
                         "use_elevator": True, "use_launch_pad": False,
+                        "elevator_target": target,
                     })
             # Launch Pad path (no hand card needed)
             if lp_owned and not lp_used:
@@ -648,11 +662,13 @@ class PlayableGame:
                     can_contract.append({
                         "card_idx": -1, "contract_idx": j,
                         "use_elevator": False, "use_launch_pad": True,
+                        "elevator_target": "",
                     })
-                if disc_ok:
+                for target in se_targets:
                     can_contract.append({
                         "card_idx": -1, "contract_idx": j,
                         "use_elevator": True, "use_launch_pad": True,
+                        "elevator_target": target,
                     })
 
         return {

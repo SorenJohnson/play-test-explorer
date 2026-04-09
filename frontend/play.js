@@ -55,9 +55,11 @@ let selectedContractIdx = null;
 let pendingPoolSwapIdx = null;
 // Special-building per-action toggles:
 // useElevatorThisFulfill: apply Space Elevator -1 on the next contract action
+// elevatorTargetResource: which contract requirement to discount (resource value)
 // useLaunchPadThisFulfill: use Launch Pad as the contract icon (no card needed)
 // hackerTarget / hackerDirection: Hacker Array picker for the next sell
 let useElevatorThisFulfill = false;
+let elevatorTargetResource = "";
 let useLaunchPadThisFulfill = false;
 let hackerTarget = "";
 let hackerDirection = 0;
@@ -390,6 +392,7 @@ function clearSelection() {
   selectedContractIdx = null;
   pendingPoolSwapIdx = null;
   useElevatorThisFulfill = false;
+  elevatorTargetResource = "";
   useLaunchPadThisFulfill = false;
   hackerTarget = "";
   hackerDirection = 0;
@@ -894,19 +897,21 @@ function renderActionBar() {
   // Contract: legal if a contract is selected and EITHER:
   //   (a) a hand-card is selected and the (card,contract) pair is in can_contract
   //   (b) Launch Pad toggle is on, owned, unused, and (-1,contract) is in can_contract
-  // Either path can compose with the Space Elevator toggle.
+  // Each path can compose with the Space Elevator toggle (which targets one
+  // specific resource on the contract via elevatorTargetResource).
   const canContractList = legal.can_contract || [];
   const matchKey = (entry) =>
-    `${entry.card_idx}-${entry.contract_idx}-${entry.use_elevator ? 1 : 0}-${entry.use_launch_pad ? 1 : 0}`;
+    `${entry.card_idx}-${entry.contract_idx}-${entry.use_elevator ? 1 : 0}-${entry.use_launch_pad ? 1 : 0}-${entry.elevator_target || ""}`;
   const validKeys = new Set(canContractList.map(matchKey));
   const targetCardIdx = useLaunchPadThisFulfill ? -1 : singleSelected;
+  const elevatorKey = useElevatorThisFulfill ? (elevatorTargetResource || "") : "";
   const canContract =
     selectedContractIdx !== null &&
     targetCardIdx !== null &&
     targetCardIdx !== undefined &&
     (useLaunchPadThisFulfill || singleSelected !== null) &&
     validKeys.has(
-      `${targetCardIdx}-${selectedContractIdx}-${useElevatorThisFulfill ? 1 : 0}-${useLaunchPadThisFulfill ? 1 : 0}`
+      `${targetCardIdx}-${selectedContractIdx}-${useElevatorThisFulfill ? 1 : 0}-${useLaunchPadThisFulfill ? 1 : 0}-${elevatorKey}`
     );
   contractBtn.disabled = !canContract;
 
@@ -964,15 +969,35 @@ function renderSpecialToggles(legal, singleSelected) {
     `);
   }
 
-  // Space Elevator toggle — visible whenever owned. Disabled if used.
+  // Space Elevator toggle + target picker. Visible whenever owned.
+  // The picker enumerates the resources on the SELECTED contract so the
+  // player can choose which one to discount (-1 to ONE resource).
   if (seStatus.owned) {
     const used = !!seStatus.used;
+    let targetOptions = "";
+    let targetSection = "";
+    if (useElevatorThisFulfill && !used && selectedContractIdx !== null) {
+      const s = currentState;
+      const contract = s.available_contracts && s.available_contracts[selectedContractIdx];
+      if (contract && contract.requirements) {
+        targetOptions = contract.requirements
+          .map((r) => `<option value="${r.resource}" ${elevatorTargetResource === r.resource ? "selected" : ""}>${r.resource}</option>`)
+          .join("");
+        targetSection = `
+          <select id="se-target" class="toggle-select">
+            <option value="">— pick a resource —</option>
+            ${targetOptions}
+          </select>
+        `;
+      }
+    }
     parts.push(`
       <div class="toggle-row">
         <label class="toggle-checkbox-label">
           <input type="checkbox" id="se-toggle" ${useElevatorThisFulfill && !used ? "checked" : ""} ${used ? "disabled" : ""}>
-          <span>Use Space Elevator (-1 to all contract reqs)</span>
+          <span>Use Space Elevator (-1 to one resource)</span>
         </label>
+        ${targetSection}
         ${used ? '<span style="color:#8b949e; font-size:0.75rem;">already used this turn</span>' : ''}
       </div>
     `);
@@ -1023,6 +1048,14 @@ function renderSpecialToggles(legal, singleSelected) {
   if (seToggleEl) {
     seToggleEl.addEventListener("change", (e) => {
       useElevatorThisFulfill = e.target.checked;
+      if (!useElevatorThisFulfill) elevatorTargetResource = "";
+      render();
+    });
+  }
+  const seTargetEl = document.getElementById("se-target");
+  if (seTargetEl) {
+    seTargetEl.addEventListener("change", (e) => {
+      elevatorTargetResource = e.target.value;
       render();
     });
   }
@@ -1271,6 +1304,7 @@ function onContract() {
     contract_idx: selectedContractIdx,
     use_elevator: useElevatorThisFulfill,
     use_launch_pad: useLaunchPadThisFulfill,
+    elevator_target: useElevatorThisFulfill ? elevatorTargetResource : "",
   };
   applyHumanAction(action, (result) => {
     if (result.ok) {

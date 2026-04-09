@@ -198,7 +198,37 @@ class TestSpaceElevator:
         effective = effective_contract_requirements(p, contract, apply_elevator=False)
         assert effective[0].amount == 2
 
-    def test_elevator_reduces_each_requirement_by_one(self):
+    def test_elevator_targets_one_resource_only(self):
+        """SE -1 applies to ONE resource (the target), not all."""
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        p.buildings_played.append(_build_special("Space Elevator"))
+        contract = Contract(
+            requirements=[
+                ResourceAmount(resource=Resource.FOOD, amount=2),
+                ResourceAmount(resource=Resource.GLS, amount=1),
+            ],
+            reward=50,
+            count=1,
+        )
+        # Target FOOD: FOOD becomes 1, GLS stays 1
+        effective = effective_contract_requirements(
+            p, contract, apply_elevator=True, elevator_target="FOOD"
+        )
+        amounts = {r.resource: r.amount for r in effective}
+        assert amounts[Resource.FOOD] == 1
+        assert amounts[Resource.GLS] == 1
+        # Target GLS: FOOD stays 2, GLS becomes 0
+        effective = effective_contract_requirements(
+            p, contract, apply_elevator=True, elevator_target="GLS"
+        )
+        amounts = {r.resource: r.amount for r in effective}
+        assert amounts[Resource.FOOD] == 2
+        assert amounts[Resource.GLS] == 0
+
+    def test_elevator_default_target_is_first_req(self):
+        """When no target is supplied, the first requirement gets the discount."""
         cards, contracts = _load()
         state = GameState.create(cards, contracts, num_players=3)
         p = state.players[0]
@@ -213,8 +243,8 @@ class TestSpaceElevator:
         )
         effective = effective_contract_requirements(p, contract, apply_elevator=True)
         amounts = {r.resource: r.amount for r in effective}
-        assert amounts[Resource.FOOD] == 1
-        assert amounts[Resource.GLS] == 0
+        assert amounts[Resource.FOOD] == 1  # first req gets the -1
+        assert amounts[Resource.GLS] == 1   # second req unchanged
 
     def test_elevator_floor_at_zero(self):
         cards, contracts = _load()
