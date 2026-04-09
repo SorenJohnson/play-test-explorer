@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from my_project.models import Card, Contract, Resource
-from my_project.parsing import parse_cards, parse_contracts
+from my_project.parsing import parse_cards, parse_contracts, parse_patents
 from my_project.simulation import (
     Action,
     ActionType,
@@ -40,12 +40,14 @@ from my_project.simulation import (
     GameState,
     HAND_SIZE,
     Player,
+    _default_ai_bid,
     compute_build_deficit,
     effective_contract_requirements,
     execute_build,
     execute_contract,
     execute_event_with_redraws,
     execute_sell,
+    settle_silent_auction,
     swap_pool_card,
 )
 from my_project.strategies import (
@@ -143,6 +145,9 @@ class PlayableGame:
         random.seed(self.seed)
         cards = parse_cards(self.data_dir / "Cards.csv")
         contracts = parse_contracts(self.data_dir / "Contracts.csv")
+        # Patents.csv may not exist in older asset bundles — graceful fallback.
+        patents_path = self.data_dir / "Patents.csv"
+        patents = parse_patents(patents_path) if patents_path.exists() else []
         self.state = GameState.create(
             all_cards=cards,
             all_contracts=contracts,
@@ -152,6 +157,7 @@ class PlayableGame:
             randomize_market=True,
             event_deck_config=self.event_deck_config,
             event_deck=self.custom_event_deck,
+            patent_pile=patents,
         )
         # Apply custom names if provided. Strict length check, empty entries
         # silently keep the engine's `Player_{i+1}` default so the UI can pass

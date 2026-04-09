@@ -309,16 +309,16 @@ class TestRedrawCascade:
         assert state.event_idx == 2
 
 
-# --- PATENT_AUCTION (stub) ---
+# --- PATENT_AUCTION (silent auction with bid heuristic) ---
 
 
-class TestPatentAuctionStub:
-    def test_patent_auction_is_noop_for_now(self):
-        """PATENT_AUCTION currently returns a 'skipped' string and changes nothing."""
+class TestPatentAuction:
+    def test_no_patents_is_noop(self):
+        """With an empty patent_pile, the auction reports no patents left."""
         cards, contracts = _load()
         state = GameState.create(cards, contracts)
         money_before = [p.money for p in state.players]
         auction = _ec(EventType.PATENT_AUCTION)
         detail = execute_event(state, auction, state.players[0])
-        assert "skipped" in detail.lower() or "not implemented" in detail.lower()
+        assert "no patents" in detail.lower()
         assert [p.money for p in state.players] == money_before

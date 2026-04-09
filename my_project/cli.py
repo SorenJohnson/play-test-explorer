@@ -173,7 +173,7 @@ def cmd_sync_play() -> None:
     for name in py_files:
         shutil.copy2(src_root / name, dst_root / name)
 
-    csv_files = ["Cards.csv", "Contracts.csv", "market.csv"]
+    csv_files = ["Cards.csv", "Contracts.csv", "market.csv", "Patents.csv"]
     for name in csv_files:
         shutil.copy2(src_root / "data" / name, dst_root / "data" / name)
 

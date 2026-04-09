@@ -71,6 +71,32 @@ def parse_contracts(path: Path) -> list[Contract]:
     return contracts
 
 
+def parse_patents(path: Path) -> list[Card]:
+    """Parse Patents.csv into a list of Card objects.
+
+    Patents are modeled as Cards (they ride in Player.buildings_played) but
+    have no purchase cost — they're awarded by the Patent Auction event.
+    The CSV columns are: Name, Rates, Effect.
+    """
+    patents: list[Card] = []
+    with open(path, newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            patents.append(
+                Card(
+                    alternate="Patent",
+                    slot=5,  # patents are slot 5, distinct from buildings
+                    building=row["Name"].strip(),
+                    costs=[],
+                    rates=parse_resource_list(row["Rates"]),
+                    effect=row["Effect"].strip(),
+                    can_sell=[],
+                    can_fulfill_contract=False,
+                )
+            )
+    return patents
+
+
 def parse_market(path: Path) -> list[MarketTrack]:
     """Parse market.csv (no header row) into MarketTrack objects."""
     tracks: list[MarketTrack] = []

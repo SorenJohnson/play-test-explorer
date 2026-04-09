@@ -492,6 +492,14 @@ class GameState:
     # reshuffled when exhausted via _shuffle_news_deck().
     news_deck: list[NewsCard] = field(default_factory=list)
     news_idx: int = 0
+    # Patent pile consumed by PATENT_AUCTION events. Drawn from the top
+    # without replacement. When empty, auctions become no-ops.
+    patent_pile: list[Card] = field(default_factory=list)
+    patent_idx: int = 0
+    # Per-player bid overrides for the next patent auction. Used by the
+    # play adapter to thread human-supplied bids in. Key = seat index,
+    # value = bid in $5 increments. Defaults to None for "use AI heuristic".
+    pending_bids: dict[int, int] = field(default_factory=dict)
     turn: int = 0
     event_idx: int = 0
     history: list[TurnRecord] = field(default_factory=list)
@@ -530,6 +538,7 @@ class GameState:
         event_deck_config: EventDeckConfig | None = None,
         event_deck: list[EventCard] | None = None,
         news_deck: list[NewsCard] | None = None,
+        patent_pile: list[Card] | None = None,
     ) -> GameState:
         market = Market.create(start_market_pos)
 
@@ -569,6 +578,14 @@ class GameState:
             news_deck = build_default_news_deck()
             random.shuffle(news_deck)
 
+        # Patent pile (shuffled at game start). Empty list = no patents
+        # available; auctions become no-ops in that case.
+        if patent_pile is None:
+            patent_pile = []
+        else:
+            patent_pile = list(patent_pile)
+            random.shuffle(patent_pile)
+
         # Create players. Assign unique corporations randomly (capped at # of corps).
         corp_pool = list(CORPORATIONS)
         random.shuffle(corp_pool)
@@ -604,6 +621,7 @@ class GameState:
             pool=pool,
             event_deck=event_deck,
             news_deck=news_deck,
+            patent_pile=patent_pile,
             max_turns=max_turns,
         )
 
@@ -1136,9 +1154,91 @@ def do_draw_building_card(state: GameState) -> str:
     return f"draw building card → {new_card.building}"
 
 
+def _draw_patent(state: GameState) -> Card | None:
+    """Draw the next patent off the pile, or return None if exhausted."""
+    if state.patent_idx >= len(state.patent_pile):
+        return None
+    patent = state.patent_pile[state.patent_idx]
+    state.patent_idx += 1
+    return patent
+
+
+def settle_silent_auction(
+    state: GameState,
+    patent: Card,
+    bids: dict[int, int],
+) -> tuple[int, int] | None:
+    """Resolve a silent auction given a {player_idx: bid} map.
+
+    Returns (winner_idx, amount_paid) or None if no one bid above 0.
+
+    Rules:
+      - Highest bidder wins
+      - Ties broken by turn order (lower index first)
+      - Winner pays runner_up + 5 as DEBT (per the rules doc)
+      - If only one player bids, they pay 5 (since runner_up = 0)
+    """
+    positive_bids = {idx: amt for idx, amt in bids.items() if amt > 0}
+    if not positive_bids:
+        return None
+
+    # Sort by (-bid, idx) so highest bid first, ties broken by lower seat
+    sorted_bidders = sorted(positive_bids.items(), key=lambda kv: (-kv[1], kv[0]))
+    winner_idx, winner_bid = sorted_bidders[0]
+    runner_up_bid = sorted_bidders[1][1] if len(sorted_bidders) > 1 else 0
+
+    # Pay runner_up + 5 (as debt)
+    amount_paid = runner_up_bid + 5
+    state.players[winner_idx].debt += amount_paid
+    state.players[winner_idx].buildings_played.append(patent)
+    # Apply the patent's rates to the winner's accumulated rates
+    state.players[winner_idx].apply_rates(patent)
+    return (winner_idx, amount_paid)
+
+
 def do_patent_auction(state: GameState) -> str:
-    """Stub: patent auction system isn't implemented yet (Phase 2 milestone)."""
-    return "patent auction (skipped — not implemented)"
+    """Run a silent patent auction.
+
+    Draws the top patent from the pile, collects bids, settles, applies the
+    result. The bid for each player is taken from `state.pending_bids` if
+    set (used by the play adapter to inject human-supplied bids); otherwise
+    falls back to a heuristic AI bid.
+    """
+    patent = _draw_patent(state)
+    if patent is None:
+        return "patent auction (no patents left)"
+
+    bids: dict[int, int] = {}
+    for idx, player in enumerate(state.players):
+        if idx in state.pending_bids:
+            bids[idx] = state.pending_bids[idx]
+        else:
+            bids[idx] = _default_ai_bid(player, patent)
+    # Clear the bid overrides; they're consumed by this single auction.
+    state.pending_bids = {}
+
+    result = settle_silent_auction(state, patent, bids)
+    if result is None:
+        return f"patent auction ({patent.building}): no bids"
+    winner_idx, amount = result
+    return (
+        f"patent auction: {state.players[winner_idx].name} "
+        f"won {patent.building} for ${amount} debt"
+    )
+
+
+def _default_ai_bid(player: Player, patent: Card) -> int:
+    """Heuristic bid for the headless / Monte Carlo path.
+
+    Bids up to 1/3 of available cash, capped at $30. Bids in $5
+    increments. Players with more debt than cash bid 0 (passing).
+    """
+    available = player.money - player.debt
+    if available <= 0:
+        return 0
+    target = min(available // 3, 30)
+    # Round down to a $5 increment
+    return (target // 5) * 5
 
 
 def execute_event_with_redraws(
