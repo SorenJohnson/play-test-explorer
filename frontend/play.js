@@ -236,6 +236,10 @@ _event_deck_config = _EDC(**_kw)
     marketChart.destroy();
     marketChart = null;
   }
+  if (endgameNwChart) {
+    endgameNwChart.destroy();
+    endgameNwChart = null;
+  }
   document.getElementById("endgame-overlay").style.display = "none";
   document.getElementById("new-game-modal").style.display = "none";
   document.getElementById("game-root").style.display = "block";
@@ -484,6 +488,19 @@ function renderOpponents() {
       const color = v > 0 ? "#3fb950" : "#f85149";
       return `<span style="color:${color}">${v > 0 ? "+" : ""}${v} ${r}</span>`;
     }).filter(Boolean).join(" ");
+    // Slot-4 specials and slot-5 patents the opponent owns
+    const builtCards = p.built_cards || [];
+    const specials = builtCards.filter((c) => c.slot === 4);
+    const patents = builtCards.filter((c) => c.slot === 5);
+    const specialsLine = specials.length
+      ? `<div class="opponent-specials"><span class="opp-label">Specials:</span> ${specials.map((c) => c.building).join(", ")}</div>`
+      : "";
+    const patentsLine = patents.length
+      ? `<div class="opponent-patents"><span class="opp-label">Patents:</span> ${patents.map((c) => c.building).join(", ")}</div>`
+      : "";
+    const creditCell = (p.credit || 0) > 0
+      ? `<div class="stat"><span class="stat-label">Credit</span><span style="color:#3fb950">$${p.credit}</span></div>`
+      : "";
     return `
       <div class="opponent-card ${isActive ? "active" : ""}" style="--player-color:${seatColor}">
         <div class="opponent-name">${p.name}</div>
@@ -497,6 +514,7 @@ function renderOpponents() {
             <span class="stat-label">Debt</span>
             <span style="color:#f85149">$${p.debt}</span>
           </div>
+          ${creditCell}
           <div class="stat">
             <span class="stat-label">NW</span>
             <span style="color:#3fb950">$${p.net_worth}</span>
@@ -511,6 +529,8 @@ function renderOpponents() {
           </div>
         </div>
         <div class="opponent-rates">${rateChips || "<span style='color:#484f58'>no rates</span>"}</div>
+        ${specialsLine}
+        ${patentsLine}
       </div>`;
   }).join("");
 }
@@ -598,9 +618,43 @@ function renderPlayer() {
       </div>`;
   }).join("");
 
-  const buildings = p.buildings_played.length
-    ? p.buildings_played.join(", ")
+  // Split built cards into ordinary buildings, slot-4 specials, and patents.
+  // Specials and patents get their effect text inlined so the player can see
+  // what they're getting from each unique card.
+  const builtCards = p.built_cards || [];
+  const ordinaryBuildings = builtCards.filter((c) => c.slot < 4);
+  const specials = builtCards.filter((c) => c.slot === 4);
+  const patents = builtCards.filter((c) => c.slot === 5);
+
+  const ordinaryStr = ordinaryBuildings.length
+    ? ordinaryBuildings.map((c) => c.building).join(", ")
     : "<em>None built yet</em>";
+
+  const specialsHtml = specials.length
+    ? specials.map((c) => `
+      <div class="special-card-summary">
+        <strong>${c.building}</strong>
+        <span class="special-effect">${c.effect || "(no effect)"}</span>
+      </div>
+    `).join("")
+    : '<em style="color:#484f58">None</em>';
+
+  const patentsHtml = patents.length
+    ? patents.map((c) => `
+      <div class="special-card-summary">
+        <strong>${c.building}</strong>
+        <span class="special-effect">${c.effect || "(no effect)"}</span>
+      </div>
+    `).join("")
+    : '<em style="color:#484f58">None</em>';
+
+  // Credit row only shown if non-zero (avoid clutter for players who have none)
+  const creditRow = (p.credit || 0) > 0
+    ? `<div class="player-stats-row">
+        <span class="player-stats-label">Credit</span>
+        <span class="player-stats-value" style="color:#3fb950">$${p.credit}</span>
+      </div>`
+    : "";
 
   document.getElementById("player-panel").innerHTML = `
     <div class="player-stats-block">
@@ -612,6 +666,7 @@ function renderPlayer() {
         <span class="player-stats-label">Debt</span>
         <span class="player-stats-value" style="color:#f85149">$${p.debt}</span>
       </div>
+      ${creditRow}
       <div class="player-stats-row">
         <span class="player-stats-label">Contracts Fulfilled</span>
         <span class="player-stats-value">${p.contracts_fulfilled}</span>
@@ -621,7 +676,15 @@ function renderPlayer() {
         <span class="player-stats-value big">$${p.net_worth}</span>
       </div>
       <div class="buildings-list">
-        <strong>Buildings (${p.buildings_played.length}):</strong> ${buildings}
+        <strong>Buildings (${ordinaryBuildings.length}):</strong> ${ordinaryStr}
+      </div>
+      <div class="buildings-list">
+        <strong>Special Buildings (${specials.length}):</strong>
+        <div class="special-cards-list">${specialsHtml}</div>
+      </div>
+      <div class="buildings-list">
+        <strong>Patents (${patents.length}):</strong>
+        <div class="special-cards-list">${patentsHtml}</div>
       </div>
     </div>
     <div class="player-rates-block">
@@ -1193,11 +1256,12 @@ function submitPromptAnswer() {
   } else {
     answers = {};
   }
-  // Resolve the prompt; we don't need the return value because refreshState
-  // below picks up the updated game state directly.
-  game.resolve_pending_prompt(pyodide.toPy(answers));
-  // After resolution, refresh and check if another prompt is pending or
-  // if we should advance to the next AI turn.
+  // Resolve the prompt; the return value carries the event detail
+  // (e.g. "patent auction: Player_2 won Superconductors for $25 debt"),
+  // which we surface in the turn log via logEventResolution.
+  const result = game.resolve_pending_prompt(pyodide.toPy(answers))
+    .toJs({ dict_converter: Object.fromEntries });
+  logEventResolution(result);
   refreshState();
   if (currentState && currentState.pending_prompt) {
     // Cascading prompt — re-show the modal
@@ -1210,6 +1274,20 @@ function submitPromptAnswer() {
     advanceUntilHuman();
   } else if (game.is_over()) {
     showEndgame();
+  }
+}
+
+// Append the resolved event detail to the turn log.
+// `result` is the dict returned by resolve_pending_prompt: {ok, type, detail, ...}
+// or for the AI-resume path the same shape returned by step_ai_turn.
+function logEventResolution(result) {
+  if (!result || !result.ok) return;
+  // The detail string contains everything: who won the auction, the bid, etc.
+  const detail = result.detail || (result.event && result.event.detail);
+  if (!detail || detail === "no event") return;
+  // Attach to the most recent log entry as its event.
+  if (turnLog.length > 0) {
+    turnLog[turnLog.length - 1].event = detail;
   }
 }
 
@@ -1233,52 +1311,58 @@ function renderPatentActions() {
 
   const parts = [];
 
+  // Helper: choose the right status label based on used vs other gates.
+  const statusLabel = (status, otherwiseReason) => {
+    if (status.used) return '<span class="patent-action-status">already used this turn</span>';
+    if (!status.available) {
+      return `<span class="patent-action-status">${otherwiseReason}</span>`;
+    }
+    return "";
+  };
+
   if (pa.water_engine?.owned) {
-    const avail = pa.water_engine.available;
-    const used = !avail && pa.water_engine.owned;
+    const status = pa.water_engine;
     parts.push(`
       <div class="patent-action-row">
         <strong>Water Engine</strong> &mdash; spend 1 H2O for 2 PWR.
         <button id="pa-water-engine-btn" class="action-btn"
-                ${avail ? "" : "disabled"}>
+                ${status.available ? "" : "disabled"}>
           Use Water Engine
         </button>
-        ${used ? '<span class="patent-action-status">already used</span>' : ''}
+        ${statusLabel(status, "need +1 H2O rate")}
       </div>
     `);
   }
 
   if (pa.nanotechnology?.owned) {
-    const avail = pa.nanotechnology.available;
-    const used = !avail;
+    const status = pa.nanotechnology;
     parts.push(`
       <div class="patent-action-row">
         <strong>Nanotechnology</strong> &mdash; discard your hand and draw fresh.
         <button id="pa-nanotech-btn" class="action-btn"
-                ${avail ? "" : "disabled"}>
+                ${status.available ? "" : "disabled"}>
           Discard &amp; Redraw
         </button>
-        ${used ? '<span class="patent-action-status">already used</span>' : ''}
+        ${statusLabel(status, "cannot use")}
       </div>
     `);
   }
 
   if (pa.teleportation?.owned) {
-    const avail = pa.teleportation.available;
-    const used = pa.teleportation.owned && !avail && pa.teleportation.valid_resources?.length > 0;
-    const opts = (pa.teleportation.valid_resources || [])
+    const status = pa.teleportation;
+    const opts = (status.valid_resources || [])
       .map((r) => `<option value="${r}">${r}</option>`)
       .join("");
     parts.push(`
       <div class="patent-action-row">
         <strong>Teleportation</strong> &mdash; sell any resource at market price (-1 PWR cost).
-        <select id="pa-tele-resource" class="toggle-select" ${avail ? "" : "disabled"}>
+        <select id="pa-tele-resource" class="toggle-select" ${status.available ? "" : "disabled"}>
           ${opts || '<option value="">— no valid resources —</option>'}
         </select>
-        <button id="pa-tele-btn" class="action-btn" ${avail ? "" : "disabled"}>
+        <button id="pa-tele-btn" class="action-btn" ${status.available ? "" : "disabled"}>
           Use Teleportation
         </button>
-        ${used ? '<span class="patent-action-status">already used</span>' : ''}
+        ${statusLabel(status, "no positive rates to sell")}
       </div>
     `);
   }
@@ -1545,6 +1629,10 @@ function logAiTurn(result) {
 
 // --- End-game ---
 
+// Persistent Chart instance for the post-game NW review chart so we can
+// destroy it cleanly between games (Chart.js doesn't reuse canvases).
+let endgameNwChart = null;
+
 function showEndgame() {
   const scores = game.final_scores().toJs({ dict_converter: Object.fromEntries });
   const overlay = document.getElementById("endgame-overlay");
@@ -1562,7 +1650,64 @@ function showEndgame() {
         <span class="endgame-rank-nw">$${s.net_worth}</span>
       </div>`;
   }).join("");
+  renderEndgameNwChart();
   overlay.style.display = "flex";
+}
+
+function renderEndgameNwChart() {
+  const s = currentState;
+  if (!s || !s.player_history) return;
+  const history = s.player_history;
+  if (history.length === 0) return;
+  const canvas = document.getElementById("endgame-nw-chart");
+  if (!canvas) return;
+  // Destroy any prior chart so we don't leak Chart.js instances
+  if (endgameNwChart) {
+    endgameNwChart.destroy();
+    endgameNwChart = null;
+  }
+  const labels = history.map((h) => `T${h.turn}`);
+  const numPlayers = history[0].players.length;
+  const datasets = [];
+  for (let p = 0; p < numPlayers; p++) {
+    datasets.push({
+      label: history[0].players[p].name,
+      data: history.map((h) => h.players[p].net_worth),
+      borderColor: playerColor(p),
+      backgroundColor: "transparent",
+      borderWidth: 2,
+      tension: 0.2,
+      pointRadius: 0,
+    });
+  }
+  endgameNwChart = new Chart(canvas, {
+    type: "line",
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: "#8b949e", font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => `${ctx.dataset.label}: $${ctx.parsed.y}`,
+          },
+        },
+      },
+      scales: {
+        x: {
+          title: { display: true, text: "Turn", color: "#8b949e" },
+          ticks: { color: "#8b949e", maxTicksLimit: 12 },
+          grid: { color: "#21262d" },
+        },
+        y: {
+          title: { display: true, text: "Net Worth ($)", color: "#8b949e" },
+          ticks: { color: "#8b949e" },
+          grid: { color: "#21262d" },
+        },
+      },
+    },
+  });
 }
 
 // --- Kickoff ---

@@ -131,6 +131,17 @@ body {
   flex-wrap: wrap;
   font-size: 0.7rem;
 }
+.opponent-specials,
+.opponent-patents {
+  margin-top: 6px;
+  font-size: 0.7rem;
+  color: #c9d1d9;
+}
+.opponent-specials .opp-label,
+.opponent-patents .opp-label {
+  color: #8b949e;
+  font-weight: 600;
+}
 
 /* Market grid */
 #market-grid {
@@ -221,8 +232,35 @@ body {
   color: #8b949e;
   font-size: 0.75rem;
   margin-top: 8px;
-  max-height: 60px;
+  max-height: 200px;
   overflow-y: auto;
+}
+.buildings-list strong {
+  color: #c9d1d9;
+}
+.special-cards-list {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.special-card-summary {
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 0.72rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.special-card-summary strong {
+  color: #58a6ff;
+  font-size: 0.78rem;
+}
+.special-card-summary .special-effect {
+  color: #8b949e;
+  font-style: italic;
 }
 
 /* Contracts grid */

@@ -135,6 +135,14 @@
       <div id="endgame-panel">
         <h2>Game Over</h2>
         <div id="endgame-results"></div>
+        <details id="endgame-review" style="margin-top:16px;">
+          <summary style="cursor:pointer; color:#8b949e; font-size:0.85rem;">
+            Review game — net worth over time
+          </summary>
+          <div class="chart-container" style="min-height:280px; margin-top:12px;">
+            <canvas id="endgame-nw-chart"></canvas>
+          </div>
+        </details>
         <div class="endgame-buttons">
           <button id="play-again-btn" class="primary-btn">New Game</button>
           <button id="endgame-dismiss-btn" class="secondary-btn">Review Game</button>

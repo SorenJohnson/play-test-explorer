@@ -110,6 +110,9 @@ class PlayableGame:
     # One snapshot per completed player-turn so the UI can plot market drift.
     # Entry shape: {"turn": int (1-indexed player-turn), "market": {res_str: price}}.
     market_history: list[dict] = field(default_factory=list, init=False)
+    # One snapshot per completed player-turn of every player's NW components
+    # (money / debt / credit / net_worth). Used for the post-game review chart.
+    player_history: list[dict] = field(default_factory=list, init=False)
     _turn_action_records: list = field(default_factory=list, init=False)
     # Event hiding: when a turn begins we pre-advance event_idx past the current
     # event and stash the event here. This prevents state.remaining_events()
@@ -188,6 +191,20 @@ class PlayableGame:
         self.market_history.append({
             "turn": turn,
             "market": {r.value: self.state.market.price(r) for r in Resource},
+        })
+        # Parallel per-player snapshot for the post-game review chart.
+        self.player_history.append({
+            "turn": turn,
+            "players": [
+                {
+                    "name": p.name,
+                    "money": p.money,
+                    "debt": p.debt,
+                    "credit": p.credit,
+                    "net_worth": p.net_worth(),
+                }
+                for p in self.state.players
+            ],
         })
 
     # --- Status queries ---
@@ -734,6 +751,7 @@ class PlayableGame:
             "last_event": self.last_event,
             "last_ai_actions": self.last_ai_actions,
             "market_history": list(self.market_history),
+            "player_history": list(self.player_history),
             # Patent state — patent_pile_remaining is just for stats / debug
             # since the modal handles the bid flow at auction time.
             "patent_pile_remaining": max(0, len(s.patent_pile) - s.patent_idx),
@@ -765,9 +783,9 @@ class PlayableGame:
                 "hacker_array_status": {"owned": False},
                 "optimization_center_owned": False,
                 "patent_actions": {
-                    "water_engine": {"owned": False, "available": False},
-                    "nanotechnology": {"owned": False, "available": False},
-                    "teleportation": {"owned": False, "available": False, "valid_resources": []},
+                    "water_engine": {"owned": False, "used": False, "available": False},
+                    "nanotechnology": {"owned": False, "used": False, "available": False},
+                    "teleportation": {"owned": False, "used": False, "available": False, "valid_resources": []},
                 },
             }
         player = self.current_player()
@@ -867,9 +885,14 @@ class PlayableGame:
             r.value for r in Resource
             if r != Resource.PWR and player.rate(r) > 0
         ]
+        # `used` reflects ONLY the per-turn flag — useful for the UI to
+        # distinguish "already used this turn" from "cannot use right now"
+        # (e.g. Water Engine with no H2O rate). `available` combines all
+        # gates (owned + not used + other prerequisites).
         patent_actions = {
             "water_engine": {
                 "owned": we_owned,
+                "used": player.has_used_water_engine_this_turn,
                 "available": (
                     we_owned
                     and not player.has_used_water_engine_this_turn
@@ -878,10 +901,12 @@ class PlayableGame:
             },
             "nanotechnology": {
                 "owned": nano_owned,
+                "used": player.has_used_nanotechnology_this_turn,
                 "available": nano_owned and not player.has_used_nanotechnology_this_turn,
             },
             "teleportation": {
                 "owned": tele_owned,
+                "used": player.has_used_teleportation_this_turn,
                 "available": (
                     tele_owned
                     and not player.has_used_teleportation_this_turn
