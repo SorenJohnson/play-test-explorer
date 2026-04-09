@@ -96,6 +96,9 @@ class PlayableGame:
     event_deck_config: EventDeckConfig | None = None
     # When provided, overrides build_event_deck entirely.
     custom_event_deck: list[EventCard] | None = None
+    # Test escape hatch: when True, the engine never pauses mid-event for
+    # human prompts (auctions / OC picks). Live play uses False.
+    disable_prompts: bool = False
     data_dir: Path = field(default_factory=lambda: DEFAULT_DATA_DIR)
 
     state: GameState = field(init=False)
@@ -124,6 +127,9 @@ class PlayableGame:
     # step_ai_turn call. Mid-turn this is the 1-indexed turn currently in
     # progress; between turns it's the count of completed turns.
     _turn_count: int = field(default=0, init=False)
+    # Suspended AI turn state (set when an AI turn paused mid-event for a
+    # human prompt). None when no AI turn is paused.
+    _suspended_ai_turn: dict | None = field(default=None, init=False)
 
     def __post_init__(self) -> None:
         # Resolve seats first; if omitted, derive from legacy num_players + human_index.
@@ -170,6 +176,10 @@ class PlayableGame:
             for i, n in enumerate(self.names):
                 if n:
                     self.state.players[i].name = n
+        # Mark the state as containing humans so the simulation engine knows
+        # to pause for human input on auctions / OC picks. Tests that drive
+        # the engine end-to-end can set disable_prompts=True to bypass.
+        self.state._is_human_game = bool(self._human_indices) and not self.disable_prompts
         # Seed history with the starting market so the UI chart has a turn-0 anchor.
         self._snapshot_market(turn=0)
 
@@ -255,13 +265,16 @@ class PlayableGame:
         """Complete the human turn: draw back to hand size, fire the event.
 
         Returns a dict describing the fired event so the UI can render it.
+        If the event needs human input (auction bid, OC pick), pauses with
+        a pending_prompt and the turn finalization happens later when the
+        prompt is resolved.
         """
         if not self.human_turn_in_progress:
             raise RuntimeError("begin_human_turn was not called")
 
         player = self.current_player()
 
-        # Draw back to hand size
+        # Draw back to hand size (independent of the event prompt)
         needed = player.hand_size - len(player.hand)
         if needed > 0:
             player.hand.extend(self.state.deck.draw(needed))
@@ -270,9 +283,22 @@ class PlayableGame:
         # begin_human_turn; do NOT advance it again here.
         event = self._pending_event
         event_detail = execute_event_with_redraws(self.state, event, player)
+        # If the event paused for a human prompt, do NOT finalize the turn.
+        # The play UI will collect the input and call resolve_pending_prompt,
+        # which then re-enters _finalize_human_turn.
+        if self.state.pending_prompt is not None:
+            self.last_event = event_detail
+            return {
+                "type": event.type.value,
+                "detail": event_detail,
+                "awaiting_prompt": True,
+            }
+        return self._finalize_human_turn(event, event_detail)
+
+    def _finalize_human_turn(self, event: EventCard, event_detail: str) -> dict:
+        """Finalize the in-progress human turn after the event has fully resolved."""
         self._pending_event = None
         self.last_event = event_detail
-
         self.human_turn_in_progress = False
         self._active_player_idx = -1
         self._snapshot_market(turn=self.state.turn)
@@ -424,6 +450,83 @@ class PlayableGame:
         self.state.pending_oc_picks.pop(seat_idx, None)
         return {"ok": True}
 
+    # --- Mid-event prompt resolution ---
+
+    def is_awaiting_prompt(self) -> bool:
+        """True iff the engine is paused waiting for a human prompt answer."""
+        return self.state.pending_prompt is not None
+
+    def pending_prompt(self) -> dict | None:
+        """Returns the current pending prompt dict, or None."""
+        return self.state.pending_prompt
+
+    def resolve_pending_prompt(self, answers: dict) -> dict:
+        """Resolve the in-flight prompt with the supplied answers and resume.
+
+        For patent_auction prompts, `answers` should be:
+            {"bids": {seat_idx: amount, ...}}
+        For optimization_center prompts:
+            {"picks": {seat_idx: resource_value, ...}}
+
+        After answers are written to state, fires the suspended event by
+        calling resume_pending_event(state, active_player). If the event
+        was part of a paused human turn, finalizes the turn. If part of an
+        AI turn, finalizes that.
+        """
+        from my_project.simulation import resume_pending_event
+        prompt = self.state.pending_prompt
+        if prompt is None:
+            return {"ok": False, "reason": "No pending prompt"}
+        kind = prompt.get("kind")
+        if kind == "patent_auction":
+            bids = answers.get("bids", {})
+            for seat_idx_raw, amount in bids.items():
+                seat_idx = int(seat_idx_raw)
+                self.state.pending_bids[seat_idx] = max(0, int(amount))
+        elif kind == "optimization_center":
+            picks = answers.get("picks", {})
+            for seat_idx_raw, resource in picks.items():
+                seat_idx = int(seat_idx_raw)
+                if not resource:
+                    continue
+                self.state.pending_oc_picks[seat_idx] = resource
+
+        # Resume the suspended event
+        if self.human_turn_in_progress:
+            player = self.state.players[self._active_player_idx]
+            event = self.state._suspended_event
+            detail = resume_pending_event(self.state, player)
+            old_detail = self.last_event or ""
+            full_detail = (old_detail + " | " + detail) if old_detail else detail
+            # If the resume hit ANOTHER prompt, we're still paused
+            if self.state.pending_prompt is not None:
+                self.last_event = full_detail
+                return {
+                    "ok": True,
+                    "awaiting_prompt": True,
+                    "detail": full_detail,
+                }
+            finalized = self._finalize_human_turn(event, full_detail)
+            return {"ok": True, **finalized}
+        elif self._suspended_ai_turn is not None:
+            ai_state = self._suspended_ai_turn
+            player = self.state.players[ai_state["acting_player_idx"]]
+            event = ai_state["event"]
+            detail = resume_pending_event(self.state, player)
+            old_detail = self.last_event or ""
+            full_detail = (old_detail + " | " + detail) if old_detail else detail
+            if self.state.pending_prompt is not None:
+                self.last_event = full_detail
+                return {"ok": True, "awaiting_prompt": True, "detail": full_detail}
+            finalized = self._finalize_ai_turn(
+                ai_state["acting_player_idx"],
+                ai_state["actions_log"],
+                event,
+                full_detail,
+            )
+            return {"ok": True, **finalized}
+        return {"ok": False, "reason": "No suspended turn to resume"}
+
     # --- AI turn ---
 
     def step_ai_turn(self) -> dict:
@@ -486,10 +589,36 @@ class PlayableGame:
         self.last_event = event_detail
         self.last_ai_actions = actions_log
 
-        # End of turn: clear the active-turn marker.
+        if self.state.pending_prompt is not None:
+            # An AI's event needs human input (e.g. an auction event fired
+            # mid-AI-turn but a human in the game must bid). Pause here; the
+            # play UI will resolve the prompt and then call resume_ai_turn().
+            self._suspended_ai_turn = {
+                "acting_player_idx": acting_player_idx,
+                "actions_log": actions_log,
+                "event": event,
+            }
+            return {
+                "ok": True,
+                "player_index": acting_player_idx,
+                "actions": actions_log,
+                "event": {
+                    "type": event.type.value,
+                    "detail": event_detail,
+                },
+                "awaiting_prompt": True,
+            }
+
+        return self._finalize_ai_turn(acting_player_idx, actions_log, event, event_detail)
+
+    def _finalize_ai_turn(
+        self, acting_player_idx: int, actions_log: list, event, event_detail: str,
+    ) -> dict:
+        """Finalize the in-progress AI turn after the event has fully resolved."""
+        self.last_event = event_detail
         self._active_player_idx = -1
         self._snapshot_market(turn=self.state.turn)
-
+        self._suspended_ai_turn = None
         return {
             "ok": True,
             "player_index": acting_player_idx,
@@ -501,9 +630,20 @@ class PlayableGame:
         if action.action_type == ActionType.BUILD and action.build_cards:
             return execute_build(self.state, player, action.build_cards, action.discard_cards)
         if action.action_type == ActionType.SELL and action.sell_card >= 0:
-            return execute_sell(self.state, player, action.sell_card)
-        if action.action_type == ActionType.CONTRACT and action.contract_card >= 0:
-            return execute_contract(self.state, player, action.contract_card, action.contract_idx)
+            return execute_sell(
+                self.state, player, action.sell_card,
+                hacker_target=action.hacker_target or None,
+                hacker_direction=action.hacker_direction,
+            )
+        if action.action_type == ActionType.CONTRACT:
+            if not action.use_launch_pad and action.contract_card < 0:
+                return None
+            return execute_contract(
+                self.state, player, action.contract_card, action.contract_idx,
+                use_elevator=action.use_elevator,
+                use_launch_pad=action.use_launch_pad,
+                elevator_target=action.elevator_target or None,
+            )
         return None
 
     # --- Serialization ---
@@ -557,8 +697,16 @@ class PlayableGame:
             # Patent state for the auction UI
             "patent_pile_remaining": max(0, len(s.patent_pile) - s.patent_idx),
             "pending_bids": dict(s.pending_bids),
+            # The patent that will be auctioned next (peek without drawing)
+            "next_patent": (
+                _patent_card_dict(s.patent_pile[s.patent_idx])
+                if s.patent_idx < len(s.patent_pile)
+                else None
+            ),
             # Optimization Center pre-declared picks (seat → resource string)
             "pending_oc_picks": dict(s.pending_oc_picks),
+            # Mid-event prompt (None when no prompt is active)
+            "pending_prompt": dict(s.pending_prompt) if s.pending_prompt else None,
         }
 
     # --- Legal action enumeration (for UI hinting) ---
@@ -737,6 +885,15 @@ def _card_dict(card: Card) -> dict:
         "effect": card.effect,
         "can_sell": [r.value for r in card.can_sell],
         "can_fulfill_contract": card.can_fulfill_contract,
+    }
+
+
+def _patent_card_dict(card: Card) -> dict:
+    """Slim card dict for patent UI: name, rates, effect."""
+    return {
+        "name": card.building,
+        "rates": [{"resource": ra.resource.value, "amount": ra.amount} for ra in card.rates],
+        "effect": card.effect,
     }
 
 

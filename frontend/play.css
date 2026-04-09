@@ -550,7 +550,8 @@ body {
 }
 
 /* New-game config modal */
-#new-game-modal {
+#new-game-modal,
+#prompt-modal {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
   background: rgba(0, 0, 0, 0.85);
@@ -558,6 +559,55 @@ body {
   align-items: center;
   justify-content: center;
   z-index: 200;
+}
+#prompt-panel {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 28px;
+  width: 92%;
+  max-width: 520px;
+}
+#prompt-panel h2 {
+  color: #58a6ff;
+  font-size: 1.3rem;
+  margin: 0 0 16px;
+  border: none;
+  padding: 0;
+}
+#prompt-body {
+  margin-bottom: 20px;
+  font-size: 0.9rem;
+  color: #c9d1d9;
+}
+#prompt-body .prompt-detail {
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  padding: 10px;
+  margin: 10px 0;
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 0.8rem;
+}
+#prompt-body .prompt-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: 8px 0;
+}
+#prompt-body label {
+  color: #8b949e;
+  font-size: 0.85rem;
+  min-width: 100px;
+}
+#prompt-body input,
+#prompt-body select {
+  background: #21262d;
+  border: 1px solid #30363d;
+  color: #c9d1d9;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 0.85rem;
 }
 #new-game-panel {
   background: #161b22;

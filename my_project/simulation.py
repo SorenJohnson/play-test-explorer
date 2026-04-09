@@ -517,6 +517,19 @@ class GameState:
     # settlement. Key = seat index, value = resource value string (e.g. "FE").
     # Consumed by do_futures_settlement.
     pending_oc_picks: dict[int, str] = field(default_factory=dict)
+    # Mid-event interruption state. When set, the event resolution loop has
+    # paused waiting for human input. The play adapter exposes this to the
+    # UI and resumes after the resolve_prompt call.
+    # Shape:
+    #   {"kind": "patent_auction", "patent_card_dict": {...}}
+    #   {"kind": "optimization_center", "seats": [{"seat_idx": 0, "options": [...]}, ...]}
+    pending_prompt: dict | None = None
+    # When pending_prompt is set, this captures the in-flight event so the
+    # play adapter can resume it after the prompt is answered.
+    _suspended_event: EventCard | None = field(default=None, repr=False)
+    # When the suspended event was part of a redraw chain, True means there
+    # might be more events to fire after the resume.
+    _suspended_chain_active: bool = field(default=False, repr=False)
     turn: int = 0
     event_idx: int = 0
     history: list[TurnRecord] = field(default_factory=list)
@@ -1430,17 +1443,89 @@ def do_patent_auction(state: GameState) -> str:
 
 
 def _default_ai_bid(player: Player, patent: Card) -> int:
-    """Heuristic bid for the headless / Monte Carlo path.
+    """Heuristic bid based on the patent's positive rate value + cash.
 
-    Bids up to 1/3 of available cash, capped at $30. Bids in $5
-    increments. Players with more debt than cash bid 0 (passing).
+    Estimates the patent's value as the sum of (rate × $8 baseline) — a
+    simple approximation of "1 unit of rate is worth ~$8 over the rest of
+    the game" without needing market access. Bids up to that value,
+    clamped to half the player's available cash, in $5 increments.
+    Players with non-positive net cash pass. Patents with positive rates
+    always get at least the minimum bid ($5).
     """
     available = player.money - player.debt
     if available <= 0:
         return 0
-    target = min(available // 3, 30)
-    # Round down to a $5 increment
-    return (target // 5) * 5
+    # Patent value heuristic: $8 per positive rate unit
+    rate_value = sum(ra.amount for ra in patent.rates if ra.amount > 0) * 8
+    cash_cap = available // 2
+    target = min(rate_value, cash_cap, 40)
+    bid = (target // 5) * 5
+    # Floor at $5 if the patent has any positive rates and we can afford it
+    if rate_value > 0 and bid == 0 and available >= 5:
+        bid = 5
+    return bid
+
+
+def _event_needs_prompt(state: GameState, event: EventCard) -> dict | None:
+    """Inspect an event and return a prompt dict if it needs human input.
+
+    Patent Auction: needs a bid from each human seat (so they can see the
+    upcoming patent before bidding).
+
+    Futures Settlement: needs an OC target pick from each human seat that
+    owns an Optimization Center.
+
+    Returns None if no human input is required (all-AI game, or the event
+    doesn't need prompts).
+    """
+    # Need at least one human player for any prompt to be relevant.
+    # The play adapter sets this via PlayableGame initialization. We detect
+    # humans here by checking flags on Player; for now we treat ANY game as
+    # potentially-human and let the play adapter filter.
+    if event.type == EventType.PATENT_AUCTION:
+        # Peek at the next patent without drawing it
+        if state.patent_idx >= len(state.patent_pile):
+            return None  # no patents left, nothing to prompt
+        patent = state.patent_pile[state.patent_idx]
+        return {
+            "kind": "patent_auction",
+            "patent": _patent_to_dict(patent),
+        }
+    if event.type == EventType.FUTURES_SETTLEMENT or event.type == EventType.END_GAME:
+        # END_GAME fires futures settlement as part of its sequence
+        seats_with_oc: list[int] = []
+        for idx, p in enumerate(state.players):
+            if _count_buildings(p, "Optimization Center") > 0:
+                # Skip if they already have a pending pick (e.g. AI auto-set)
+                if idx in state.pending_oc_picks:
+                    continue
+                seats_with_oc.append(idx)
+        if not seats_with_oc:
+            return None
+        # Build the option list per seat — only show resources where the
+        # player has a positive non-PWR rate (those are the only valid picks)
+        seats_data = []
+        for idx in seats_with_oc:
+            p = state.players[idx]
+            options = [
+                r.value for r in Resource
+                if r != Resource.PWR and p.rate(r) > 0
+            ]
+            seats_data.append({"seat_idx": idx, "options": options})
+        return {
+            "kind": "optimization_center",
+            "seats": seats_data,
+        }
+    return None
+
+
+def _patent_to_dict(patent: Card) -> dict:
+    """Serialize a patent Card for the UI prompt."""
+    return {
+        "name": patent.building,
+        "rates": [{"resource": ra.resource.value, "amount": ra.amount} for ra in patent.rates],
+        "effect": patent.effect,
+    }
 
 
 def execute_event_with_redraws(
@@ -1457,13 +1542,77 @@ def execute_event_with_redraws(
 
     Redraws may chain into END_GAME, which fires its effects inline as part
     of the same player-turn. The detail string concatenates each fired event.
+
+    Mid-event interruptions: if any event in the chain needs human input
+    (via _event_needs_prompt), the function pauses by setting
+    state.pending_prompt and state._suspended_event, then returns the partial
+    detail. The play adapter exposes the prompt to the UI and calls
+    resume_pending_event() once the prompt is resolved.
     """
+    # Check if THIS event needs a prompt before firing it
+    prompt = _event_needs_prompt(state, event)
+    if prompt is not None and _has_human_player(state):
+        state.pending_prompt = prompt
+        state._suspended_event = event
+        state._suspended_chain_active = event.redraws
+        return f"awaiting prompt: {prompt['kind']}"
+
     detail = execute_event(state, event, active_player)
     while event.redraws and state.event_idx < len(state.event_deck):
         next_event = state.event_deck[state.event_idx]
+        # Pause-check before firing the next chained event
+        next_prompt = _event_needs_prompt(state, next_event)
+        if next_prompt is not None and _has_human_player(state):
+            state.event_idx += 1
+            state.pending_prompt = next_prompt
+            state._suspended_event = next_event
+            state._suspended_chain_active = next_event.redraws
+            return detail + " | awaiting prompt: " + next_prompt["kind"]
         state.event_idx += 1
         detail = detail + " | " + execute_event(state, next_event, active_player)
         event = next_event
+    return detail
+
+
+def _has_human_player(state: GameState) -> bool:
+    """Heuristic for 'is anyone in this game a human?'
+
+    The simulation engine doesn't track human/AI seats — that lives on
+    PlayableGame. We use a sentinel: humans set _is_human_game on the state
+    via the play adapter at construction time.
+    """
+    return getattr(state, "_is_human_game", False)
+
+
+def resume_pending_event(state: GameState, active_player: Player) -> str:
+    """Resume a previously suspended event after its prompt was resolved.
+
+    Called by the play adapter after the human supplies the prompt's answer.
+    Fires the suspended event normally, then continues any redraw chain that
+    was in progress.
+    """
+    if state._suspended_event is None:
+        return ""
+    event = state._suspended_event
+    state._suspended_event = None
+    state.pending_prompt = None
+    chain_active = state._suspended_chain_active
+    state._suspended_chain_active = False
+
+    detail = execute_event(state, event, active_player)
+    # If the suspended event was a redraw card, continue the chain
+    while chain_active and state.event_idx < len(state.event_deck):
+        next_event = state.event_deck[state.event_idx]
+        next_prompt = _event_needs_prompt(state, next_event)
+        if next_prompt is not None and _has_human_player(state):
+            state.event_idx += 1
+            state.pending_prompt = next_prompt
+            state._suspended_event = next_event
+            state._suspended_chain_active = next_event.redraws
+            return detail + " | awaiting prompt: " + next_prompt["kind"]
+        state.event_idx += 1
+        detail = detail + " | " + execute_event(state, next_event, active_player)
+        chain_active = next_event.redraws
     return detail
 
 

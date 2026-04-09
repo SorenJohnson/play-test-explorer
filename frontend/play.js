@@ -404,13 +404,22 @@ function refreshState() {
   currentState = s;
   currentLegal = legal;
   render();
+  // Surface (or hide) the prompt modal whenever state changes.
+  maybeShowPromptModal();
 }
 
 function advanceUntilHuman() {
-  // Run AI turns until it's the human's turn or game ends
+  // Run AI turns until it's the human's turn or game ends. If an AI turn
+  // pauses for a human prompt (auction / OC pick), stop and let the modal
+  // handle it; resume advancing after the prompt is resolved.
   while (!game.is_over() && !game.is_human_turn()) {
     const result = game.step_ai_turn().toJs({ dict_converter: Object.fromEntries });
     logAiTurn(result);
+    if (result.awaiting_prompt) {
+      refreshState();
+      maybeShowPromptModal();
+      return;
+    }
   }
   if (game.is_over()) {
     refreshState();
@@ -435,7 +444,6 @@ function render() {
   renderPool();
   renderHand();
   renderActionBar();
-  renderOcSection();
   renderPatentSection();
   renderLog();
 }
@@ -1068,33 +1076,140 @@ function renderSpecialToggles(legal, singleSelected) {
   }
 }
 
-function renderOcSection() {
+// --- Mid-event prompt modal ---
+
+function maybeShowPromptModal() {
   const s = currentState;
-  const legal = currentLegal || {};
-  const section = document.getElementById("oc-section");
-  if (!section) return;
-  const youIdx = activeHumanIndex(s);
-  const isHumanTurn = (s.human_indices || []).includes(s.current_player_index);
-  if (!isHumanTurn || !legal.optimization_center_owned) {
-    section.style.display = "none";
+  if (!s || !s.pending_prompt) {
+    hidePromptModal();
     return;
   }
-  section.style.display = "block";
-  const pendingPicks = s.pending_oc_picks || {};
-  const myPick = pendingPicks[youIdx];
-  const status = document.getElementById("oc-status");
-  if (status) {
-    if (myPick) {
-      status.textContent = `Target declared: ${myPick}`;
-      status.style.color = "#3fb950";
-    } else {
-      status.textContent = "No target declared (will auto-pick highest-priced)";
-      status.style.color = "#8b949e";
-    }
+  renderPromptModal(s.pending_prompt);
+  document.getElementById("prompt-modal").style.display = "flex";
+}
+
+function hidePromptModal() {
+  const modal = document.getElementById("prompt-modal");
+  if (modal) modal.style.display = "none";
+}
+
+function renderPromptModal(prompt) {
+  const titleEl = document.getElementById("prompt-title");
+  const bodyEl = document.getElementById("prompt-body");
+  if (!titleEl || !bodyEl) return;
+  if (prompt.kind === "patent_auction") {
+    titleEl.textContent = "Patent Auction";
+    const patent = prompt.patent || {};
+    const ratesStr = (patent.rates || [])
+      .map((r) => `${r.amount > 0 ? "+" : ""}${r.amount} ${r.resource}`)
+      .join(", ");
+    const effectStr = patent.effect || "(no effect)";
+    const humans = currentState.human_indices || [];
+    const youIdx = activeHumanIndex(currentState);
+    // Build per-human bid inputs (for hot-seat games, every human bids).
+    const inputs = humans
+      .map((idx) => {
+        const player = currentState.players[idx];
+        const isYou = idx === youIdx ? " (active)" : "";
+        return `
+          <div class="prompt-row">
+            <label>${player.name}${isYou}:</label>
+            <input type="number" class="prompt-bid-input" data-seat-idx="${idx}"
+                   min="0" max="500" step="5" value="0">
+            <span style="color:#8b949e; font-size:0.75rem;">$ as debt</span>
+          </div>
+        `;
+      })
+      .join("");
+    bodyEl.innerHTML = `
+      <p>The next patent is up for auction. Highest bidder wins; ties go to
+      the earliest seat. The winner pays runner_up + $5 as debt.</p>
+      <div class="prompt-detail">
+        <strong>${patent.name}</strong><br>
+        Rates: ${ratesStr || "—"}<br>
+        Effect: ${effectStr}
+      </div>
+      ${inputs}
+      <p style="color:#8b949e; font-size:0.75rem;">
+        Bids round to the nearest $5. Bid 0 to pass. AI players bid using a
+        heuristic based on the patent's rate value.
+      </p>
+    `;
+  } else if (prompt.kind === "optimization_center") {
+    titleEl.textContent = "Optimization Center";
+    const seats = prompt.seats || [];
+    const humans = new Set(currentState.human_indices || []);
+    // Show one picker per human seat that owns an OC
+    const inputs = seats
+      .filter((s) => humans.has(s.seat_idx))
+      .map((s) => {
+        const player = currentState.players[s.seat_idx];
+        const options = (s.options || [])
+          .map((r) => `<option value="${r}">${r}</option>`)
+          .join("");
+        return `
+          <div class="prompt-row">
+            <label>${player.name}:</label>
+            <select class="prompt-oc-input" data-seat-idx="${s.seat_idx}">
+              <option value="">— auto-pick —</option>
+              ${options}
+            </select>
+          </div>
+        `;
+      })
+      .join("");
+    bodyEl.innerHTML = `
+      <p>Optimization Center: pick which positive resource rate to boost
+      by +1 before the futures settlement fires. Auto-pick falls back to
+      the highest-priced positive non-PWR rate.</p>
+      ${inputs}
+    `;
+  } else {
+    titleEl.textContent = "Pending";
+    bodyEl.innerHTML = `<p>Unknown prompt: ${prompt.kind}</p>`;
   }
-  const input = document.getElementById("oc-target-input");
-  if (input && myPick && document.activeElement !== input) {
-    input.value = myPick;
+}
+
+function submitPromptAnswer() {
+  const s = currentState;
+  if (!s || !s.pending_prompt) return;
+  const prompt = s.pending_prompt;
+  let answers;
+  if (prompt.kind === "patent_auction") {
+    const bids = {};
+    document.querySelectorAll(".prompt-bid-input").forEach((inp) => {
+      const idx = parseInt(inp.dataset.seatIdx, 10);
+      const amt = Math.max(0, parseInt(inp.value, 10) || 0);
+      bids[idx] = amt;
+    });
+    answers = { bids };
+  } else if (prompt.kind === "optimization_center") {
+    const picks = {};
+    document.querySelectorAll(".prompt-oc-input").forEach((sel) => {
+      const idx = parseInt(sel.dataset.seatIdx, 10);
+      if (sel.value) picks[idx] = sel.value;
+    });
+    answers = { picks };
+  } else {
+    answers = {};
+  }
+  // Resolve the prompt; we don't need the return value because refreshState
+  // below picks up the updated game state directly.
+  game.resolve_pending_prompt(pyodide.toPy(answers));
+  // After resolution, refresh and check if another prompt is pending or
+  // if we should advance to the next AI turn.
+  refreshState();
+  if (currentState && currentState.pending_prompt) {
+    // Cascading prompt — re-show the modal
+    maybeShowPromptModal();
+    return;
+  }
+  hidePromptModal();
+  // If the event ended a turn, fall back to the AI advance loop.
+  if (!game.is_human_turn() && !game.is_over()) {
+    advanceUntilHuman();
+  } else if (game.is_over()) {
+    showEndgame();
   }
 }
 
@@ -1108,40 +1223,33 @@ function renderPatentSection() {
     section.style.display = "none";
     return;
   }
-  // Show only on a human's turn (in hot-seat the active human gets to declare).
-  const youIdx = activeHumanIndex(s);
-  const isHumanTurn = (s.human_indices || []).includes(s.current_player_index);
-  if (!isHumanTurn) {
-    section.style.display = "none";
-    return;
-  }
   section.style.display = "block";
 
   const info = document.getElementById("patent-info");
   if (info) {
     info.textContent =
-      `${remaining} patent${remaining === 1 ? "" : "s"} remaining. Set your bid for the next ` +
-      `auction. Bids are in $5 increments and paid as debt by the winner. Highest bidder wins ` +
-      `(ties go to earliest seat).`;
+      `${remaining} patent${remaining === 1 ? "" : "s"} remaining in the pile. ` +
+      `When the next Patent Auction event fires, you'll be prompted to bid on ` +
+      `the patent shown below.`;
   }
 
-  // Status: show whether the active human has already declared a bid.
-  const pendingBids = s.pending_bids || {};
-  const youBid = pendingBids[youIdx];
-  const status = document.getElementById("patent-bid-status");
-  const input = document.getElementById("patent-bid-input");
-  if (status) {
-    if (youBid !== undefined) {
-      status.textContent = `Bid declared: $${youBid}`;
-      status.style.color = "#3fb950";
+  // Show the next-up patent (peek without drawing)
+  const next = s.next_patent;
+  const preview = document.getElementById("patent-preview");
+  if (preview) {
+    if (next) {
+      const ratesStr = (next.rates || [])
+        .map((r) => `${r.amount > 0 ? "+" : ""}${r.amount} ${r.resource}`)
+        .join(", ") || "—";
+      const effectStr = next.effect || "(no effect)";
+      preview.innerHTML = `
+        <div><strong style="color:#58a6ff">Next up:</strong> ${next.name}</div>
+        <div style="margin-top:4px;"><span style="color:#8b949e">Rates:</span> ${ratesStr}</div>
+        <div><span style="color:#8b949e">Effect:</span> ${effectStr}</div>
+      `;
     } else {
-      status.textContent = "No bid declared (will use AI default)";
-      status.style.color = "#8b949e";
+      preview.innerHTML = '<em style="color:#484f58">No upcoming patent</em>';
     }
-  }
-  // Reflect the declared bid in the input so re-clicks update from a sensible value
-  if (input && youBid !== undefined && document.activeElement !== input) {
-    input.value = String(youBid);
   }
 }
 
@@ -1207,55 +1315,10 @@ function wireButtons() {
     hideNewGameModal();
   });
 
-  // Patent auction bid controls
-  const bidSetBtn = document.getElementById("patent-bid-set-btn");
-  if (bidSetBtn) {
-    bidSetBtn.addEventListener("click", () => {
-      const input = document.getElementById("patent-bid-input");
-      if (!input || !game) return;
-      const youIdx = activeHumanIndex(currentState);
-      const amount = parseInt(input.value, 10) || 0;
-      const result = game.set_patent_bid(youIdx, amount).toJs({
-        dict_converter: Object.fromEntries,
-      });
-      if (result.ok) {
-        // The Python side may have rounded the amount; reflect that.
-        input.value = String(result.amount);
-      }
-      refreshState();
-    });
-  }
-  const bidClearBtn = document.getElementById("patent-bid-clear-btn");
-  if (bidClearBtn) {
-    bidClearBtn.addEventListener("click", () => {
-      if (!game) return;
-      const youIdx = activeHumanIndex(currentState);
-      game.clear_patent_bid(youIdx);
-      refreshState();
-    });
-  }
-
-  // Optimization Center picker
-  const ocSetBtn = document.getElementById("oc-set-btn");
-  if (ocSetBtn) {
-    ocSetBtn.addEventListener("click", () => {
-      const input = document.getElementById("oc-target-input");
-      if (!input || !game) return;
-      const youIdx = activeHumanIndex(currentState);
-      const value = input.value;
-      if (!value) return;
-      game.set_oc_pick(youIdx, value);
-      refreshState();
-    });
-  }
-  const ocClearBtn = document.getElementById("oc-clear-btn");
-  if (ocClearBtn) {
-    ocClearBtn.addEventListener("click", () => {
-      if (!game) return;
-      const youIdx = activeHumanIndex(currentState);
-      game.clear_oc_pick(youIdx);
-      refreshState();
-    });
+  // Mid-event prompt modal submit (replaces the old patent-bid panel)
+  const promptSubmitBtn = document.getElementById("prompt-submit-btn");
+  if (promptSubmitBtn) {
+    promptSubmitBtn.addEventListener("click", submitPromptAnswer);
   }
 }
 
@@ -1340,6 +1403,12 @@ function onPass() {
   // End the human's turn: draw + event, then AI turns
   const eventResult = game.end_human_turn().toJs({ dict_converter: Object.fromEntries });
   logHumanTurnEnd(eventResult);
+  // If the event paused for a prompt, surface the modal and don't advance.
+  if (eventResult.awaiting_prompt) {
+    refreshState();
+    maybeShowPromptModal();
+    return;
+  }
   // Advance through AI turns
   advanceUntilHuman();
 }

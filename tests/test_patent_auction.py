@@ -4,13 +4,17 @@ from pathlib import Path
 
 from my_project.models import Card, Resource, ResourceAmount
 from my_project.parsing import parse_cards, parse_contracts, parse_patents
+from my_project.play_adapter import PlayableGame
 from my_project.simulation import (
     EventCard,
     EventType,
     GameState,
     _default_ai_bid,
+    _ec,
     do_patent_auction,
     execute_event,
+    execute_event_with_redraws,
+    resume_pending_event,
     settle_silent_auction,
 )
 
@@ -186,13 +190,102 @@ class TestDefaultAiBid:
         state = GameState.create(cards, contracts, num_players=3)
         state.players[0].money = 100
         state.players[0].debt = 0
-        bid = _default_ai_bid(state.players[0], _patent("X"))
+        bid = _default_ai_bid(state.players[0], _patent("X", rates=[(Resource.PWR, 2)]))
         assert bid % 5 == 0
 
-    def test_bid_capped_at_30(self):
+    def test_bid_capped_at_40(self):
         cards, contracts = _load()
         state = GameState.create(cards, contracts, num_players=3)
         state.players[0].money = 1000
         state.players[0].debt = 0
-        bid = _default_ai_bid(state.players[0], _patent("X"))
-        assert bid <= 30
+        bid = _default_ai_bid(state.players[0], _patent("X", rates=[(Resource.PWR, 10)]))
+        assert bid <= 40
+
+    def test_bid_scales_with_patent_value(self):
+        """Higher-rate patents draw bigger bids."""
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        state.players[0].money = 100
+        state.players[0].debt = 0
+        weak = _default_ai_bid(state.players[0], _patent("Weak", rates=[(Resource.PWR, 1)]))
+        strong = _default_ai_bid(state.players[0], _patent("Strong", rates=[(Resource.PWR, 4)]))
+        assert strong > weak
+
+    def test_minimum_bid_floor(self):
+        """A patent with positive rates always gets at least the $5 minimum bid."""
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        state.players[0].money = 50
+        state.players[0].debt = 0
+        bid = _default_ai_bid(state.players[0], _patent("Tiny", rates=[(Resource.PWR, 1)]))
+        assert bid >= 5
+
+
+# --- Mid-event interruption (auction prompt) ---
+
+
+class TestAuctionPrompt:
+    def test_event_pauses_when_human_present(self):
+        """A patent_auction event sets pending_prompt and does not draw the patent."""
+        cards, contracts = _load()
+        patents = [_patent("Alpha"), _patent("Beta")]
+        state = GameState.create(
+            cards, contracts, num_players=3, patent_pile=patents,
+        )
+        state._is_human_game = True
+        idx_before = state.patent_idx
+        execute_event_with_redraws(state, _ec(EventType.PATENT_AUCTION), state.players[0])
+        # Paused; the patent has NOT been drawn yet (just peeked)
+        assert state.pending_prompt is not None
+        assert state.pending_prompt["kind"] == "patent_auction"
+        assert state.patent_idx == idx_before
+
+    def test_resume_settles_with_supplied_bids(self):
+        cards, contracts = _load()
+        patent = _patent("Alpha", rates=[(Resource.PWR, 1)])
+        state = GameState.create(
+            cards, contracts, num_players=3, patent_pile=[patent],
+        )
+        state._is_human_game = True
+        execute_event_with_redraws(state, _ec(EventType.PATENT_AUCTION), state.players[0])
+        # Now supply bids and resume
+        state.pending_bids = {0: 25, 1: 0, 2: 0}
+        resume_pending_event(state, state.players[0])
+        # The auction settled, P0 should own the patent for 0+5 = 5 debt
+        assert any(c.building == "Alpha" for c in state.players[0].buildings_played)
+        assert state.players[0].debt == 5
+        assert state.pending_prompt is None
+
+    def test_no_pause_in_all_ai_game(self):
+        """Without _is_human_game flag, the auction fires immediately with AI bids."""
+        cards, contracts = _load()
+        state = GameState.create(
+            cards, contracts, num_players=3, patent_pile=[_patent("Alpha")],
+        )
+        # _is_human_game not set
+        execute_event_with_redraws(state, _ec(EventType.PATENT_AUCTION), state.players[0])
+        assert state.pending_prompt is None
+        # The patent was drawn and auctioned
+        assert state.patent_idx == 1
+
+    def test_playable_game_pauses_and_resumes(self):
+        """End-to-end via PlayableGame."""
+        game = PlayableGame(seed=42, max_turns=8)
+        # Force the next event of the human turn to be a patent auction
+        game.begin_human_turn()
+        # Replace the pending event with a patent auction so we can test the path
+        game.state.patent_pile = [_patent("Test", rates=[(Resource.PWR, 1)])]
+        game.state.patent_idx = 0
+        game._pending_event = _ec(EventType.PATENT_AUCTION)
+        game.apply_human_action({"type": "pass"})
+        result = game.end_human_turn()
+        assert result.get("awaiting_prompt") is True
+        assert game.is_awaiting_prompt()
+        prompt = game.pending_prompt()
+        assert prompt["kind"] == "patent_auction"
+        # Resolve
+        resolve_result = game.resolve_pending_prompt({"bids": {0: 10}})
+        assert resolve_result["ok"]
+        assert not game.is_awaiting_prompt()
+        # P0 should have won (only positive bid)
+        assert any(c.building == "Test" for c in game.state.players[0].buildings_played)

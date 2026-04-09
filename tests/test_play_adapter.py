@@ -60,7 +60,9 @@ def test_ai_turn_runs():
 
 def test_full_game_completes():
     """Drive a full game with the human passing every turn + AI stepping."""
-    game = PlayableGame(seed=42, max_turns=8)
+    # disable_prompts skips the auction / OC pause flow so the test loop
+    # doesn't have to handle resolve_pending_prompt mid-event.
+    game = PlayableGame(seed=42, max_turns=8, disable_prompts=True)
     safety_counter = 0
     while not game.is_over():
         if game.is_human_turn():
@@ -326,7 +328,9 @@ def test_last_player_gets_full_turn_before_end_game():
     has_built_this_turn must be reset for that player (proving they got a
     fresh turn), and the turn record must show event=END_GAME.
     """
-    game = PlayableGame(seed=42, max_turns=8)
+    # disable_prompts so this test doesn't have to dance around the auction
+    # / OC pause flow when patent auctions or futures fire.
+    game = PlayableGame(seed=42, max_turns=8, disable_prompts=True)
 
     # Play through. Mark the last player's begin-turn state.
     last_player_had_fresh_turn = False
