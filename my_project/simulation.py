@@ -177,6 +177,7 @@ class EventType(StrEnum):
     POWER_BILL = "power_bill"
     DEBT_COLLECTION = "debt_collection"
     FUTURES_SETTLEMENT = "futures_settlement"
+    NEWS = "news"
     END_GAME = "end_game"
 
 
@@ -186,8 +187,8 @@ class EventCard:
 
     For simple events (power bill, futures settlement, etc.) only `type` is
     needed. The optional `payload` dict carries per-event parameters for
-    data-driven events like NEWS (Phase 2). `label` is a human-readable
-    display string for the turn log; if empty, falls back to `type.value`.
+    data-driven events like NEWS. `label` is a human-readable display string
+    for the turn log; if empty, falls back to `type.value`.
     """
     type: EventType
     payload: dict | None = None
@@ -202,22 +203,62 @@ def _ec(t: EventType) -> EventCard:
     return EventCard(type=t)
 
 
-def build_event_deck(num_turns: int, num_players: int) -> list[EventCard]:
+@dataclass
+class EventDeckConfig:
+    """Configurable composition for the event deck.
+
+    Each count field accepts either a fixed int or a (min, max) tuple for
+    random variation. Defaults match the original hardcoded module constants
+    so existing behavior is preserved when no config is supplied.
+    """
+    power_bill_count: int | tuple[int, int] = field(
+        default_factory=lambda: POWER_BILL_RANGE
+    )
+    debt_collection_count: int | tuple[int, int] = field(
+        default_factory=lambda: DEBT_COLLECTION_RANGE
+    )
+    futures_settlement_count: int | tuple[int, int] = field(
+        default_factory=lambda: FUTURES_SETTLEMENT_RANGE
+    )
+    news_pool: list[EventCard] = field(default_factory=list)
+    news_count: int | tuple[int, int] = 0
+    pwr_adjust_fraction: float = PWR_ADJUST_FRACTION
+
+
+def _resolve_count(spec: int | tuple[int, int]) -> int:
+    """Resolve a count spec to a concrete int."""
+    if isinstance(spec, tuple):
+        return random.randint(spec[0], spec[1])
+    return spec
+
+
+def build_event_deck(
+    num_turns: int,
+    num_players: int,
+    config: EventDeckConfig | None = None,
+) -> list[EventCard]:
     """Build a shuffled event deck with one card per player-turn.
 
     The last slot is always END_GAME (fires final power bill + futures
-    settlement). The remaining slots are filled with random events per
-    the composition ranges. PWR_ADJUST_FRACTION of leftover slots become
-    PWR adjustments, the rest are no-events.
+    settlement). The remaining slots are filled per the config (or module
+    defaults). PWR_ADJUST_FRACTION of leftover slots become PWR adjustments,
+    the rest are no-events.
     """
+    cfg = config or EventDeckConfig()
     total = num_turns * num_players
     # Reserve last slot for END_GAME
     reg_slots = max(0, total - 1)
 
     events: list[EventCard] = []
-    events.extend([_ec(EventType.POWER_BILL)] * random.randint(*POWER_BILL_RANGE))
-    events.extend([_ec(EventType.DEBT_COLLECTION)] * random.randint(*DEBT_COLLECTION_RANGE))
-    events.extend([_ec(EventType.FUTURES_SETTLEMENT)] * random.randint(*FUTURES_SETTLEMENT_RANGE))
+    events.extend([_ec(EventType.POWER_BILL)] * _resolve_count(cfg.power_bill_count))
+    events.extend([_ec(EventType.DEBT_COLLECTION)] * _resolve_count(cfg.debt_collection_count))
+    events.extend([_ec(EventType.FUTURES_SETTLEMENT)] * _resolve_count(cfg.futures_settlement_count))
+
+    # News events — sample from the provided pool with replacement.
+    # `random.choices` allows duplicates so news_count can exceed pool size.
+    news_n = _resolve_count(cfg.news_count)
+    if news_n > 0 and cfg.news_pool:
+        events.extend(random.choices(cfg.news_pool, k=news_n))
 
     # Truncate if over capacity
     if len(events) > reg_slots:
@@ -225,7 +266,7 @@ def build_event_deck(num_turns: int, num_players: int) -> list[EventCard]:
 
     remaining = reg_slots - len(events)
     if remaining > 0:
-        pwr_adjusts = int(remaining * PWR_ADJUST_FRACTION)
+        pwr_adjusts = int(remaining * cfg.pwr_adjust_fraction)
         events.extend([_ec(EventType.PWR_ADJUST)] * pwr_adjusts)
         events.extend([_ec(EventType.NO_EVENT)] * (remaining - pwr_adjusts))
 
@@ -336,6 +377,8 @@ class GameState:
         randomize_market: bool = False,
         max_turns: int = DEFAULT_MAX_TURNS,
         corporation_rates: list[dict[Resource, int]] | None = None,
+        event_deck_config: EventDeckConfig | None = None,
+        event_deck: list[EventCard] | None = None,
     ) -> GameState:
         market = Market.create(start_market_pos)
 
@@ -358,8 +401,9 @@ class GameState:
         # Draw pool
         pool = deck.draw(POOL_SIZE)
 
-        # Build event deck
-        event_deck = build_event_deck(max_turns, num_players)
+        # Build event deck (use explicit deck if provided, else build from config)
+        if event_deck is None:
+            event_deck = build_event_deck(max_turns, num_players, event_deck_config)
 
         # Create players. Assign unique corporations randomly (capped at # of corps).
         corp_pool = list(CORPORATIONS)
@@ -732,6 +776,29 @@ def do_futures_settlement(state: GameState) -> None:
             state.market.adjust(r, total)
 
 
+def do_news(state: GameState, event: EventCard) -> str:
+    """Execute a news event: adjust market prices per the payload.
+
+    Payload shape:
+        {"market_deltas": {"FOOD": 4, "H2O": -2, ...}}
+
+    Each entry moves the named resource's market position by the given delta
+    (positive = price rises, negative = price drops). Uses the same
+    Market.adjust that PWR_ADJUST and futures settlements use.
+    """
+    payload = event.payload or {}
+    deltas = payload.get("market_deltas", {})
+    parts = []
+    for r_str, delta in deltas.items():
+        resource = Resource(r_str)
+        state.market.adjust(resource, delta)
+        sign = "+" if delta >= 0 else ""
+        parts.append(f"{r_str} {sign}{delta}")
+    label = event.display_label()
+    detail = ", ".join(parts) if parts else "no effect"
+    return f"NEWS: {label} ({detail})"
+
+
 def execute_event(state: GameState, event: EventCard, active_player: Player) -> str:
     """Execute an event card and return a description."""
     match event.type:
@@ -749,6 +816,8 @@ def execute_event(state: GameState, event: EventCard, active_player: Player) -> 
         case EventType.FUTURES_SETTLEMENT:
             do_futures_settlement(state)
             return "futures settlement"
+        case EventType.NEWS:
+            return do_news(state, event)
         case EventType.END_GAME:
             do_power_bill(state)
             do_futures_settlement(state)

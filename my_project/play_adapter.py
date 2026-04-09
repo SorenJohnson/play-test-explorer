@@ -35,6 +35,7 @@ from my_project.simulation import (
     DEFAULT_MAX_TURNS,
     DEFAULT_START_MONEY,
     EventCard,
+    EventDeckConfig,
     EventType,
     GameState,
     HAND_SIZE,
@@ -89,6 +90,9 @@ class PlayableGame:
     # back to the engine's `Player_{i+1}` default.
     names: list[str] | None = None
     max_turns: int = DEFAULT_MAX_TURNS
+    event_deck_config: EventDeckConfig | None = None
+    # When provided, overrides build_event_deck entirely.
+    custom_event_deck: list[EventCard] | None = None
     data_dir: Path = field(default_factory=lambda: DEFAULT_DATA_DIR)
 
     state: GameState = field(init=False)
@@ -139,6 +143,8 @@ class PlayableGame:
             start_money=DEFAULT_START_MONEY,
             max_turns=self.max_turns,
             randomize_market=True,
+            event_deck_config=self.event_deck_config,
+            event_deck=self.custom_event_deck,
         )
         # Apply custom names if provided. Strict length check, empty entries
         # silently keep the engine's `Player_{i+1}` default so the UI can pass
