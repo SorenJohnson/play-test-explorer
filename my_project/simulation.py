@@ -180,7 +180,29 @@ class EventType(StrEnum):
     END_GAME = "end_game"
 
 
-def build_event_deck(num_turns: int, num_players: int) -> list[EventType]:
+@dataclass
+class EventCard:
+    """A single card in the event deck.
+
+    For simple events (power bill, futures settlement, etc.) only `type` is
+    needed. The optional `payload` dict carries per-event parameters for
+    data-driven events like NEWS (Phase 2). `label` is a human-readable
+    display string for the turn log; if empty, falls back to `type.value`.
+    """
+    type: EventType
+    payload: dict | None = None
+    label: str = ""
+
+    def display_label(self) -> str:
+        return self.label or self.type.value
+
+
+def _ec(t: EventType) -> EventCard:
+    """Shorthand for creating a simple (no-payload) EventCard."""
+    return EventCard(type=t)
+
+
+def build_event_deck(num_turns: int, num_players: int) -> list[EventCard]:
     """Build a shuffled event deck with one card per player-turn.
 
     The last slot is always END_GAME (fires final power bill + futures
@@ -192,10 +214,10 @@ def build_event_deck(num_turns: int, num_players: int) -> list[EventType]:
     # Reserve last slot for END_GAME
     reg_slots = max(0, total - 1)
 
-    events: list[EventType] = []
-    events.extend([EventType.POWER_BILL] * random.randint(*POWER_BILL_RANGE))
-    events.extend([EventType.DEBT_COLLECTION] * random.randint(*DEBT_COLLECTION_RANGE))
-    events.extend([EventType.FUTURES_SETTLEMENT] * random.randint(*FUTURES_SETTLEMENT_RANGE))
+    events: list[EventCard] = []
+    events.extend([_ec(EventType.POWER_BILL)] * random.randint(*POWER_BILL_RANGE))
+    events.extend([_ec(EventType.DEBT_COLLECTION)] * random.randint(*DEBT_COLLECTION_RANGE))
+    events.extend([_ec(EventType.FUTURES_SETTLEMENT)] * random.randint(*FUTURES_SETTLEMENT_RANGE))
 
     # Truncate if over capacity
     if len(events) > reg_slots:
@@ -204,12 +226,12 @@ def build_event_deck(num_turns: int, num_players: int) -> list[EventType]:
     remaining = reg_slots - len(events)
     if remaining > 0:
         pwr_adjusts = int(remaining * PWR_ADJUST_FRACTION)
-        events.extend([EventType.PWR_ADJUST] * pwr_adjusts)
-        events.extend([EventType.NO_EVENT] * (remaining - pwr_adjusts))
+        events.extend([_ec(EventType.PWR_ADJUST)] * pwr_adjusts)
+        events.extend([_ec(EventType.NO_EVENT)] * (remaining - pwr_adjusts))
 
     random.shuffle(events)
     # END_GAME always goes at the bottom (fires on the final player-turn)
-    events.append(EventType.END_GAME)
+    events.append(_ec(EventType.END_GAME))
     return events
 
 
@@ -278,7 +300,7 @@ class GameState:
     contracts: list[Contract]
     available_contracts: list[Contract]
     pool: list[Card]
-    event_deck: list[EventType]
+    event_deck: list[EventCard]
     turn: int = 0
     event_idx: int = 0
     history: list[TurnRecord] = field(default_factory=list)
@@ -299,8 +321,8 @@ class GameState:
     def remaining_events(self) -> dict[EventType, int]:
         """Count remaining events from current position in event deck."""
         counts: dict[EventType, int] = {e: 0 for e in EventType}
-        for e in self.event_deck[self.event_idx:]:
-            counts[e] += 1
+        for ec in self.event_deck[self.event_idx:]:
+            counts[ec.type] += 1
         return counts
 
     @classmethod
@@ -710,9 +732,9 @@ def do_futures_settlement(state: GameState) -> None:
             state.market.adjust(r, total)
 
 
-def execute_event(state: GameState, event: EventType, active_player: Player) -> str:
-    """Execute an event and return a description."""
-    match event:
+def execute_event(state: GameState, event: EventCard, active_player: Player) -> str:
+    """Execute an event card and return a description."""
+    match event.type:
         case EventType.NO_EVENT:
             return "no event"
         case EventType.PWR_ADJUST:
@@ -756,7 +778,7 @@ def _execute_action(state: GameState, player: Player, action: Action) -> ActionR
     return None
 
 
-def run_turn(state: GameState, player: Player, strategy, event: EventType) -> None:
+def run_turn(state: GameState, player: Player, strategy, event: EventCard) -> None:
     """Run one turn: pool swaps, then actions until hand empty or pass, draw, event."""
     state.turn += 1
     money_before = player.money
@@ -847,7 +869,7 @@ def run_game(
 
     for _ in range(max_turns):
         for i, player in enumerate(state.players):
-            event = state.event_deck[state.event_idx] if state.event_idx < len(state.event_deck) else EventType.NO_EVENT
+            event = state.event_deck[state.event_idx] if state.event_idx < len(state.event_deck) else _ec(EventType.NO_EVENT)
             state.event_idx += 1
             run_turn(state, player, player_strategies[i], event)
 

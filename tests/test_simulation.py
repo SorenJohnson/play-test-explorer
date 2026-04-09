@@ -68,9 +68,10 @@ class TestEventDeck:
 
     def test_deck_composition(self):
         deck = build_event_deck(8, 3)
-        assert 3 <= deck.count(EventType.POWER_BILL) <= 4
-        assert 2 <= deck.count(EventType.DEBT_COLLECTION) <= 4
-        assert 3 <= deck.count(EventType.FUTURES_SETTLEMENT) <= 4
+        counts = {et: sum(1 for ec in deck if ec.type == et) for et in EventType}
+        assert 3 <= counts[EventType.POWER_BILL] <= 4
+        assert 2 <= counts[EventType.DEBT_COLLECTION] <= 4
+        assert 3 <= counts[EventType.FUTURES_SETTLEMENT] <= 4
 
     def test_small_deck_truncates(self):
         deck = build_event_deck(2, 1)  # only 2 slots

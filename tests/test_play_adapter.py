@@ -282,11 +282,12 @@ def test_strategy_cannot_see_current_event_in_ai_turn():
     game.end_human_turn()
     # Now it's an AI player's turn. Peek at the current turn's event.
     current_event = game.state.event_deck[game.state.event_idx]
+    current_type = current_event.type
 
-    # Count occurrences of current_event in the full deck from event_idx
+    # Count occurrences of this event type in the full deck from event_idx
     # onward, INCLUDING and EXCLUDING the current one.
     deck_from_here = game.state.event_deck[game.state.event_idx:]
-    count_including = sum(1 for e in deck_from_here if e == current_event)
+    count_including = sum(1 for e in deck_from_here if e.type == current_type)
 
     # Monkeypatch the strategy to inspect remaining_events mid-turn.
     # play_adapter imports smart_greedy_strategy at module load, so we need
@@ -312,9 +313,9 @@ def test_strategy_cannot_see_current_event_in_ai_turn():
     assert "remaining" in observed, "Strategy was not called — can't verify"
     # The strategy's view should exclude the current turn's event: one fewer
     # of this event type than the raw count-from-current-index.
-    seen = observed["remaining"].get(current_event, 0)
+    seen = observed["remaining"].get(current_type, 0)
     assert seen == count_including - 1, (
-        f"Strategy saw {seen} of {current_event.value}, expected {count_including - 1} "
+        f"Strategy saw {seen} of {current_type.value}, expected {count_including - 1} "
         f"(current turn's event should be hidden). event_idx={observed['event_idx']}."
     )
 

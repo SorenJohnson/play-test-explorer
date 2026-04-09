@@ -34,6 +34,7 @@ from my_project.simulation import (
     ActionType,
     DEFAULT_MAX_TURNS,
     DEFAULT_START_MONEY,
+    EventCard,
     EventType,
     GameState,
     HAND_SIZE,
@@ -104,7 +105,7 @@ class PlayableGame:
     # from revealing the current turn's event to the strategy or UI during the
     # action phase, matching simulation.run_game's pattern. Cleared when the
     # event fires at end of turn.
-    _pending_event: EventType | None = field(default=None, init=False)
+    _pending_event: EventCard | None = field(default=None, init=False)
     # When a turn is in progress, event_idx has been pre-advanced, so
     # `event_idx % num_players` would point at the NEXT player. This field
     # records the index of the player whose turn is currently in progress.
@@ -250,7 +251,7 @@ class PlayableGame:
         self.human_turn_in_progress = False
         self._active_player_idx = -1
         self._snapshot_market(turn=self.state.turn)
-        return {"type": event.value, "detail": event_detail}
+        return {"type": event.type.value, "detail": event_detail}
 
     def apply_human_action(self, action: dict) -> dict:
         """Apply a single action for the human player.
@@ -406,7 +407,7 @@ class PlayableGame:
             "ok": True,
             "player_index": acting_player_idx,
             "actions": actions_log,
-            "event": {"type": event.value, "detail": event_detail},
+            "event": {"type": event.type.value, "detail": event_detail},
         }
 
     def _execute_ai_action(self, player: Player, action: Action):
