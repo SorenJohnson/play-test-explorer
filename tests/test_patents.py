@@ -590,19 +590,24 @@ class TestFinancialInstruments:
         # No FI ownership → no bonuses
         assert [p.money for p in state.players] == money_before
 
-    def test_contracts_offset_other_players_interest(self):
-        """The interest other players pay is reduced by their contract count.
-        FI bonus tracks the actual interest, not the gross."""
+    def test_credit_absorbs_interest_before_fi_payout(self):
+        """When other players have credit, the credit absorbs the interest
+        before it becomes real debt. Only the REAL debt added (post-credit)
+        counts toward the FI owner's bonus."""
         cards, contracts = _load()
         state = GameState.create(cards, contracts, num_players=3)
         state.players[0].buildings_played.append(_patent("Financial Instruments"))
         state.players[0].debt = 0
-        # Player 1: $100 debt, 1 contract → effective debt = max(0, 100-50) = 50 → interest = 5
+        # Player 1: $100 debt → interest 10. But P1 has $5 credit which
+        # absorbs $5 of that interest. Real debt added = 5.
         state.players[1].debt = 100
-        state.players[1].contracts_fulfilled = 1
+        state.players[1].credit = 5
         money_before = state.players[0].money
         do_debt_collection(state)
+        # FI owner gains 5 (the real-debt portion only)
         assert state.players[0].money == money_before + 5
+        # P1's credit was consumed
+        assert state.players[1].credit == 0
 
 
 # --- Virtual Reality ---

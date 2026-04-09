@@ -8,12 +8,17 @@ from my_project.simulation import (
     Market,
     Player,
     PRICE_TRACK,
+    _apply_debt,
     build_event_deck,
     compute_build_deficit,
+    do_debt_collection,
+    do_power_bill,
     do_pwr_adjust,
     execute_build,
+    execute_contract,
     run_game,
 )
+from my_project.models import Contract
 from my_project.strategies import greedy_strategy, random_strategy
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "my_project" / "data"
@@ -275,3 +280,129 @@ class TestRunGame:
         assert len(events) > 0
         # At least some non-empty events
         assert any(e != "no event" for e in events)
+
+
+# --- Credit / contract debt absorption ---
+
+
+class TestApplyDebt:
+    def test_no_credit_adds_to_debt(self):
+        p = Player(name="P", debt=0, credit=0)
+        consumed, real = _apply_debt(p, 50)
+        assert consumed == 0
+        assert real == 50
+        assert p.debt == 50
+        assert p.credit == 0
+
+    def test_credit_absorbs_full_debt(self):
+        p = Player(name="P", debt=0, credit=100)
+        consumed, real = _apply_debt(p, 50)
+        assert consumed == 50
+        assert real == 0
+        assert p.debt == 0
+        assert p.credit == 50  # 100 - 50
+
+    def test_credit_partially_absorbs_debt(self):
+        p = Player(name="P", debt=0, credit=20)
+        consumed, real = _apply_debt(p, 50)
+        assert consumed == 20
+        assert real == 30
+        assert p.debt == 30
+        assert p.credit == 0
+
+    def test_zero_amount_is_noop(self):
+        p = Player(name="P", debt=0, credit=10)
+        consumed, real = _apply_debt(p, 0)
+        assert consumed == 0 and real == 0
+        assert p.credit == 10
+
+
+class TestContractCreditModel:
+    """The user-facing example: $0 cash, -$50 debt + $50 contract = $0 NW.
+    Plus credit semantics for leftover reward."""
+
+    def _setup(self):
+        cards, contracts = _load_data()
+        state = GameState.create(cards, contracts, num_players=3)
+        # Give player 0 a known clean state
+        p = state.players[0]
+        p.money = 0
+        p.debt = 0
+        p.credit = 0
+        for r in Resource:
+            p.rates[r] = 5  # plenty of every resource
+        return state, p
+
+    def _put_contract(self, state, requirements, reward=50):
+        contract = Contract(requirements=requirements, reward=reward, count=1)
+        state.available_contracts[0] = contract
+        return contract
+
+    def _give_contract_card(self, p):
+        from my_project.models import Card as _Card
+        p.hand = [_Card(
+            alternate="Contract", slot=1, building="MockContract",
+            costs=[], rates=[], effect="",
+            can_sell=[], can_fulfill_contract=True,
+        )]
+
+    def test_user_example_50_debt_paid_off_zero_nw(self):
+        """$0 cash, $50 debt + $50 contract → $0 NW, $0 debt."""
+        state, p = self._setup()
+        p.debt = 50
+        self._put_contract(state, [ResourceAmount(Resource.FE, 1)], reward=50)
+        self._give_contract_card(p)
+        execute_contract(state, p, card_idx=0, contract_idx=0)
+        assert p.debt == 0
+        assert p.credit == 0
+        assert p.money == 0
+        assert p.net_worth() == 0
+
+    def test_no_debt_full_reward_becomes_credit(self):
+        """$0 cash, $0 debt + $50 contract → $0 cash, $0 debt, $50 credit, NW $50."""
+        state, p = self._setup()
+        self._put_contract(state, [ResourceAmount(Resource.FE, 1)], reward=50)
+        self._give_contract_card(p)
+        execute_contract(state, p, card_idx=0, contract_idx=0)
+        assert p.debt == 0
+        assert p.credit == 50
+        assert p.money == 0
+        assert p.net_worth() == 50
+
+    def test_partial_debt_paid_remainder_credit(self):
+        """$0 cash, $20 debt + $50 contract → $0 debt, $30 credit, NW $30."""
+        state, p = self._setup()
+        p.debt = 20
+        self._put_contract(state, [ResourceAmount(Resource.FE, 1)], reward=50)
+        self._give_contract_card(p)
+        execute_contract(state, p, card_idx=0, contract_idx=0)
+        assert p.debt == 0
+        assert p.credit == 30
+        assert p.net_worth() == 30
+
+    def test_credit_absorbs_future_debt_from_power_bill(self):
+        """A player with credit takes a power bill hit; credit absorbs first."""
+        cards, contracts = _load_data()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        p.money = 0
+        p.debt = 0
+        p.credit = 30
+        # Force a -3 PWR rate so the bill costs PWR price * 3
+        p.rates[Resource.PWR] = -3
+        pwr_price = state.market.price(Resource.PWR)
+        do_power_bill(state)
+        cost = pwr_price * 3
+        # Credit should absorb up to the cost; debt only takes the overflow
+        if cost <= 30:
+            assert p.debt == 0
+            assert p.credit == 30 - cost
+        else:
+            assert p.debt == cost - 30
+            assert p.credit == 0
+
+    def test_contracts_no_longer_double_counted_in_nw(self):
+        """contracts_fulfilled is no longer added to NW (it was a bug)."""
+        p = Player(name="P", money=0, debt=0, credit=0)
+        p.contracts_fulfilled = 5  # absurd but should not affect NW
+        assert p.net_worth() == 0

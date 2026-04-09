@@ -110,6 +110,10 @@ class Player:
     name: str
     money: int = 20
     debt: int = 0
+    # Contract credit: leftover reward from fulfilled contracts after paying
+    # off any existing debt. Counts toward net worth (like cash) AND absorbs
+    # future debt before it becomes real debt. NOT spendable as cash.
+    credit: int = 0
     rates: dict[Resource, int] = field(default_factory=lambda: {r: 0 for r in Resource})
     hand: list[Card] = field(default_factory=list)
     # Cards the player has built. Each entry is the original Card so special-
@@ -146,7 +150,7 @@ class Player:
     patent_state: dict[str, int] = field(default_factory=dict)
 
     def net_worth(self) -> int:
-        return self.money - self.debt + self.contracts_fulfilled * CONTRACT_REWARD
+        return self.money - self.debt + self.credit
 
     def rate(self, resource: Resource) -> int:
         return self.rates.get(resource, 0)
@@ -163,6 +167,7 @@ class Player:
         return {
             "money": self.money,
             "debt": self.debt,
+            "credit": self.credit,
             "net_worth": self.net_worth(),
             "rates": {r.value: v for r, v in self.rates.items()},
             "buildings_played": self.building_names(),
@@ -998,9 +1003,14 @@ def execute_contract(
     # Record in ledger
     player.ledger.record_contract(effective_reqs)
 
-    # Contracts pay off debt, not give cash. Remaining value is end-game net worth.
+    # Contract reward: pay off existing debt first, leftover becomes credit.
+    # Credit counts toward net worth and absorbs FUTURE debt before it
+    # becomes real debt (see _apply_debt). It is NOT spendable as cash.
     debt_payoff = min(player.debt, contract.reward)
     player.debt -= debt_payoff
+    leftover = contract.reward - debt_payoff
+    if leftover > 0:
+        player.credit += leftover
     player.contracts_fulfilled += 1
 
     # Burn the contract-icon card unless we used Launch Pad (free icon)
@@ -1368,6 +1378,26 @@ def can_use_launch_pad(player: Player) -> bool:
 
 # --- Events ---
 
+def _apply_debt(player: Player, amount: int) -> tuple[int, int]:
+    """Charge `amount` debt against a player, consuming credit first.
+
+    Credit absorbs debt before it becomes real debt. So a player with
+    $30 credit and a $50 debt charge ends up with $0 credit and $20 debt.
+
+    Returns a tuple `(credit_consumed, real_debt_added)` for callers that
+    want to log the breakdown. Both are >= 0 and sum to `amount`.
+
+    Negative or zero `amount` is a no-op.
+    """
+    if amount <= 0:
+        return (0, 0)
+    credit_consumed = min(player.credit, amount)
+    player.credit -= credit_consumed
+    real_debt_added = amount - credit_consumed
+    player.debt += real_debt_added
+    return (credit_consumed, real_debt_added)
+
+
 def do_pwr_adjust(state: GameState, player: Player) -> None:
     """Adjust PWR market price based on active player's rate.
 
@@ -1412,7 +1442,7 @@ def do_power_bill(state: GameState) -> None:
         elif effective_rate < 0:
             shortage = abs(effective_rate)
             cost = shortage * pwr_price
-            player.debt += cost
+            _apply_debt(player, cost)
             state.pwr_total_debt += cost
             state.bills_units_owed[Resource.PWR] += shortage
             player.ledger.record_event_cost(Resource.PWR, cost, effective_rate)
@@ -1426,18 +1456,22 @@ def do_power_bill(state: GameState) -> None:
 
 
 def do_debt_collection(state: GameState) -> None:
-    """Increase debt by $1 per DEBT_INTEREST_DIVISOR owed (minus contract value).
+    """Increase debt by $1 per DEBT_INTEREST_DIVISOR owed.
+
+    The contract "shield" from the original rules is implicit: contract
+    rewards now pay off debt directly (and any leftover becomes credit
+    that absorbs future debt before it hits the player's actual debt).
 
     Financial Instruments hook: each owner of FI gains cash equal to the
-    sum of debt added to OTHER players (not themselves) this round.
+    sum of REAL debt added to OTHER players (not themselves) this round.
+    Credit-absorbed amounts don't count for the FI payout.
     """
     debt_added: dict[int, int] = {}
     for idx, player in enumerate(state.players):
-        contract_offset = player.contracts_fulfilled * CONTRACT_REWARD
-        effective_debt = max(0, player.debt - contract_offset)
-        interest = effective_debt // DEBT_INTEREST_DIVISOR
-        player.debt += interest
-        debt_added[idx] = interest
+        interest = player.debt // DEBT_INTEREST_DIVISOR
+        # Charge the interest through _apply_debt so any credit absorbs it
+        _, real_debt = _apply_debt(player, interest)
+        debt_added[idx] = real_debt
 
     # Financial Instruments payout: for each owner, gain cash equal to the
     # sum of debt added to OTHER players this round.
@@ -1492,7 +1526,7 @@ def do_futures_settlement(state: GameState) -> None:
             if rate < 0:
                 shortage = abs(rate)
                 cost = starting_prices[r] * shortage
-                player.debt += cost
+                _apply_debt(player, cost)
                 state.futures_total_debt += cost
                 state.futures_units_bought[r] += shortage
                 state.futures_debt_per_resource[r] += cost
@@ -1648,10 +1682,10 @@ def settle_silent_auction(
     winner_idx, winner_bid = sorted_bidders[0]
     runner_up_bid = sorted_bidders[1][1] if len(sorted_bidders) > 1 else 0
 
-    # Pay runner_up + 5 (as debt)
+    # Pay runner_up + 5 (as debt — credit absorbs first if any)
     amount_paid = runner_up_bid + 5
     winner = state.players[winner_idx]
-    winner.debt += amount_paid
+    _apply_debt(winner, amount_paid)
     winner.buildings_played.append(patent)
     # Apply the patent's rates to the winner's accumulated rates (most CSV
     # patents have empty rates; the mechanical effects are wired via hooks)

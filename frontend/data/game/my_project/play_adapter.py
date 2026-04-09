@@ -938,6 +938,7 @@ class PlayableGame:
                 "net_worth": p.net_worth(),
                 "money": p.money,
                 "debt": p.debt,
+                "credit": p.credit,
                 "contracts_fulfilled": p.contracts_fulfilled,
                 "buildings_played": p.building_names(),
                 "is_human": i == self.human_index,
@@ -977,6 +978,7 @@ def _player_dict(player: Player, is_human: bool, reveal_hand: bool = False) -> d
         "corporation": player.corporation,
         "money": player.money,
         "debt": player.debt,
+        "credit": player.credit,
         "net_worth": player.net_worth(),
         "rates": {r.value: v for r, v in player.rates.items()},
         # buildings_played keeps the original string-list shape for the
