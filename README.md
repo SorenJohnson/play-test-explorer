@@ -31,20 +31,41 @@ uv run pytest                                   # Run tests
 
 Rules summary and design notes are in [context/DESIGN-DOC.md](context/DESIGN-DOC.md).
 
-## What's implemented (v0.1.0)
+## What's implemented (v0.2.0)
 
+**Core game**
 - 3 corporations with asymmetric starting rates
 - 9 resources with market price dynamics
 - Building, selling, contract fulfillment
-- Power Bills, Debt Collection, Futures Settlements, PWR Adjust events
 - One-build-per-turn rule, pool swapping
 - 3 AI strategies (random, greedy, smart)
 - Per-player colors and editable seat names
 
+**Events**
+- Power Bills, Debt Collection, Futures Settlements, PWR Adjust
+- News Bulletins (rate_all / market_random / trigger effects from a 13-card news deck)
+- Draw Building Card events (refresh the pool)
+- Patent Auctions (silent auction with pre-declared human bids)
+- Redraw cascades (some events fire two cards in a single player-turn)
+- Configurable event deck via JSON in the New Game modal
+
+**Special buildings (Slot-4)**
+- Pleasure Dome (per-dome power-bill bonus)
+- Optimization Center (pre-futures rate boost)
+- Space Elevator (-1 to all contract requirements)
+- Hacker Array (passive on-sell market bump)
+- Patent Office (draw 2 patents on build, keep best)
+
+**Patents**
+- 10-card patent pile
+- Silent auction with `runner_up + $5` debt cost
+- Pre-declared human bids via the play UI; AI heuristic for non-declarers
+
 ## Not yet implemented
 
-- News events (market-moving / resource-costing)
-- Special buildings (Hacker Array, Space Elevator, Launch Pad, etc.)
-- Patent auctions
-- Discard-to-refresh-market, discard-two-for-guaranteed-contract
+- Launch Pad ("Free Action: Fulfill Contract") — needs per-turn action limits
+- News "resource cost" semantics (the rules mention this but it's not implemented yet)
+- Discard-to-refresh-market action
 - Sell-once-per-resource-per-turn limit
+- News event "redraw" semantics from the rules
+- Mid-event modal interruptions for human auction bids (currently uses pre-declaration)
