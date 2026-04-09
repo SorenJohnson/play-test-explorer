@@ -406,3 +406,86 @@ class TestContractCreditModel:
         p = Player(name="P", money=0, debt=0, credit=0)
         p.contracts_fulfilled = 5  # absurd but should not affect NW
         assert p.net_worth() == 0
+
+
+# --- Per-event detail line capture ---
+
+
+class TestEventLines:
+    """`state.last_event_lines` captures structured per-event detail records.
+
+    These tests pin down the headers and per-player rows that the play UI
+    surfaces in the expandable event log row.
+    """
+
+    def test_power_bill_emits_header_and_per_player_lines(self):
+        cards, contracts = _load_data()
+        state = GameState.create(cards, contracts, num_players=2)
+        # Player 0 sells PWR; player 1 owes PWR
+        state.players[0].rates[Resource.PWR] = 3
+        state.players[1].rates[Resource.PWR] = -2
+        # Reset before invocation since GameState.create may have populated it
+        state.last_event_lines = []
+        do_power_bill(state)
+
+        # First line is the header
+        assert len(state.last_event_lines) >= 1
+        assert state.last_event_lines[0]["kind"] == "header"
+        assert "Power Bill" in state.last_event_lines[0]["text"]
+
+        # Both players have a per-player row, in seat order
+        player_lines = [l for l in state.last_event_lines if l["kind"] == "player"]
+        assert len(player_lines) == 2
+        assert player_lines[0]["player_idx"] == 0
+        assert player_lines[1]["player_idx"] == 1
+        # Each per-player row carries an NW snapshot
+        for line in player_lines:
+            assert "money_after" in line
+            assert "debt_after" in line
+            assert "credit_after" in line
+            assert "net_worth_after" in line
+        # The seller earned (text starts with +$); the debtor owes (−$).
+        assert player_lines[0]["text"].startswith("+$")
+        assert player_lines[1]["text"].startswith("−$")
+
+    def test_debt_collection_emits_lines_only_for_charged_players(self):
+        cards, contracts = _load_data()
+        state = GameState.create(cards, contracts, num_players=3)
+        # Player 0 has debt → gets charged; players 1 and 2 don't
+        state.players[0].debt = 100
+        state.players[1].debt = 0
+        state.players[2].debt = 0
+        state.last_event_lines = []
+        do_debt_collection(state)
+
+        assert state.last_event_lines[0]["kind"] == "header"
+        player_lines = [l for l in state.last_event_lines if l["kind"] == "player"]
+        # Only player 0 should appear
+        assert len(player_lines) == 1
+        assert player_lines[0]["player_idx"] == 0
+        assert "interest" in player_lines[0]["text"]
+
+    def test_event_lines_clear_between_events(self):
+        """execute_event_with_redraws resets the line list at the top of
+        each fresh event chain."""
+        from my_project.simulation import (
+            execute_event_with_redraws,
+            EventCard,
+            EventType,
+        )
+        cards, contracts = _load_data()
+        state = GameState.create(cards, contracts, num_players=2)
+        state.players[0].rates[Resource.PWR] = 2
+        # Stage one event, run it, stage another
+        ev1 = EventCard(type=EventType.POWER_BILL)
+        execute_event_with_redraws(state, ev1, state.players[0])
+        first_count = len(state.last_event_lines)
+        assert first_count > 0
+
+        ev2 = EventCard(type=EventType.DEBT_COLLECTION)
+        execute_event_with_redraws(state, ev2, state.players[0])
+        # The list was reset and now contains only the second event's lines
+        # (which is just the header for a player with no debt).
+        assert all("Debt" in l["text"] or "interest" in l["text"]
+                   for l in state.last_event_lines)
+        assert state.last_event_lines[0]["text"] == "Debt Collection"

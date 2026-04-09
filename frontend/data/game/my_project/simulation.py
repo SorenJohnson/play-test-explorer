@@ -558,6 +558,18 @@ class GameState:
     bills_units_owed: dict[Resource, int] = field(default_factory=lambda: {r: 0 for r in Resource})
     futures_units_bought: dict[Resource, int] = field(default_factory=lambda: {r: 0 for r in Resource})
     futures_debt_per_resource: dict[Resource, int] = field(default_factory=lambda: {r: 0 for r in Resource})
+    # Per-event detail rows captured during the most recent event chain.
+    # Cleared at the start of execute_event_with_redraws and populated by
+    # _record_event_line as each do_* event runs. The play adapter snapshots
+    # this list and surfaces it to the UI for the expandable event log row.
+    # Lines are dicts shaped like:
+    #   {"kind": "header", "text": "Power Bill — PWR @ $4"}
+    #   {"kind": "note",   "text": "Energy Vault: +$40"}
+    #   {"kind": "player", "player_idx": 0, "name": "Alice",
+    #    "text": "+$12 (sold 3 PWR)",
+    #    "money_after": 112, "debt_after": 0, "credit_after": 0,
+    #    "net_worth_after": 112}
+    last_event_lines: list[dict] = field(default_factory=list)
     max_turns: int = DEFAULT_MAX_TURNS
 
     def remaining_events(self) -> dict[EventType, int]:
@@ -1398,6 +1410,31 @@ def _apply_debt(player: Player, amount: int) -> tuple[int, int]:
     return (credit_consumed, real_debt_added)
 
 
+def _record_event_line(
+    state: "GameState",
+    *,
+    kind: str,
+    text: str,
+    player: "Player | None" = None,
+) -> None:
+    """Append a single line to the current event's detail log.
+
+    `kind` is one of "header", "note", "player". For "player" lines, pass the
+    affected `player` so the line snapshots their post-action NW components.
+    The play adapter copies `state.last_event_lines` after every event resolves
+    and surfaces it to the UI.
+    """
+    line: dict = {"kind": kind, "text": text}
+    if player is not None:
+        line["player_idx"] = state.players.index(player)
+        line["name"] = player.name
+        line["money_after"] = player.money
+        line["debt_after"] = player.debt
+        line["credit_after"] = player.credit
+        line["net_worth_after"] = player.net_worth()
+    state.last_event_lines.append(line)
+
+
 def do_pwr_adjust(state: GameState, player: Player) -> None:
     """Adjust PWR market price based on active player's rate.
 
@@ -1421,6 +1458,9 @@ def do_power_bill(state: GameState) -> None:
     vault is exhausted regardless of whether it was fully consumed.
     """
     pwr_price = state.market.price(Resource.PWR)
+    _record_event_line(
+        state, kind="header", text=f"Power Bill — PWR @ ${pwr_price}"
+    )
     for player in state.players:
         # Combine the player's PWR rate with their Energy Vault remainder
         # for a single bill. The vault is consumed (set to 0) after the
@@ -1431,6 +1471,8 @@ def do_power_bill(state: GameState) -> None:
         if vault > 0:
             player.patent_state["energy_vault"] = 0
 
+        # Build the per-player text for the event log row.
+        bill_parts: list[str] = []
         if effective_rate > 0:
             earning = effective_rate * pwr_price
             player.money += earning
@@ -1439,6 +1481,10 @@ def do_power_bill(state: GameState) -> None:
             # Per-player: power bill earnings count as "sold" PWR
             player.flow_sold_units[Resource.PWR] += effective_rate
             player.flow_sell_revenue[Resource.PWR] += earning
+            vault_note = f", incl. {vault} from vault" if vault > 0 else ""
+            bill_parts.append(
+                f"+${earning} (sold {effective_rate} PWR{vault_note})"
+            )
         elif effective_rate < 0:
             shortage = abs(effective_rate)
             cost = shortage * pwr_price
@@ -1449,10 +1495,24 @@ def do_power_bill(state: GameState) -> None:
             # Per-player: power bill debt counts as "bought" PWR
             player.flow_bought_units[Resource.PWR] += shortage
             player.flow_buy_cost[Resource.PWR] += cost
+            bill_parts.append(
+                f"−${cost} (bought {shortage} PWR)"
+            )
+        elif vault > 0:
+            # Vault was non-empty but base rate cancelled it exactly.
+            bill_parts.append(f"vault drained ({vault} PWR), no bill")
         # Pleasure Dome bonus is added on top of normal bill processing.
         bonus = _pleasure_dome_bonus(state, player)
         if bonus > 0:
             player.money += bonus
+            bill_parts.append(f"+${bonus} dome bonus")
+        if bill_parts:
+            _record_event_line(
+                state,
+                kind="player",
+                player=player,
+                text=" · ".join(bill_parts),
+            )
 
 
 def do_debt_collection(state: GameState) -> None:
@@ -1466,12 +1526,25 @@ def do_debt_collection(state: GameState) -> None:
     sum of REAL debt added to OTHER players (not themselves) this round.
     Credit-absorbed amounts don't count for the FI payout.
     """
+    _record_event_line(state, kind="header", text="Debt Collection")
     debt_added: dict[int, int] = {}
     for idx, player in enumerate(state.players):
         interest = player.debt // DEBT_INTEREST_DIVISOR
+        if interest <= 0:
+            continue
         # Charge the interest through _apply_debt so any credit absorbs it
-        _, real_debt = _apply_debt(player, interest)
+        credit_used, real_debt = _apply_debt(player, interest)
         debt_added[idx] = real_debt
+        if real_debt > 0 and credit_used > 0:
+            text = (
+                f"+${interest} interest "
+                f"(${credit_used} absorbed by credit, ${real_debt} → debt ${player.debt})"
+            )
+        elif real_debt > 0:
+            text = f"+${interest} interest → debt ${player.debt}"
+        else:
+            text = f"+${interest} interest absorbed by credit (${player.credit} left)"
+        _record_event_line(state, kind="player", player=player, text=text)
 
     # Financial Instruments payout: for each owner, gain cash equal to the
     # sum of debt added to OTHER players this round.
@@ -1481,6 +1554,12 @@ def do_debt_collection(state: GameState) -> None:
         bonus = sum(amt for other_idx, amt in debt_added.items() if other_idx != idx)
         if bonus > 0:
             player.money += bonus
+            _record_event_line(
+                state,
+                kind="player",
+                player=player,
+                text=f"+${bonus} Financial Instruments payout",
+            )
 
 
 def do_futures_settlement(state: GameState) -> None:
@@ -1494,6 +1573,7 @@ def do_futures_settlement(state: GameState) -> None:
     pre-declared pick from `state.pending_oc_picks` if set; otherwise it
     auto-falls back to the highest-priced positive non-PWR rate.
     """
+    _record_event_line(state, kind="header", text="Futures Settlement")
     # Snapshot prices before any market shifts
     starting_prices = {r: state.market.price(r) for r in Resource if r != Resource.PWR}
     total_negatives: dict[Resource, int] = {r: 0 for r in starting_prices}
@@ -1518,9 +1598,16 @@ def do_futures_settlement(state: GameState) -> None:
                 continue
             target = max(candidates, key=lambda r: starting_prices[r])
         player.rates[target] = player.rate(target) + 1
+        _record_event_line(
+            state,
+            kind="note",
+            text=f"{player.name}: Optimization Center +1 {target.value}",
+        )
 
     # All players pay debt at the snapshot price
     for player in state.players:
+        per_resource_parts: list[str] = []
+        total_cost = 0
         for r in starting_prices:
             rate = player.rate(r)
             if rate < 0:
@@ -1535,6 +1622,17 @@ def do_futures_settlement(state: GameState) -> None:
                 # Per-player futures tracking
                 player.flow_futures_units[r] += shortage
                 player.flow_futures_cost[r] += cost
+                per_resource_parts.append(
+                    f"{shortage} {r.value} @ ${starting_prices[r]} = ${cost}"
+                )
+                total_cost += cost
+        if per_resource_parts:
+            _record_event_line(
+                state,
+                kind="player",
+                player=player,
+                text=f"−${total_cost} (settled " + ", ".join(per_resource_parts) + ")",
+            )
 
     # Market rises by total negative rates per resource (no buying, just adjust)
     for r, total in total_negatives.items():
@@ -1562,6 +1660,9 @@ def do_news(state: GameState, event: EventCard) -> str:
         parts.append(f"{r_str} {sign}{delta}")
     label = event.display_label()
     detail = ", ".join(parts) if parts else "no effect"
+    _record_event_line(state, kind="header", text=f"NEWS: {label}")
+    if parts:
+        _record_event_line(state, kind="note", text=detail)
     return f"NEWS: {label} ({detail})"
 
 
@@ -1588,7 +1689,9 @@ def _apply_news_effect(state: GameState, effect: NewsEffect, active_player: Play
                 p.rates[resource] = p.rate(resource) + delta
             sign = "+" if delta >= 0 else ""
             parts.append(f"All {sign}{delta} {r_str}")
-        return ", ".join(parts) or "no rate change"
+        text = ", ".join(parts) or "no rate change"
+        _record_event_line(state, kind="note", text=text)
+        return text
 
     if effect.kind == "market_random":
         resources = effect.payload.get("resources", [])
@@ -1601,7 +1704,9 @@ def _apply_news_effect(state: GameState, effect: NewsEffect, active_player: Play
                 state.market.adjust(resource, delta)
                 sign = "+" if delta >= 0 else ""
                 parts.append(f"{r_str} {sign}{delta}")
-        return ", ".join(parts) or "no market change"
+        text = ", ".join(parts) or "no market change"
+        _record_event_line(state, kind="note", text=text)
+        return text
 
     if effect.kind == "trigger":
         which = effect.payload.get("event")
@@ -1623,9 +1728,12 @@ def do_news_bulletin(state: GameState, active_player: Player) -> str:
     """Draw the top card from the news deck and apply all of its effects."""
     card = _draw_news_card(state)
     if card is None:
+        _record_event_line(state, kind="header", text="News Bulletin (deck empty)")
         return "news bulletin (deck empty)"
     if not card.effects:
+        _record_event_line(state, kind="header", text=f"NEWS: {card.name} (All Quiet)")
         return f"NEWS: {card.name} (All Quiet)"
+    _record_event_line(state, kind="header", text=f"NEWS: {card.name}")
     detail_parts = [_apply_news_effect(state, eff, active_player) for eff in card.effects]
     return f"NEWS: {card.name} ({'; '.join(detail_parts)})"
 
@@ -1636,9 +1744,11 @@ def do_draw_building_card(state: GameState) -> str:
     Pool size stays at POOL_SIZE: the new card replaces the oldest pool slot.
     """
     if not state.deck.cards and not state.deck.discard:
+        _record_event_line(state, kind="header", text="Draw Building Card (deck empty)")
         return "draw building card (deck empty)"
     drawn = state.deck.draw(1)
     if not drawn:
+        _record_event_line(state, kind="header", text="Draw Building Card (deck empty)")
         return "draw building card (deck empty)"
     new_card = drawn[0]
     if state.pool:
@@ -1646,6 +1756,7 @@ def do_draw_building_card(state: GameState) -> str:
         evicted = state.pool.pop(0)
         state.deck.discard.append(evicted)
     state.pool.append(new_card)
+    _record_event_line(state, kind="header", text=f"Drew {new_card.building} into pool")
     return f"draw building card → {new_card.building}"
 
 
@@ -1706,8 +1817,14 @@ def do_patent_auction(state: GameState) -> str:
     """
     patent = _draw_patent(state)
     if patent is None:
+        _record_event_line(
+            state, kind="header", text="Patent Auction (no patents left)"
+        )
         return "patent auction (no patents left)"
 
+    _record_event_line(
+        state, kind="header", text=f"Patent Auction — {patent.building}"
+    )
     bids: dict[int, int] = {}
     for idx, player in enumerate(state.players):
         if idx in state.pending_bids:
@@ -1717,12 +1834,56 @@ def do_patent_auction(state: GameState) -> str:
     # Clear the bid overrides; they're consumed by this single auction.
     state.pending_bids = {}
 
+    # Snapshot vault/hand_size BEFORE settling so we can detect acquisition
+    # effects (Energy Vault init, Thinking Machines draw) per-player.
+    pre_vault = [
+        p.patent_state.get("energy_vault", 0) for p in state.players
+    ]
+    pre_hand_size = [p.hand_size for p in state.players]
+
     result = settle_silent_auction(state, patent, bids)
+
+    # Per-player bid lines, showing the winner with "WON".
+    winner_idx = result[0] if result is not None else None
+    sorted_bidders = sorted(
+        ((idx, amt) for idx, amt in bids.items() if amt > 0),
+        key=lambda kv: (-kv[1], kv[0]),
+    )
+    for idx, amt in sorted_bidders:
+        suffix = " — WON" if idx == winner_idx else ""
+        _record_event_line(
+            state,
+            kind="player",
+            player=state.players[idx],
+            text=f"Bid ${amt}{suffix}",
+        )
+
     if result is None:
+        _record_event_line(state, kind="note", text="No bids")
         return f"patent auction ({patent.building}): no bids"
+
     winner_idx, amount = result
+    winner = state.players[winner_idx]
+    _record_event_line(
+        state,
+        kind="note",
+        text=f"{winner.name} pays ${amount} debt",
+    )
+    # Acquisition-effect notes
+    if winner.patent_state.get("energy_vault", 0) > pre_vault[winner_idx]:
+        _record_event_line(
+            state,
+            kind="note",
+            text=f"Energy Vault initialized: {winner.patent_state['energy_vault']} PWR",
+        )
+    if winner.hand_size > pre_hand_size[winner_idx]:
+        _record_event_line(
+            state,
+            kind="note",
+            text="Thinking Machines: drew 1 card, hand size +1",
+        )
     return (
-        f"patent auction: {state.players[winner_idx].name} "
+        f"patent auction: {winner.name} "
         f"won {patent.building} for ${amount} debt"
     )
 
@@ -1834,6 +1995,10 @@ def execute_event_with_redraws(
     detail. The play adapter exposes the prompt to the UI and calls
     resume_pending_event() once the prompt is resolved.
     """
+    # Reset per-event line capture for this fresh event chain. Subsequent
+    # chained redraws append to the same list.
+    state.last_event_lines = []
+
     # Check if THIS event needs a prompt before firing it
     prompt = _event_needs_prompt(state, event)
     if prompt is not None and _has_human_player(state):
@@ -1927,6 +2092,7 @@ def execute_event(state: GameState, event: EventCard, active_player: Player) -> 
         case EventType.PATENT_AUCTION:
             return do_patent_auction(state)
         case EventType.END_GAME:
+            _record_event_line(state, kind="header", text="END GAME")
             do_power_bill(state)
             do_futures_settlement(state)
             return "END GAME (final power bill + futures settlement)"

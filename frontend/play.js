@@ -26,7 +26,21 @@ let pyodide = null;
 let game = null;              // Pyodide proxy to PlayableGame instance
 let currentState = null;      // most recent state_dict result
 let currentLegal = null;      // most recent legal_human_actions result
-const turnLog = [];           // array of {turn, player, text, isHuman}
+// Tagged log entries — two flavors interleaved chronologically:
+//
+//   Player-actions row:
+//     {kind: "turn", turn, playerIdx, isHuman, actions: [...]}
+//
+//   Event row (pushed right after the turn row when the event resolves):
+//     {kind: "event", turn, triggeredBy, isHuman,
+//      summary: "Power Bill — PWR @ $4",
+//      lines: [{kind: "header"|"note"|"player", text, ...}, ...]}
+//
+// Each action is the per-action record returned by the backend, augmented
+// with `type`, `detail`, and post-action NW snapshot fields. Each event line
+// comes from `state.last_event_lines` on the Python side and may carry
+// per-player NW snapshot fields too.
+const turnLog = [];
 let marketChart = null;       // Chart.js instance for the price-history chart
 
 // Returns the player index whose hand/stats should fill the "You" panel.
@@ -1284,11 +1298,41 @@ function logEventResolution(result) {
   if (!result || !result.ok) return;
   // The detail string contains everything: who won the auction, the bid, etc.
   const detail = result.detail || (result.event && result.event.detail);
-  if (!detail || detail === "no event") return;
-  // Attach to the most recent log entry as its event.
-  if (turnLog.length > 0) {
-    turnLog[turnLog.length - 1].event = detail;
+  // event lines may live at the top level (human resume) or nested under
+  // result.event.lines (AI resume), depending on which finalizer fired.
+  const lines =
+    (result.lines && result.lines.length ? result.lines : null) ||
+    (result.event && result.event.lines) ||
+    [];
+  if ((!detail || detail === "no event") && lines.length === 0) return;
+  // Find the most recent in-flight event row from this resume chain (if any)
+  // and update it. Otherwise push a fresh event row.
+  // We identify "in-flight" by the placeholder summary "(event)" used when
+  // a paused auction first surfaced through logHumanTurnEnd / logAiTurn.
+  let target = null;
+  for (let i = turnLog.length - 1; i >= 0; i--) {
+    const e = turnLog[i];
+    if (e.kind === "event" && (e.summary === "(event)" || e.lines.length === 0)) {
+      target = e;
+      break;
+    }
+    if (e.kind === "turn") break;
   }
+  if (target) {
+    if (detail && detail !== "no event") target.summary = detail;
+    if (lines.length > 0) target.lines = lines;
+    return;
+  }
+  // No placeholder — push a fresh event row tied to the current state.
+  const s = currentState;
+  turnLog.push({
+    kind: "event",
+    turn: s ? s.turn_index + 1 : "?",
+    triggeredBy: s ? s.current_player_index : -1,
+    isHuman: false,
+    summary: detail || "(event)",
+    lines,
+  });
 }
 
 function renderPatentActions() {
@@ -1375,7 +1419,7 @@ function renderPatentActions() {
     weBtn.addEventListener("click", () => {
       const result = game.use_water_engine(youIdx).toJs({ dict_converter: Object.fromEntries });
       if (result.ok) {
-        logHumanAction(result.detail || "Used Water Engine");
+        logHumanAction(result);
       } else {
         alert(`Water Engine failed: ${result.reason}`);
       }
@@ -1387,7 +1431,7 @@ function renderPatentActions() {
     nanoBtn.addEventListener("click", () => {
       const result = game.use_nanotechnology(youIdx).toJs({ dict_converter: Object.fromEntries });
       if (result.ok) {
-        logHumanAction(result.detail || "Used Nanotechnology");
+        logHumanAction(result);
       } else {
         alert(`Nanotechnology failed: ${result.reason}`);
       }
@@ -1405,13 +1449,124 @@ function renderPatentActions() {
       const result = game.use_teleportation(youIdx, sel.value)
         .toJs({ dict_converter: Object.fromEntries });
       if (result.ok) {
-        logHumanAction(result.detail || "Used Teleportation");
+        logHumanAction(result);
       } else {
         alert(`Teleportation failed: ${result.reason}`);
       }
       refreshState();
     });
   }
+}
+
+function _nwParts(rec) {
+  const parts = [];
+  if (rec.money_after !== undefined && rec.money_after !== null) {
+    parts.push(`$${rec.money_after}`);
+  }
+  if (rec.debt_after) {
+    parts.push(`debt $${rec.debt_after}`);
+  }
+  if (rec.credit_after) {
+    parts.push(`credit $${rec.credit_after}`);
+  }
+  if (rec.net_worth_after !== undefined && rec.net_worth_after !== null) {
+    parts.push(`NW $${rec.net_worth_after}`);
+  }
+  return parts;
+}
+
+function renderTurnEntry(entry, s, humans) {
+  const idx = entry.playerIdx;
+  const player = s && idx >= 0 ? s.players[idx] : null;
+  const baseName = player ? player.name : "?";
+  const youSuffix = humans.includes(idx) ? " (You)" : "";
+  const color = idx >= 0 ? playerColor(idx) : "#21262d";
+  const cls = entry.isHuman ? "log-entry human" : "log-entry";
+  const actions = entry.actions || [];
+  const summary = actions.length
+    ? actions.map((a) => a.detail).join("; ")
+    : "Passed";
+  const lastNw = actions.length
+    ? actions[actions.length - 1].net_worth_after
+    : null;
+  const nwBadge =
+    lastNw !== undefined && lastNw !== null
+      ? `<span class="log-nw">NW $${lastNw}</span>`
+      : "";
+  const expandable = actions.length > 0;
+  const detailsRows = actions.map((a) => {
+    const parts = _nwParts(a);
+    const nwSuffix = parts.length
+      ? `<span class="log-action-nw">${parts.join(" · ")}</span>`
+      : "";
+    return `<div class="log-action">
+      <span class="log-action-detail">${a.detail || a.type}</span>
+      ${nwSuffix}
+    </div>`;
+  }).join("");
+  const summaryRow = `<summary class="log-summary">
+    <span class="turn-num">T${entry.turn}</span>
+    <span class="player-name">${baseName}${youSuffix}</span>
+    <span class="log-summary-text">${summary}</span>
+    ${nwBadge}
+  </summary>`;
+  if (expandable) {
+    return `<details class="${cls}" style="--player-color:${color}">
+      ${summaryRow}
+      <div class="log-actions-list">${detailsRows}</div>
+    </details>`;
+  }
+  // No actions to expand — render as a flat row.
+  return `<div class="${cls} log-entry-flat" style="--player-color:${color}">
+    <span class="turn-num">T${entry.turn}</span>
+    <span class="player-name">${baseName}${youSuffix}</span>
+    <span class="log-summary-text">${summary}</span>
+  </div>`;
+}
+
+function renderEventEntry(entry, humans) {
+  const lines = entry.lines || [];
+  const summary = entry.summary || "(event)";
+  // Header line: ⚡ icon + summary text + line count badge.
+  const headerRow = `<summary class="log-event-summary">
+    <span class="turn-num">T${entry.turn}</span>
+    <span class="event-tag">⚡</span>
+    <span class="log-summary-text">${summary}</span>
+  </summary>`;
+  // The body shows each structured line.
+  const bodyRows = lines.map((line) => {
+    if (line.kind === "header") {
+      return `<div class="log-event-line header">${line.text || ""}</div>`;
+    }
+    if (line.kind === "note") {
+      return `<div class="log-event-line note">${line.text || ""}</div>`;
+    }
+    // Per-player line.
+    const idx = line.player_idx;
+    const youSuffix = humans.includes(idx) ? " (You)" : "";
+    const color = idx >= 0 ? playerColor(idx) : "#8b949e";
+    const parts = _nwParts(line);
+    const nwSuffix = parts.length
+      ? `<span class="log-event-nw">${parts.join(" · ")}</span>`
+      : "";
+    return `<div class="log-event-line player" style="--player-color:${color}">
+      <span class="log-event-player-name">${line.name || "?"}${youSuffix}</span>
+      <span class="log-event-text">${line.text || ""}</span>
+      ${nwSuffix}
+    </div>`;
+  }).join("");
+  if (lines.length === 0) {
+    // Nothing to expand — render as a flat row.
+    return `<div class="log-entry log-event-entry log-entry-flat">
+      <span class="turn-num">T${entry.turn}</span>
+      <span class="event-tag">⚡</span>
+      <span class="log-summary-text">${summary}</span>
+    </div>`;
+  }
+  return `<details class="log-entry log-event-entry">
+    ${headerRow}
+    <div class="log-event-lines">${bodyRows}</div>
+  </details>`;
 }
 
 function renderLog() {
@@ -1422,19 +1577,9 @@ function renderLog() {
   }
   const s = currentState;
   const humans = (s && s.human_indices) || [];
-  el.innerHTML = turnLog.slice(-30).reverse().map((entry) => {
-    const idx = entry.playerIdx;
-    const player = s && idx >= 0 ? s.players[idx] : null;
-    const baseName = player ? player.name : "?";
-    const youSuffix = humans.includes(idx) ? " (You)" : "";
-    const color = idx >= 0 ? playerColor(idx) : "#21262d";
-    const cls = entry.isHuman ? "log-entry human" : "log-entry";
-    return `<div class="${cls}" style="--player-color:${color}">
-      <span class="turn-num">T${entry.turn}</span>
-      <span class="player-name">${baseName}${youSuffix}</span>
-      ${entry.text}
-      ${entry.event ? `<div style="margin-top:4px"><span class="event-tag">⚡ ${entry.event}</span></div>` : ""}
-    </div>`;
+  el.innerHTML = turnLog.slice(-60).reverse().map((entry) => {
+    if (entry.kind === "event") return renderEventEntry(entry, humans);
+    return renderTurnEntry(entry, s, humans);
   }).join("");
 }
 
@@ -1492,7 +1637,7 @@ function onBuild() {
   };
   applyHumanAction(action, (result) => {
     if (result.ok) {
-      logHumanAction(`Built ${result.buildings.join(", ")} for $${result.build_money_spent}`);
+      logHumanAction(result);
     }
   });
 }
@@ -1507,10 +1652,8 @@ function onSell() {
     hacker_direction: hackerDirection,
   };
   applyHumanAction(action, (result) => {
-    if (result.ok && result.sell_resource) {
-      logHumanAction(`Sold ${result.sell_amount} ${result.sell_resource} for $${result.sell_revenue}`);
-    } else if (result.ok) {
-      logHumanAction("Sold (no matching resources)");
+    if (result.ok) {
+      logHumanAction(result);
     }
   });
 }
@@ -1532,7 +1675,7 @@ function onContract() {
   };
   applyHumanAction(action, (result) => {
     if (result.ok) {
-      logHumanAction(`Fulfilled contract (${result.contract_label}) for $${result.contract_reward}`);
+      logHumanAction(result);
     }
   });
 }
@@ -1576,55 +1719,111 @@ function onPass() {
 
 // --- Log helpers ---
 
-function logHumanAction(text) {
+// Returns the in-progress human turn row, creating one if none exists.
+// Reuses the most recent entry only if it's still the active turn row for
+// this (turn, player) combo — once an event row has been pushed for this
+// turn, the turn is closed and a new turn row would start fresh.
+function getCurrentHumanLogEntry() {
   const s = currentState;
-  turnLog.push({
-    turn: s.turn_index + 1,
-    playerIdx: s.current_player_index,
-    text,
+  const turn = s.turn_index + 1;
+  const playerIdx = s.current_player_index;
+  if (turnLog.length > 0) {
+    const last = turnLog[turnLog.length - 1];
+    if (
+      last.kind === "turn" &&
+      last.isHuman &&
+      last.turn === turn &&
+      last.playerIdx === playerIdx
+    ) {
+      return last;
+    }
+  }
+  const entry = {
+    kind: "turn",
+    turn,
+    playerIdx,
     isHuman: true,
-    event: null,
-  });
+    actions: [],
+  };
+  turnLog.push(entry);
+  return entry;
+}
+
+function _normalizeAction(a) {
+  return {
+    type: a.type || "action",
+    detail: a.detail || "",
+    buildings: a.buildings || [],
+    build_money_spent: a.build_money_spent,
+    sell_resource: a.sell_resource,
+    sell_amount: a.sell_amount,
+    sell_revenue: a.sell_revenue,
+    contract_label: a.contract_label,
+    contract_reward: a.contract_reward,
+    money_after: a.money_after,
+    debt_after: a.debt_after,
+    credit_after: a.credit_after,
+    net_worth_after: a.net_worth_after,
+  };
+}
+
+function logHumanAction(result) {
+  const entry = getCurrentHumanLogEntry();
+  entry.actions.push(_normalizeAction(result));
   render();
 }
 
+// Push an event row right after the human's turn row. Always emits a row
+// if either a summary string or any structured lines were returned, even
+// when the player took no actions (so the turn row stays empty but the
+// event still appears in the log).
 function logHumanTurnEnd(eventResult) {
-  // Mark the last human entry with the event that fired
-  const lastHuman = [...turnLog].reverse().find((e) => e.isHuman);
-  const eventText = eventResult.detail && eventResult.detail !== "no event" ? eventResult.detail : null;
-  if (lastHuman && eventText) {
-    lastHuman.event = eventText;
-  } else if (eventText) {
-    // The human may have passed with no actions
-    const s = currentState;
-    turnLog.push({
-      turn: s.turn_index + 1,
-      playerIdx: s.current_player_index,
-      text: "Passed",
-      isHuman: true,
-      event: eventText,
-    });
-  }
+  // Make sure a turn row exists in case the human passed with no actions.
+  getCurrentHumanLogEntry();
+  const summary =
+    eventResult.detail && eventResult.detail !== "no event"
+      ? eventResult.detail
+      : null;
+  const lines = eventResult.lines || [];
+  if (!summary && lines.length === 0) return;
+  const s = currentState;
+  turnLog.push({
+    kind: "event",
+    turn: s.turn_index + 1,
+    triggeredBy: s.current_player_index,
+    isHuman: true,
+    summary: summary || "(event)",
+    lines,
+  });
 }
 
 function logAiTurn(result) {
   if (!result.ok) return;
   const s = currentState;
   const turnNum = s ? s.turn_index + 1 : "?";
-  const actionText = result.actions.length
-    ? result.actions.map((a) => a.detail).join("; ")
-    : "Passed";
-  const eventText =
-    result.event && result.event.detail && result.event.detail !== "no event"
-      ? result.event.detail
-      : null;
+  // Always push the turn row (even if no actions, so the player is still
+  // attributed in the log).
   turnLog.push({
+    kind: "turn",
     turn: turnNum,
     playerIdx: result.player_index,
-    text: actionText,
     isHuman: false,
-    event: eventText,
+    actions: (result.actions || []).map(_normalizeAction),
   });
+  // Then push the event row if anything happened.
+  const ev = result.event || {};
+  const summary = ev.detail && ev.detail !== "no event" ? ev.detail : null;
+  const lines = ev.lines || [];
+  if (summary || lines.length > 0) {
+    turnLog.push({
+      kind: "event",
+      turn: turnNum,
+      triggeredBy: result.player_index,
+      isHuman: false,
+      summary: summary || "(event)",
+      lines,
+    });
+  }
 }
 
 // --- End-game ---

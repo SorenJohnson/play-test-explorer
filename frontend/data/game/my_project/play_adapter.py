@@ -312,6 +312,7 @@ class PlayableGame:
             return {
                 "type": event.type.value,
                 "detail": event_detail,
+                "lines": list(self.state.last_event_lines),
                 "awaiting_prompt": True,
             }
         return self._finalize_human_turn(event, event_detail)
@@ -323,7 +324,11 @@ class PlayableGame:
         self.human_turn_in_progress = False
         self._active_player_idx = -1
         self._snapshot_market(turn=self.state.turn)
-        return {"type": event.type.value, "detail": event_detail}
+        return {
+            "type": event.type.value,
+            "detail": event_detail,
+            "lines": list(self.state.last_event_lines),
+        }
 
     def apply_human_action(self, action: dict) -> dict:
         """Apply a single action for the human player.
@@ -357,7 +362,7 @@ class PlayableGame:
             if record is None:
                 return {"ok": False, "reason": "Cannot afford build (or duplicate special)"}
             self._turn_action_records.append(record)
-            return _record_to_dict(record, ok=True)
+            return _record_to_dict(record, ok=True, player=player)
 
         if atype == "sell":
             idx = action.get("card_idx", -1)
@@ -374,7 +379,7 @@ class PlayableGame:
                 hacker_direction=int(action.get("hacker_direction", 0) or 0),
             )
             self._turn_action_records.append(record)
-            return _record_to_dict(record, ok=True)
+            return _record_to_dict(record, ok=True, player=player)
 
         if atype == "contract":
             card_idx = action.get("card_idx", -1)
@@ -401,7 +406,7 @@ class PlayableGame:
             if record is None:
                 return {"ok": False, "reason": "Cannot fulfill contract"}
             self._turn_action_records.append(record)
-            return _record_to_dict(record, ok=True)
+            return _record_to_dict(record, ok=True, player=player)
 
         return {"ok": False, "reason": f"Unknown action type: {atype}"}
 
@@ -449,7 +454,12 @@ class PlayableGame:
         player.rates[Resource.H2O] = player.rate(Resource.H2O) - 1
         player.rates[Resource.PWR] = player.rate(Resource.PWR) + 2
         player.has_used_water_engine_this_turn = True
-        return {"ok": True, "detail": "Water Engine: -1 H2O, +2 PWR"}
+        return {
+            "ok": True,
+            "type": "patent",
+            "detail": "Water Engine: -1 H2O, +2 PWR",
+            **_nw_snapshot(player),
+        }
 
     def use_nanotechnology(self, seat_idx: int) -> dict:
         """Nanotechnology: discard the entire hand and draw the same number
@@ -465,14 +475,24 @@ class PlayableGame:
         if n == 0:
             # Mark as used to prevent infinite UI clicks; otherwise no-op
             player.has_used_nanotechnology_this_turn = True
-            return {"ok": True, "detail": "Nanotechnology: empty hand, no-op"}
+            return {
+                "ok": True,
+                "type": "patent",
+                "detail": "Nanotechnology: empty hand, no-op",
+                **_nw_snapshot(player),
+            }
         # Discard entire hand
         self.state.deck.discard.extend(player.hand)
         player.hand = []
         # Draw same number back
         player.hand.extend(self.state.deck.draw(n))
         player.has_used_nanotechnology_this_turn = True
-        return {"ok": True, "detail": f"Nanotechnology: discarded and redrew {n} cards"}
+        return {
+            "ok": True,
+            "type": "patent",
+            "detail": f"Nanotechnology: discarded and redrew {n} cards",
+            **_nw_snapshot(player),
+        }
 
     def use_teleportation(self, seat_idx: int, resource: str) -> dict:
         """Teleportation: free sell action. Player picks any positive
@@ -501,7 +521,9 @@ class PlayableGame:
         player.has_used_teleportation_this_turn = True
         return {
             "ok": True,
+            "type": "patent",
             "detail": f"Teleportation: sold {resource} for ${price}, -1 PWR",
+            **_nw_snapshot(player),
         }
 
     # --- Mid-event prompt resolution ---
@@ -559,6 +581,7 @@ class PlayableGame:
                     "ok": True,
                     "awaiting_prompt": True,
                     "detail": full_detail,
+                    "lines": list(self.state.last_event_lines),
                 }
             finalized = self._finalize_human_turn(event, full_detail)
             return {"ok": True, **finalized}
@@ -571,7 +594,12 @@ class PlayableGame:
             full_detail = (old_detail + " | " + detail) if old_detail else detail
             if self.state.pending_prompt is not None:
                 self.last_event = full_detail
-                return {"ok": True, "awaiting_prompt": True, "detail": full_detail}
+                return {
+                    "ok": True,
+                    "awaiting_prompt": True,
+                    "detail": full_detail,
+                    "lines": list(self.state.last_event_lines),
+                }
             finalized = self._finalize_ai_turn(
                 ai_state["acting_player_idx"],
                 ai_state["actions_log"],
@@ -633,7 +661,7 @@ class PlayableGame:
                 break
             record = self._execute_ai_action(player, action)
             if record is not None:
-                actions_log.append(_record_to_dict(record, ok=True))
+                actions_log.append(_record_to_dict(record, ok=True, player=player))
             actions_taken += 1
 
         # Draw
@@ -662,6 +690,7 @@ class PlayableGame:
                 "event": {
                     "type": event.type.value,
                     "detail": event_detail,
+                    "lines": list(self.state.last_event_lines),
                 },
                 "awaiting_prompt": True,
             }
@@ -680,7 +709,11 @@ class PlayableGame:
             "ok": True,
             "player_index": acting_player_idx,
             "actions": actions_log,
-            "event": {"type": event.type.value, "detail": event_detail},
+            "event": {
+                "type": event.type.value,
+                "detail": event_detail,
+                "lines": list(self.state.last_event_lines),
+            },
         }
 
     def _execute_ai_action(self, player: Player, action: Action):
@@ -1018,8 +1051,29 @@ def _player_dict(player: Player, is_human: bool, reveal_hand: bool = False) -> d
     }
 
 
-def _record_to_dict(record, ok: bool = True) -> dict:
+def _nw_snapshot(player: Player) -> dict:
+    """Return a dict of the player's current NW components.
+
+    Used by the patent active-action methods so their results carry the
+    same after-action snapshot as `_record_to_dict`, letting the play log
+    show how each action moved the bottom line.
+    """
     return {
+        "money_after": player.money,
+        "debt_after": player.debt,
+        "credit_after": player.credit,
+        "net_worth_after": player.net_worth(),
+    }
+
+
+def _record_to_dict(record, ok: bool = True, player: Player | None = None) -> dict:
+    """Serialize an action record for the play UI.
+
+    If `player` is supplied, snapshots the player's POST-action net worth
+    components (money / debt / credit / net_worth) so the frontend can
+    show how each individual action moved the bottom line.
+    """
+    out = {
         "ok": ok,
         "type": record.action_type,
         "detail": record.detail,
@@ -1032,3 +1086,9 @@ def _record_to_dict(record, ok: bool = True) -> dict:
         "contract_label": record.contract_label,
         "contract_reward": record.contract_reward,
     }
+    if player is not None:
+        out["money_after"] = player.money
+        out["debt_after"] = player.debt
+        out["credit_after"] = player.credit
+        out["net_worth_after"] = player.net_worth()
+    return out

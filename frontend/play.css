@@ -533,6 +533,136 @@ body {
 .log-entry .event-tag {
   color: #f0883e;
 }
+/* Expandable log entries — <details> elements */
+details.log-entry {
+  cursor: pointer;
+}
+details.log-entry > summary.log-summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+details.log-entry > summary.log-summary::-webkit-details-marker {
+  display: none;
+}
+details.log-entry > summary.log-summary::before {
+  content: "▸";
+  color: #6e7681;
+  margin-right: 4px;
+  font-size: 0.7rem;
+}
+details.log-entry[open] > summary.log-summary::before {
+  content: "▾";
+}
+.log-entry .log-summary-text {
+  color: #c9d1d9;
+  flex: 1;
+  min-width: 0;
+}
+.log-entry .log-nw {
+  color: #7ee787;
+  font-weight: 600;
+  margin-left: auto;
+}
+.log-actions-list {
+  margin-top: 6px;
+  margin-left: 24px;
+  padding-left: 8px;
+  border-left: 1px solid #30363d;
+}
+.log-action {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 0.78rem;
+}
+.log-action-detail {
+  color: #c9d1d9;
+}
+.log-action-nw {
+  color: #8b949e;
+  white-space: nowrap;
+}
+.log-event-row {
+  margin-top: 6px;
+  margin-left: 24px;
+}
+.log-entry-flat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+/* Event rows — dedicated row pushed right after the player's actions row */
+details.log-event-entry {
+  border-left: 3px solid #f0883e;
+  cursor: pointer;
+}
+details.log-event-entry > summary.log-event-summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+details.log-event-entry > summary.log-event-summary::-webkit-details-marker {
+  display: none;
+}
+details.log-event-entry > summary.log-event-summary::before {
+  content: "▸";
+  color: #6e7681;
+  margin-right: 4px;
+  font-size: 0.7rem;
+}
+details.log-event-entry[open] > summary.log-event-summary::before {
+  content: "▾";
+}
+.log-event-entry.log-entry-flat {
+  border-left: 3px solid #f0883e;
+}
+.log-event-lines {
+  margin-top: 6px;
+  margin-left: 24px;
+  padding-left: 8px;
+  border-left: 1px solid #30363d;
+}
+.log-event-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 0.78rem;
+}
+.log-event-line.header {
+  color: #f0883e;
+  font-weight: 600;
+}
+.log-event-line.note {
+  color: #8b949e;
+  font-style: italic;
+}
+.log-event-line.player {
+  border-left: 2px solid var(--player-color, #21262d);
+  padding-left: 6px;
+}
+.log-event-player-name {
+  color: var(--player-color, #58a6ff);
+  font-weight: 600;
+  min-width: 70px;
+}
+.log-event-text {
+  color: #c9d1d9;
+  flex: 1;
+  min-width: 0;
+}
+.log-event-nw {
+  color: #8b949e;
+  white-space: nowrap;
+  margin-left: auto;
+}
 
 /* End-game overlay */
 #endgame-overlay {
