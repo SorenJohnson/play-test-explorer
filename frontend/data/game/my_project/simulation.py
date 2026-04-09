@@ -99,7 +99,9 @@ class Player:
     debt: int = 0
     rates: dict[Resource, int] = field(default_factory=lambda: {r: 0 for r in Resource})
     hand: list[Card] = field(default_factory=list)
-    buildings_played: list[str] = field(default_factory=list)
+    # Cards the player has built. Each entry is the original Card so special-
+    # building handlers can read its `effect` field at activation/trigger time.
+    buildings_played: list[Card] = field(default_factory=list)
     contracts_fulfilled: int = 0
     hand_size: int = HAND_SIZE
     ledger: CostLedger = field(default_factory=CostLedger.create)
@@ -128,13 +130,17 @@ class Player:
         for ra in card.rates:
             self.rates[ra.resource] = self.rates.get(ra.resource, 0) + ra.amount
 
+    def building_names(self) -> list[str]:
+        """Names of buildings the player has constructed, in build order."""
+        return [c.building for c in self.buildings_played]
+
     def snapshot(self) -> dict:
         return {
             "money": self.money,
             "debt": self.debt,
             "net_worth": self.net_worth(),
             "rates": {r.value: v for r, v in self.rates.items()},
-            "buildings_played": list(self.buildings_played),
+            "buildings_played": self.building_names(),
             "contracts_fulfilled": self.contracts_fulfilled,
         }
 
@@ -721,7 +727,7 @@ def execute_build(
     # Apply rates to player
     for card in build_cards:
         player.apply_rates(card)
-        player.buildings_played.append(card.building)
+        player.buildings_played.append(card)
 
     # Remove cards from hand (highest indices first to avoid shifting) → discard pile
     all_indices = sorted(set(build_indices) | set(discard_indices), reverse=True)

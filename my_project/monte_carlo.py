@@ -81,7 +81,9 @@ def _summarize_game(state: GameState) -> GameSummary:
     final_debt = [p.debt for p in state.players]
     final_net_worth = [p.net_worth() for p in state.players]
     contracts = [p.contracts_fulfilled for p in state.players]
-    buildings = [list(p.buildings_played) for p in state.players]
+    # Flatten Card → name string at the monte_carlo boundary so the JSON
+    # output schema and downstream analytics stay unchanged.
+    buildings = [p.building_names() for p in state.players]
     rates = [{r.value: v for r, v in p.rates.items()} for p in state.players]
     final_market = state.market.snapshot()
     corporations = [p.corporation for p in state.players]

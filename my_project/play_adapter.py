@@ -578,7 +578,7 @@ class PlayableGame:
                 "money": p.money,
                 "debt": p.debt,
                 "contracts_fulfilled": p.contracts_fulfilled,
-                "buildings_played": list(p.buildings_played),
+                "buildings_played": p.building_names(),
                 "is_human": i == self.human_index,
             }
             for i, p in enumerate(self.state.players)
@@ -618,7 +618,11 @@ def _player_dict(player: Player, is_human: bool, reveal_hand: bool = False) -> d
         "debt": player.debt,
         "net_worth": player.net_worth(),
         "rates": {r.value: v for r, v in player.rates.items()},
-        "buildings_played": list(player.buildings_played),
+        # buildings_played keeps the original string-list shape for the
+        # existing UI / analytics consumers. built_cards is the parallel
+        # rich form (one dict per built card) used by special-building UI.
+        "buildings_played": player.building_names(),
+        "built_cards": [_card_dict(c) for c in player.buildings_played],
         "contracts_fulfilled": player.contracts_fulfilled,
         "hand_size": len(player.hand),
         "hand": [_card_dict(c) for c in player.hand] if reveal_hand else [],
