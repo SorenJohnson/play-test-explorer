@@ -177,7 +177,14 @@ class EventType(StrEnum):
     POWER_BILL = "power_bill"
     DEBT_COLLECTION = "debt_collection"
     FUTURES_SETTLEMENT = "futures_settlement"
+    # Direct news with payload-based market deltas (for ad-hoc JSON config).
     NEWS = "news"
+    # Draws and resolves a card from the news deck (data-driven via Events.csv).
+    NEWS_BULLETIN = "news_bulletin"
+    # Refreshes the building pool by drawing a fresh card.
+    DRAW_BUILDING_CARD = "draw_building_card"
+    # Stub for the future patent auction system. Currently a no-op.
+    PATENT_AUCTION = "patent_auction"
     END_GAME = "end_game"
 
 
@@ -189,18 +196,76 @@ class EventCard:
     needed. The optional `payload` dict carries per-event parameters for
     data-driven events like NEWS. `label` is a human-readable display string
     for the turn log; if empty, falls back to `type.value`.
+
+    `redraws=True` means: after firing this card's effect, the engine
+    immediately draws and fires the NEXT event card too as part of the same
+    player-turn. The deck must be sized to account for these extra
+    consumptions (build_event_deck handles this).
     """
     type: EventType
     payload: dict | None = None
     label: str = ""
+    redraws: bool = False
 
     def display_label(self) -> str:
         return self.label or self.type.value
 
 
-def _ec(t: EventType) -> EventCard:
+def _ec(t: EventType, redraws: bool = False) -> EventCard:
     """Shorthand for creating a simple (no-payload) EventCard."""
-    return EventCard(type=t)
+    return EventCard(type=t, redraws=redraws)
+
+
+# --- News deck ---
+
+
+@dataclass
+class NewsEffect:
+    """A single effect on a news card.
+
+    `kind` selects the handler:
+      - "rate_all": apply rate deltas to every player. payload = {"FOOD": -1, ...}
+      - "market_random": roll the d20 distribution N times for each listed
+            resource. payload = {"resources": ["H2O", ...], "rolls": 1}
+      - "trigger": re-fire one of the standard event types in-place.
+            payload = {"event": "power_bill"|"debt_collection"|"futures_settlement"}
+    """
+    kind: str
+    payload: dict
+
+
+@dataclass
+class NewsCard:
+    name: str
+    effects: list[NewsEffect] = field(default_factory=list)
+
+
+# Hardcoded effect dispatch keyed by exact card name from Events.csv (the
+# "NEWS: " prefix is stripped before lookup). The CSV's freeform Effect column
+# is documentation; the truth lives here.
+NEWS_EFFECTS: dict[str, list[NewsEffect]] = {
+    "Colonist Shuttle":         [NewsEffect("rate_all", {"PWR": -1, "O2": -1})],
+    "Population Growth":        [NewsEffect("rate_all", {"PWR": -1, "FOOD": -1})],
+    "Infrastructure Added":     [NewsEffect("rate_all", {"PWR": -1, "H2O": -1})],
+    "MARSQUAKE":                [NewsEffect("rate_all", {"PWR": -1, "FE": -1})],
+    "Wage Increases":           [NewsEffect("rate_all", {"GLS": -1, "ELX": -1})],
+    "Life Support Volatile":    [NewsEffect("market_random", {"resources": ["H2O", "O2", "FOOD"], "rolls": 1})],
+    "Raw Materials Volatile":   [NewsEffect("market_random", {"resources": ["FE", "C", "SI"], "rolls": 1})],
+    "Consumer Goods Volatile":  [NewsEffect("market_random", {"resources": ["GLS", "ELX"], "rolls": 1})],
+    "Power Market Volatile":    [NewsEffect("market_random", {"resources": ["PWR"], "rolls": 2})],
+    "All Quiet":                [],
+    "Debt Collection":          [NewsEffect("trigger", {"event": "debt_collection"})],
+    "Power Bill":               [NewsEffect("trigger", {"event": "power_bill"})],
+    "Futures Settlement":       [NewsEffect("trigger", {"event": "futures_settlement"})],
+}
+
+# Same d20 distribution used by GameState.create's randomize_market roll.
+_D20_DELTAS = [3, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, -2, -2, -2, -3, -3, -4, -4, 0]
+
+
+def build_default_news_deck() -> list[NewsCard]:
+    """Build a fresh news deck containing one card per entry in NEWS_EFFECTS."""
+    return [NewsCard(name=name, effects=list(effects)) for name, effects in NEWS_EFFECTS.items()]
 
 
 @dataclass
@@ -208,21 +273,57 @@ class EventDeckConfig:
     """Configurable composition for the event deck.
 
     Each count field accepts either a fixed int or a (min, max) tuple for
-    random variation. Defaults match the original hardcoded module constants
-    so existing behavior is preserved when no config is supplied.
+    random variation. Defaults are sourced from default_event_counts() which
+    encodes the Events.csv composition (player-count conditionals included).
+
+    `news_pool` is the JSON-friendly direct-NEWS pool (legacy NEWS event type
+    with explicit market_deltas in payload). The data-driven NEWS_BULLETIN
+    flow uses the news deck on GameState, populated from NEWS_EFFECTS.
     """
-    power_bill_count: int | tuple[int, int] = field(
-        default_factory=lambda: POWER_BILL_RANGE
-    )
-    debt_collection_count: int | tuple[int, int] = field(
-        default_factory=lambda: DEBT_COLLECTION_RANGE
-    )
-    futures_settlement_count: int | tuple[int, int] = field(
-        default_factory=lambda: FUTURES_SETTLEMENT_RANGE
-    )
+    power_bill_count: int | tuple[int, int] | None = None
+    debt_collection_count: int | tuple[int, int] | None = None
+    futures_settlement_count: int | tuple[int, int] | None = None
+    news_bulletin_count: int | tuple[int, int] | None = None
+    patent_auction_count: int | tuple[int, int] | None = None
+    draw_building_count: int | tuple[int, int] | None = None
+    draw_building_redraw_count: int | tuple[int, int] | None = None
+    # Legacy direct-NEWS payload pool (used by the JSON Advanced section).
     news_pool: list[EventCard] = field(default_factory=list)
     news_count: int | tuple[int, int] = 0
     pwr_adjust_fraction: float = PWR_ADJUST_FRACTION
+
+
+def default_event_counts(num_players: int) -> dict[str, int]:
+    """Return the default per-event-type counts for a given player count.
+
+    These values mirror Events.csv. The player-count conditionals from the
+    CSV (3-4P Patent Auction vs 2P News Bulletin, redraw flags on Draw
+    Building Card) are resolved here.
+    """
+    # Base counts from Events.csv rows 2-10
+    counts = {
+        "news_bulletin": 3,
+        "debt_collection": 2,
+        "power_bill": 1,
+        "futures_settlement": 1,
+        "patent_auction": 3,
+        "draw_building": 5,         # row 9: regular draws (no redraw at 3-4P)
+        "draw_building_redraw": 5,  # row 10: redraw at 2-3P
+    }
+    # Row 7 conditional: 3-4P → Patent Auction, 2P → News Bulletin
+    if num_players >= 3:
+        counts["patent_auction"] += 1
+    else:
+        counts["news_bulletin"] += 1
+    # Row 9 redraws at 2P
+    if num_players == 2:
+        counts["draw_building_redraw"] += counts["draw_building"]
+        counts["draw_building"] = 0
+    # Row 10 redraws at 2-3P (already in counts as redraw); at 4P+ they're regular
+    if num_players >= 4:
+        counts["draw_building"] += counts["draw_building_redraw"]
+        counts["draw_building_redraw"] = 0
+    return counts
 
 
 def _resolve_count(spec: int | tuple[int, int]) -> int:
@@ -232,43 +333,71 @@ def _resolve_count(spec: int | tuple[int, int]) -> int:
     return spec
 
 
+def _resolve_or_default(spec, default):
+    """Use the user-supplied count if given, else fall back to the default int."""
+    if spec is None:
+        return default
+    return _resolve_count(spec)
+
+
 def build_event_deck(
     num_turns: int,
     num_players: int,
     config: EventDeckConfig | None = None,
 ) -> list[EventCard]:
-    """Build a shuffled event deck with one card per player-turn.
+    """Build a shuffled event deck for one full game.
 
-    The last slot is always END_GAME (fires final power bill + futures
-    settlement). The remaining slots are filled per the config (or module
-    defaults). PWR_ADJUST_FRACTION of leftover slots become PWR adjustments,
-    the rest are no-events.
+    Composition defaults come from default_event_counts(num_players). The
+    deck is sized to num_turns * num_players PLUS the number of redraw
+    cards, since each redraw consumes an extra event slot during play.
+    The last card is always END_GAME.
+
+    Any user-supplied EventDeckConfig fields override the defaults; fields
+    left as None use default_event_counts.
     """
     cfg = config or EventDeckConfig()
-    total = num_turns * num_players
-    # Reserve last slot for END_GAME
-    reg_slots = max(0, total - 1)
+    defaults = default_event_counts(num_players)
+
+    n_news_bulletin = _resolve_or_default(cfg.news_bulletin_count, defaults["news_bulletin"])
+    n_debt = _resolve_or_default(cfg.debt_collection_count, defaults["debt_collection"])
+    n_power = _resolve_or_default(cfg.power_bill_count, defaults["power_bill"])
+    n_futures = _resolve_or_default(cfg.futures_settlement_count, defaults["futures_settlement"])
+    n_patent = _resolve_or_default(cfg.patent_auction_count, defaults["patent_auction"])
+    n_draw_reg = _resolve_or_default(cfg.draw_building_count, defaults["draw_building"])
+    n_draw_redraw = _resolve_or_default(cfg.draw_building_redraw_count, defaults["draw_building_redraw"])
 
     events: list[EventCard] = []
-    events.extend([_ec(EventType.POWER_BILL)] * _resolve_count(cfg.power_bill_count))
-    events.extend([_ec(EventType.DEBT_COLLECTION)] * _resolve_count(cfg.debt_collection_count))
-    events.extend([_ec(EventType.FUTURES_SETTLEMENT)] * _resolve_count(cfg.futures_settlement_count))
+    events.extend([_ec(EventType.NEWS_BULLETIN)] * n_news_bulletin)
+    events.extend([_ec(EventType.DEBT_COLLECTION)] * n_debt)
+    events.extend([_ec(EventType.POWER_BILL)] * n_power)
+    events.extend([_ec(EventType.FUTURES_SETTLEMENT)] * n_futures)
+    events.extend([_ec(EventType.PATENT_AUCTION)] * n_patent)
+    events.extend([_ec(EventType.DRAW_BUILDING_CARD)] * n_draw_reg)
+    events.extend([_ec(EventType.DRAW_BUILDING_CARD, redraws=True)] * n_draw_redraw)
 
-    # News events — sample from the provided pool with replacement.
-    # `random.choices` allows duplicates so news_count can exceed pool size.
+    # Legacy direct-NEWS pool (JSON Advanced section). Sampled with replacement.
     news_n = _resolve_count(cfg.news_count)
     if news_n > 0 and cfg.news_pool:
         events.extend(random.choices(cfg.news_pool, k=news_n))
 
-    # Truncate if over capacity
-    if len(events) > reg_slots:
-        events = events[:reg_slots]
+    # Size the deck to player_turns + redraws so each player-turn gets at
+    # least one event after redraws have consumed extras.
+    player_turns = num_turns * num_players
+    redraw_count = sum(1 for ec in events if ec.redraws)
+    target_size = player_turns + redraw_count
 
-    remaining = reg_slots - len(events)
-    if remaining > 0:
-        pwr_adjusts = int(remaining * cfg.pwr_adjust_fraction)
+    # Truncate if the structured composition already exceeds target size.
+    if len(events) > target_size - 1:  # -1 leaves room for END_GAME
+        events = events[: target_size - 1]
+        redraw_count = sum(1 for ec in events if ec.redraws)
+        target_size = player_turns + redraw_count
+
+    # Pad with PWR_ADJUST / NO_EVENT fillers up to target_size - 1.
+    fillers_needed = (target_size - 1) - len(events)
+    if fillers_needed > 0:
+        pwr_adjusts = int(fillers_needed * cfg.pwr_adjust_fraction)
         events.extend([_ec(EventType.PWR_ADJUST)] * pwr_adjusts)
-        events.extend([_ec(EventType.NO_EVENT)] * (remaining - pwr_adjusts))
+        events.extend([_ec(EventType.NO_EVENT)] * (fillers_needed - pwr_adjusts))
 
     random.shuffle(events)
     # END_GAME always goes at the bottom (fires on the final player-turn)
@@ -342,6 +471,10 @@ class GameState:
     available_contracts: list[Contract]
     pool: list[Card]
     event_deck: list[EventCard]
+    # News deck consumed by NEWS_BULLETIN events. Drawn without replacement;
+    # reshuffled when exhausted via _shuffle_news_deck().
+    news_deck: list[NewsCard] = field(default_factory=list)
+    news_idx: int = 0
     turn: int = 0
     event_idx: int = 0
     history: list[TurnRecord] = field(default_factory=list)
@@ -379,6 +512,7 @@ class GameState:
         corporation_rates: list[dict[Resource, int]] | None = None,
         event_deck_config: EventDeckConfig | None = None,
         event_deck: list[EventCard] | None = None,
+        news_deck: list[NewsCard] | None = None,
     ) -> GameState:
         market = Market.create(start_market_pos)
 
@@ -404,6 +538,12 @@ class GameState:
         # Build event deck (use explicit deck if provided, else build from config)
         if event_deck is None:
             event_deck = build_event_deck(max_turns, num_players, event_deck_config)
+
+        # Build news deck (defaults to one card per NEWS_EFFECTS entry,
+        # shuffled). Callers can supply a custom list for tests / playtesting.
+        if news_deck is None:
+            news_deck = build_default_news_deck()
+            random.shuffle(news_deck)
 
         # Create players. Assign unique corporations randomly (capped at # of corps).
         corp_pool = list(CORPORATIONS)
@@ -439,6 +579,7 @@ class GameState:
             available_contracts=available,
             pool=pool,
             event_deck=event_deck,
+            news_deck=news_deck,
             max_turns=max_turns,
         )
 
@@ -799,6 +940,119 @@ def do_news(state: GameState, event: EventCard) -> str:
     return f"NEWS: {label} ({detail})"
 
 
+def _draw_news_card(state: GameState) -> NewsCard | None:
+    """Draw the next card from the news deck. Reshuffle if exhausted."""
+    if not state.news_deck:
+        return None
+    if state.news_idx >= len(state.news_deck):
+        random.shuffle(state.news_deck)
+        state.news_idx = 0
+    card = state.news_deck[state.news_idx]
+    state.news_idx += 1
+    return card
+
+
+def _apply_news_effect(state: GameState, effect: NewsEffect, active_player: Player) -> str:
+    """Apply a single news effect, returning a short detail string."""
+    if effect.kind == "rate_all":
+        # Apply rate deltas to every player in the game.
+        parts = []
+        for r_str, delta in effect.payload.items():
+            resource = Resource(r_str)
+            for p in state.players:
+                p.rates[resource] = p.rate(resource) + delta
+            sign = "+" if delta >= 0 else ""
+            parts.append(f"All {sign}{delta} {r_str}")
+        return ", ".join(parts) or "no rate change"
+
+    if effect.kind == "market_random":
+        resources = effect.payload.get("resources", [])
+        rolls = int(effect.payload.get("rolls", 1))
+        parts = []
+        for r_str in resources:
+            resource = Resource(r_str)
+            for _ in range(rolls):
+                delta = random.choice(_D20_DELTAS)
+                state.market.adjust(resource, delta)
+                sign = "+" if delta >= 0 else ""
+                parts.append(f"{r_str} {sign}{delta}")
+        return ", ".join(parts) or "no market change"
+
+    if effect.kind == "trigger":
+        which = effect.payload.get("event")
+        if which == "power_bill":
+            do_power_bill(state)
+            return "→ power bill"
+        if which == "debt_collection":
+            do_debt_collection(state)
+            return "→ debt collection"
+        if which == "futures_settlement":
+            do_futures_settlement(state)
+            return "→ futures settlement"
+        return f"unknown trigger: {which}"
+
+    return f"unknown effect: {effect.kind}"
+
+
+def do_news_bulletin(state: GameState, active_player: Player) -> str:
+    """Draw the top card from the news deck and apply all of its effects."""
+    card = _draw_news_card(state)
+    if card is None:
+        return "news bulletin (deck empty)"
+    if not card.effects:
+        return f"NEWS: {card.name} (All Quiet)"
+    detail_parts = [_apply_news_effect(state, eff, active_player) for eff in card.effects]
+    return f"NEWS: {card.name} ({'; '.join(detail_parts)})"
+
+
+def do_draw_building_card(state: GameState) -> str:
+    """Refresh the pool by drawing a fresh card from the building deck.
+
+    Pool size stays at POOL_SIZE: the new card replaces the oldest pool slot.
+    """
+    if not state.deck.cards and not state.deck.discard:
+        return "draw building card (deck empty)"
+    drawn = state.deck.draw(1)
+    if not drawn:
+        return "draw building card (deck empty)"
+    new_card = drawn[0]
+    if state.pool:
+        # FIFO: evict the oldest pool slot back to the discard pile.
+        evicted = state.pool.pop(0)
+        state.deck.discard.append(evicted)
+    state.pool.append(new_card)
+    return f"draw building card → {new_card.building}"
+
+
+def do_patent_auction(state: GameState) -> str:
+    """Stub: patent auction system isn't implemented yet (Phase 2 milestone)."""
+    return "patent auction (skipped — not implemented)"
+
+
+def execute_event_with_redraws(
+    state: GameState,
+    event: EventCard,
+    active_player: Player,
+) -> str:
+    """Execute an event and any cascading redraws.
+
+    If the event has `redraws=True`, immediately draws and executes the next
+    event card from the deck (advancing event_idx). Continues chaining as
+    long as each fired card has `redraws=True`. The deck is sized in
+    build_event_deck to account for these extra consumptions.
+
+    Redraws may chain into END_GAME, which fires its effects inline as part
+    of the same player-turn. The detail string concatenates each fired event.
+    """
+    detail = execute_event(state, event, active_player)
+    while event.redraws and state.event_idx < len(state.event_deck):
+        next_event = state.event_deck[state.event_idx]
+        state.event_idx += 1
+        detail = detail + " | " + execute_event(state, next_event, active_player)
+        event = next_event
+    return detail
+
+
 def execute_event(state: GameState, event: EventCard, active_player: Player) -> str:
     """Execute an event card and return a description."""
     match event.type:
@@ -818,6 +1072,12 @@ def execute_event(state: GameState, event: EventCard, active_player: Player) -> 
             return "futures settlement"
         case EventType.NEWS:
             return do_news(state, event)
+        case EventType.NEWS_BULLETIN:
+            return do_news_bulletin(state, active_player)
+        case EventType.DRAW_BUILDING_CARD:
+            return do_draw_building_card(state)
+        case EventType.PATENT_AUCTION:
+            return do_patent_auction(state)
         case EventType.END_GAME:
             do_power_bill(state)
             do_futures_settlement(state)
@@ -878,8 +1138,8 @@ def run_turn(state: GameState, player: Player, strategy, event: EventCard) -> No
     if needed > 0:
         player.hand.extend(state.deck.draw(needed))
 
-    # Execute event
-    event_detail = execute_event(state, event, player)
+    # Execute event (with cascading redraws if applicable)
+    event_detail = execute_event_with_redraws(state, event, player)
 
     detail_strs = [r.detail for r in action_records]
     state.history.append(TurnRecord(

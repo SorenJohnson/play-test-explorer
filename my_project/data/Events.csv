@@ -1,0 +1,23 @@
+Count,Name,Effect
+3,News Bulletin,Draw from News Deck
+2,Debt Collection,Players gain $1 debt per $10 debt (minus Contracts)
+1,Power Bill,"Players gain/lose Price x Rate, Pleasure Dome"
+1,Futures Settlement,"Optimization Center, Reconcile Resources"
+3,Patent Auction,Draw Patent card and Auction it off
+1,3-4P: Patent Auction,2P: News Deck
+1,End Round/Game,"Futures Settlement, Power Bill"
+5,Draw Building Card,2P: Redraw
+5,Draw Building Card,2-3P: Redraw
+1,NEWS: Colonist Shuttle,"All Players: -1 PWR, -1 O2"
+1,NEWS: Population Growth,"All Players: -1 PWR, -1 FOOD"
+1,NEWS: Infrastructure Added,"All Players: -1 PWR, -1 H2O"
+1,NEWS: MARSQUAKE,"All Players: -1 PWR, -1 FE"
+1,NEWS: Wage Increases,"All Players: -1 GLS, -1 ELX"
+1,NEWS: Life Support Volatile,"Change H2O, O2, FOOD price by 1d20"
+1,NEWS: Raw Materials Volatile,"Change FE, C, SI price by 1d20"
+1,NEWS: Consumer Goods Volatile,"Change GLS, ELX price by 1d20"
+1,NEWS: Power Market Volatile,Change PWR price by 1d20 twice
+1,NEWS: All Quiet,Nothing Happens
+1,NEWS: Debt Collection,Players gain $1 debt per $10 debt (minus Contracts)
+1,NEWS: Power Bill,"Players gain/lose Price x Rate, Pleasure Dome"
+1,NEWS: Futures Settlement,"Players gain/lose Price x Rate, Pleasure Dome"

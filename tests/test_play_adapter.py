@@ -354,7 +354,12 @@ def test_last_player_gets_full_turn_before_end_game():
             result = game.step_ai_turn()
             if upcoming_turn == 24:
                 assert result["ok"]
-                assert result["event"]["type"] == "end_game"
+                # END_GAME may fire as the primary event OR as a chained event
+                # from a redraw. Check the detail string instead of the type
+                # field, since the type reports the FIRST card pulled.
+                assert "END GAME" in result["event"]["detail"], (
+                    f"Turn 24 did not fire END_GAME. event={result['event']}"
+                )
                 last_player_had_fresh_turn = True  # proven by successful step
         safety += 1
         assert safety < 50, "Game didn't terminate"

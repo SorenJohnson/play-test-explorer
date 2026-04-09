@@ -43,7 +43,7 @@ from my_project.simulation import (
     compute_build_deficit,
     execute_build,
     execute_contract,
-    execute_event,
+    execute_event_with_redraws,
     execute_sell,
     swap_pool_card,
 )
@@ -113,8 +113,14 @@ class PlayableGame:
     # When a turn is in progress, event_idx has been pre-advanced, so
     # `event_idx % num_players` would point at the NEXT player. This field
     # records the index of the player whose turn is currently in progress.
-    # -1 means no turn is in progress (use event_idx-based calculation).
+    # -1 means no turn is in progress (use _turn_count-based calculation).
     _active_player_idx: int = field(default=-1, init=False)
+    # Logical player-turn counter, decoupled from event_idx so that redraw
+    # events (which consume multiple cards per turn) don't break the
+    # whose-turn-is-it cycle. Increments by 1 per begin_human_turn /
+    # step_ai_turn call. Mid-turn this is the 1-indexed turn currently in
+    # progress; between turns it's the count of completed turns.
+    _turn_count: int = field(default=0, init=False)
 
     def __post_init__(self) -> None:
         # Resolve seats first; if omitted, derive from legacy num_players + human_index.
@@ -177,19 +183,24 @@ class PlayableGame:
         return self._active_player_idx >= 0
 
     def is_over(self) -> bool:
-        # If a turn is in progress, event_idx has been pre-advanced so
-        # comparing against len(event_deck) would incorrectly report "over"
-        # on the final turn. Treat the game as not-over while a turn is in
-        # progress; it becomes over after the turn finishes.
+        # Game ends when we've played all the player-turns OR the event deck
+        # is exhausted (which can happen if redraws consume END_GAME early).
         if self._turn_in_progress():
             return False
+        if self._turn_count >= self.max_turns * self.num_players:
+            return True
         return self.state.event_idx >= len(self.state.event_deck)
 
     def current_player_index(self) -> int:
-        """Index of the player whose turn is now active (0-based)."""
+        """Index of the player whose turn is now active (0-based).
+
+        Pre-redraws this could be derived from event_idx % num_players, but
+        with redraws consuming variable cards per turn we track the player
+        cycle via _turn_count instead.
+        """
         if self._turn_in_progress():
             return self._active_player_idx
-        return self.state.event_idx % self.num_players
+        return self._turn_count % self.num_players
 
     def is_human_turn(self) -> bool:
         return self.current_player_index() in self._human_indices and not self.is_over()
@@ -199,17 +210,14 @@ class PlayableGame:
 
     def turn_number(self) -> int:
         """1-indexed player turn number (out of max_turns * num_players)."""
-        # Subtract one during active turn because event_idx was pre-advanced.
         if self._turn_in_progress():
-            return self.state.event_idx
-        return self.state.event_idx + 1
+            return self._turn_count
+        return self._turn_count + 1
 
     def round_number(self) -> int:
         """1-indexed round (1..max_turns). Each round is num_players player-turns."""
-        effective_idx = (
-            self.state.event_idx - 1 if self._turn_in_progress() else self.state.event_idx
-        )
-        return (effective_idx // self.num_players) + 1
+        effective = self._turn_count - 1 if self._turn_in_progress() else self._turn_count
+        return (effective // self.num_players) + 1
 
     # --- Human turn control ---
 
@@ -222,8 +230,9 @@ class PlayableGame:
         self.state.turn += 1
         self.human_turn_in_progress = True
         self._turn_action_records = []
-        # Record which player is acting before we advance event_idx
-        self._active_player_idx = self.state.event_idx % self.num_players
+        # Record which player is acting via _turn_count, BEFORE incrementing it.
+        self._active_player_idx = self._turn_count % self.num_players
+        self._turn_count += 1
         # Reset per-turn state (rule: one build action per turn)
         self.state.players[self._active_player_idx].has_built_this_turn = False
         # Pre-advance event_idx and stash the current turn's event so that
@@ -250,7 +259,7 @@ class PlayableGame:
         # Fire the pre-stashed event. event_idx was already advanced in
         # begin_human_turn; do NOT advance it again here.
         event = self._pending_event
-        event_detail = execute_event(self.state, event, player)
+        event_detail = execute_event_with_redraws(self.state, event, player)
         self._pending_event = None
         self.last_event = event_detail
 
@@ -359,11 +368,13 @@ class PlayableGame:
         if self.is_human_turn():
             return {"ok": False, "reason": "It's the human's turn"}
 
-        # Record active player and pre-advance event_idx BEFORE the action
-        # phase runs, so the strategy's remaining_events() call does not
-        # include the current turn's event (matching simulation.run_game).
-        acting_player_idx = self.state.event_idx % self.num_players
+        # Record active player via _turn_count, BEFORE incrementing it.
+        # event_idx pre-advances independently so the strategy's
+        # remaining_events() call does not include the current turn's event
+        # (matching simulation.run_game).
+        acting_player_idx = self._turn_count % self.num_players
         self._active_player_idx = acting_player_idx
+        self._turn_count += 1
         player = self.state.players[acting_player_idx]
         event = self.state.event_deck[self.state.event_idx]
         self.state.event_idx += 1
@@ -401,7 +412,7 @@ class PlayableGame:
             player.hand.extend(self.state.deck.draw(needed))
 
         # Event. event_idx was already advanced above; do NOT advance it again.
-        event_detail = execute_event(self.state, event, player)
+        event_detail = execute_event_with_redraws(self.state, event, player)
         self.last_event = event_detail
         self.last_ai_actions = actions_log
 

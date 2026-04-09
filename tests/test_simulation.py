@@ -62,20 +62,42 @@ class TestMarket:
 
 
 class TestEventDeck:
-    def test_deck_size(self):
-        deck = build_event_deck(15, 3)
-        assert len(deck) == 45
+    def test_deck_size_includes_redraw_buffer(self):
+        """Deck is sized to player_turns + redraw_count so each turn fires
+        at least one event after redraws have consumed extras."""
+        deck = build_event_deck(8, 3)
+        player_turns = 8 * 3
+        redraw_count = sum(1 for ec in deck if ec.redraws)
+        assert len(deck) == player_turns + redraw_count
 
-    def test_deck_composition(self):
+    def test_deck_composition_3p_defaults(self):
+        """At 3 players, the default Events.csv composition is exact."""
         deck = build_event_deck(8, 3)
         counts = {et: sum(1 for ec in deck if ec.type == et) for et in EventType}
-        assert 3 <= counts[EventType.POWER_BILL] <= 4
-        assert 2 <= counts[EventType.DEBT_COLLECTION] <= 4
-        assert 3 <= counts[EventType.FUTURES_SETTLEMENT] <= 4
+        # CSV defaults at 3P (after the row 7 conditional resolves to Patent Auction)
+        assert counts[EventType.NEWS_BULLETIN] == 3
+        assert counts[EventType.DEBT_COLLECTION] == 2
+        assert counts[EventType.POWER_BILL] == 1
+        assert counts[EventType.FUTURES_SETTLEMENT] == 1
+        assert counts[EventType.PATENT_AUCTION] == 4  # 3 base + 1 from row 7
+        assert counts[EventType.END_GAME] == 1
+        # Draw building cards: 5 regular + 5 redraw at 3P
+        assert counts[EventType.DRAW_BUILDING_CARD] == 10
+        redraw_count = sum(1 for ec in deck if ec.redraws)
+        assert redraw_count == 5
 
-    def test_small_deck_truncates(self):
-        deck = build_event_deck(2, 1)  # only 2 slots
-        assert len(deck) == 2
+    def test_2p_uses_news_bulletin_for_row7(self):
+        """At 2P, the row 7 conditional resolves to News Bulletin instead."""
+        deck = build_event_deck(8, 2)
+        counts = {et: sum(1 for ec in deck if ec.type == et) for et in EventType}
+        assert counts[EventType.NEWS_BULLETIN] == 4  # 3 base + 1 from row 7
+        assert counts[EventType.PATENT_AUCTION] == 3  # base, no +1
+
+    def test_4p_has_no_draw_building_redraws(self):
+        """At 4P, both Draw Building Card rows are non-redraw."""
+        deck = build_event_deck(8, 4)
+        redraw_count = sum(1 for ec in deck if ec.redraws)
+        assert redraw_count == 0
 
 
 class TestPwrAdjust:
