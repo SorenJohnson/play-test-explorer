@@ -614,3 +614,55 @@ body {
 .new-game-buttons .primary-btn {
   margin-left: 0;
 }
+
+/* Advanced — event deck section */
+#ng-advanced {
+  border-top: 1px solid #21262d;
+  padding-top: 12px;
+}
+#ng-advanced > summary {
+  cursor: pointer;
+  color: #8b949e;
+  font-size: 0.85rem;
+  list-style: revert;
+}
+#ng-advanced > summary:hover {
+  color: #c9d1d9;
+}
+#ng-advanced .advanced-help {
+  color: #8b949e;
+  font-size: 0.75rem;
+  margin: 8px 0 6px;
+  line-height: 1.4;
+}
+#ng-advanced .advanced-help code {
+  background: #21262d;
+  border: 1px solid #30363d;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.7rem;
+}
+#ng-event-config {
+  width: 100%;
+  min-height: 180px;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  color: #c9d1d9;
+  padding: 8px 10px;
+  border-radius: 4px;
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  resize: vertical;
+}
+#ng-event-config:focus {
+  outline: 1px solid #58a6ff;
+  border-color: #58a6ff;
+}
+.advanced-error {
+  color: #f85149;
+  font-size: 0.75rem;
+  margin-top: 6px;
+  min-height: 1.2em;
+  white-space: pre-wrap;
+}

@@ -116,12 +116,31 @@ async function loadPythonSources() {
 
 // --- Game lifecycle ---
 
+// Default JSON shown in the New Game modal's Advanced section. Mirrors the
+// Python EventDeckConfig defaults so the user has a working starting point.
+// `news_pool` is empty by default; populating it and bumping `news_count`
+// turns on news events.
+const DEFAULT_EVENT_CONFIG = {
+  power_bill_count: [3, 4],
+  debt_collection_count: [2, 4],
+  futures_settlement_count: [3, 4],
+  news_count: 0,
+  news_pool: [],
+  pwr_adjust_fraction: 0.5,
+};
+
+// Pretty-printed string used to seed the textarea on first load.
+const DEFAULT_EVENT_CONFIG_TEXT = JSON.stringify(DEFAULT_EVENT_CONFIG, null, 2);
+
 // Last-used config so the New Game modal pre-fills with the previous settings.
 let lastGameConfig = {
   seats: ["human", "smart", "smart"],
   names: ["Player_1", "Player_2", "Player_3"],
   rounds: 8,
   seed: null,
+  // Raw textarea contents — kept as a string so user formatting/comments survive
+  // round-trips through the modal.
+  eventConfigText: DEFAULT_EVENT_CONFIG_TEXT,
 };
 
 // Default name for a seat index — matches the engine's `Player_{i+1}` format
@@ -147,8 +166,58 @@ function startNewGame(config = null) {
   const seatsLiteral = "[" + cfg.seats.map((s) => `"${s}"`).join(", ") + "]";
   const namesArr = (cfg.names || []).map((n, i) => n || defaultSeatName(i));
   const namesLiteral = "[" + namesArr.map((n) => JSON.stringify(n)).join(", ") + "]";
+
+  // Build the EventDeckConfig kwarg, only if the user provided non-default JSON.
+  // The Python side parses the JSON and turns dict entries into EventDeckConfig
+  // / EventCard instances. Tuples are written as Python tuples via lists →
+  // tuple() coercion in the helper.
+  const eventConfig = cfg.eventConfig || null;
+  let extraKwargs = "";
+  if (eventConfig) {
+    const json = JSON.stringify(eventConfig);
+    // Stash the JSON in a Python global, then build EventDeckConfig from it.
+    // Done in a separate runPython call so we can keep the main constructor
+    // call readable.
+    pyodide.runPython(`
+import json as _json
+from my_project.simulation import EventDeckConfig as _EDC, EventCard as _EC, EventType as _ET
+_raw = _json.loads(${JSON.stringify(json)})
+
+def _coerce_count(v):
+    if isinstance(v, list) and len(v) == 2:
+        return (int(v[0]), int(v[1]))
+    return int(v)
+
+def _coerce_news(items):
+    out = []
+    for item in items or []:
+        out.append(_EC(
+            type=_ET.NEWS,
+            label=item.get("label", ""),
+            payload={"market_deltas": item.get("market_deltas", {})},
+        ))
+    return out
+
+_kw = {}
+if "power_bill_count" in _raw:
+    _kw["power_bill_count"] = _coerce_count(_raw["power_bill_count"])
+if "debt_collection_count" in _raw:
+    _kw["debt_collection_count"] = _coerce_count(_raw["debt_collection_count"])
+if "futures_settlement_count" in _raw:
+    _kw["futures_settlement_count"] = _coerce_count(_raw["futures_settlement_count"])
+if "news_count" in _raw:
+    _kw["news_count"] = _coerce_count(_raw["news_count"])
+if "news_pool" in _raw:
+    _kw["news_pool"] = _coerce_news(_raw["news_pool"])
+if "pwr_adjust_fraction" in _raw:
+    _kw["pwr_adjust_fraction"] = float(_raw["pwr_adjust_fraction"])
+_event_deck_config = _EDC(**_kw)
+`);
+    extraKwargs = ", event_deck_config=_event_deck_config";
+  }
+
   pyodide.runPython(
-    `game = PlayableGame(seed=${seed}, seats=${seatsLiteral}, names=${namesLiteral}, max_turns=${cfg.rounds})`
+    `game = PlayableGame(seed=${seed}, seats=${seatsLiteral}, names=${namesLiteral}, max_turns=${cfg.rounds}${extraKwargs})`
   );
   game = pyodide.globals.get("game");
   turnLog.length = 0;
@@ -190,6 +259,11 @@ function populateNewGameForm(cfg) {
   numSeatsSelect.value = String(cfg.seats.length);
   document.getElementById("ng-rounds").value = String(cfg.rounds);
   document.getElementById("ng-seed").value = cfg.seed === null ? "" : String(cfg.seed);
+  document.getElementById("ng-event-config").value =
+    cfg.eventConfigText || DEFAULT_EVENT_CONFIG_TEXT;
+  // Clear any leftover error message from the previous open.
+  const errEl = document.getElementById("ng-config-error");
+  if (errEl) errEl.textContent = "";
   renderSeatRows(cfg.seats, cfg.names || []);
   numSeatsSelect.onchange = () => {
     const n = parseInt(numSeatsSelect.value, 10);
@@ -248,7 +322,58 @@ function readNewGameConfig() {
   const rounds = parseInt(document.getElementById("ng-rounds").value, 10) || 8;
   const seedRaw = document.getElementById("ng-seed").value.trim();
   const seed = seedRaw === "" ? null : parseInt(seedRaw, 10);
-  return { seats, names: filledNames, rounds, seed: Number.isNaN(seed) ? null : seed };
+  const eventConfigText = document.getElementById("ng-event-config").value;
+  return {
+    seats,
+    names: filledNames,
+    rounds,
+    seed: Number.isNaN(seed) ? null : seed,
+    eventConfigText,
+  };
+}
+
+// Parse the event-deck JSON textarea. Returns {ok: true, parsed} or
+// {ok: false, error}. Empty / whitespace-only text is treated as "no
+// custom config" and parsed === null.
+function parseEventConfig(text) {
+  const trimmed = (text || "").trim();
+  if (!trimmed) return { ok: true, parsed: null };
+  let parsed;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch (err) {
+    return { ok: false, error: `JSON parse error: ${err.message}` };
+  }
+  if (typeof parsed !== "object" || Array.isArray(parsed) || parsed === null) {
+    return { ok: false, error: "Top-level event config must be a JSON object." };
+  }
+  // Light validation — surface obvious mistakes early instead of letting
+  // Pyodide raise a less-friendly traceback.
+  const known = new Set([
+    "power_bill_count",
+    "debt_collection_count",
+    "futures_settlement_count",
+    "news_count",
+    "news_pool",
+    "pwr_adjust_fraction",
+  ]);
+  for (const key of Object.keys(parsed)) {
+    if (!known.has(key)) {
+      return { ok: false, error: `Unknown field: ${key}` };
+    }
+  }
+  if (parsed.news_pool !== undefined && !Array.isArray(parsed.news_pool)) {
+    return { ok: false, error: "news_pool must be an array." };
+  }
+  for (const [i, card] of (parsed.news_pool || []).entries()) {
+    if (typeof card !== "object" || card === null) {
+      return { ok: false, error: `news_pool[${i}] must be an object.` };
+    }
+    if (card.market_deltas !== undefined && (typeof card.market_deltas !== "object" || Array.isArray(card.market_deltas))) {
+      return { ok: false, error: `news_pool[${i}].market_deltas must be an object.` };
+    }
+  }
+  return { ok: true, parsed };
 }
 
 function clearSelection() {
@@ -821,6 +946,19 @@ function wireButtons() {
   document.getElementById("ng-start-btn").addEventListener("click", () => {
     const cfg = readNewGameConfig();
     if (!cfg.seats.length) return;
+    // Validate the event-config JSON inline so the user sees the error in the
+    // modal instead of a Pyodide traceback in the console.
+    const errEl = document.getElementById("ng-config-error");
+    const parseResult = parseEventConfig(cfg.eventConfigText);
+    if (!parseResult.ok) {
+      if (errEl) errEl.textContent = parseResult.error;
+      // Auto-open the Advanced section so the user actually sees the error.
+      const adv = document.getElementById("ng-advanced");
+      if (adv) adv.open = true;
+      return;
+    }
+    if (errEl) errEl.textContent = "";
+    cfg.eventConfig = parseResult.parsed;  // null if textarea was empty
     startNewGame(cfg);
   });
   document.getElementById("ng-cancel-btn").addEventListener("click", () => {

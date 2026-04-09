@@ -156,6 +156,22 @@
             <label for="ng-seed">Seed</label>
             <input type="text" id="ng-seed" placeholder="random">
           </div>
+          <details id="ng-advanced">
+            <summary>Advanced — event deck</summary>
+            <div class="form-row" style="margin-top:8px;">
+              <label for="ng-preset">Preset</label>
+              <select id="ng-preset">
+                <option value="default">Default</option>
+              </select>
+            </div>
+            <div class="advanced-help">
+              JSON for event deck composition. Counts can be a number or
+              <code>[min, max]</code>. <code>news_pool</code> is a list of news cards;
+              <code>news_count</code> draws that many at random from the pool.
+            </div>
+            <textarea id="ng-event-config" spellcheck="false"></textarea>
+            <div id="ng-config-error" class="advanced-error"></div>
+          </details>
         </div>
         <div class="new-game-buttons">
           <button id="ng-start-btn" class="primary-btn">Start Game</button>
