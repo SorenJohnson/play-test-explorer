@@ -319,25 +319,28 @@ class TestCarbonScrubbing:
         assert record is not None
         assert p.money == money_before
 
-    def test_strips_c_from_negative_rates(self):
+    def test_does_not_strip_negative_c_rate(self):
+        """The patent only affects build-time costs, NOT per-turn negative
+        rates. A card with -1 C rate keeps that rate even with the patent."""
         state, p = _setup_player_with_patent("Carbon Scrubbing")
         card = _build_card("CarbonDrain", rates=[(Resource.PWR, 1), (Resource.C, -1)])
         c_before = p.rate(Resource.C)
         pwr_before = p.rate(Resource.PWR)
         _execute_single_build(state, p, card)
-        # C rate unchanged (the -1 was stripped)
-        assert p.rate(Resource.C) == c_before
-        # PWR rate gained +1 (the positive PWR rate was kept)
+        # The -1 C rate is preserved (Carbon Scrubbing only affects costs)
+        assert p.rate(Resource.C) == c_before - 1
+        # PWR rate gained +1
         assert p.rate(Resource.PWR) == pwr_before + 1
 
-    def test_strips_o2_from_negative_rates(self):
+    def test_does_not_strip_negative_o2_rate(self):
         state, p = _setup_player_with_patent("Carbon Scrubbing")
         card = _build_card("OxygenDrain", rates=[(Resource.O2, -2)])
         o2_before = p.rate(Resource.O2)
         _execute_single_build(state, p, card)
-        assert p.rate(Resource.O2) == o2_before
+        # The -2 O2 rate is preserved
+        assert p.rate(Resource.O2) == o2_before - 2
 
-    def test_does_not_strip_other_resources(self):
+    def test_does_not_strip_other_resource_costs(self):
         state, p = _setup_player_with_patent("Carbon Scrubbing")
         card = _build_card("WaterCost", costs=[(Resource.H2O, 1)], rates=[(Resource.PWR, 1)])
         # Player has 1 H2O rate to cover the cost
@@ -348,8 +351,7 @@ class TestCarbonScrubbing:
         assert p.money == money_before
 
     def test_does_not_strip_positive_c_or_o2(self):
-        """The patent only strips negative C/O2 rates and C/O2 costs.
-        Positive rates are kept."""
+        """The patent only strips C/O2 from costs. Positive rates are kept."""
         state, p = _setup_player_with_patent("Carbon Scrubbing")
         card = _build_card("Producer", rates=[(Resource.C, 2), (Resource.O2, 1)])
         c_before = p.rate(Resource.C)
@@ -482,6 +484,57 @@ class TestEnergyVault:
         pwr_price = state.market.price(Resource.PWR)
         assert p.money == money_before + 7 * pwr_price
         # Vault is now exhausted
+        assert p.patent_state["energy_vault"] == 0
+
+    def test_power_bill_combines_rate_and_vault_into_one_transaction(self):
+        """The vault folds into the player's effective PWR rate for the
+        bill — one transaction, not two separate ones."""
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        p.buildings_played.append(_patent("Energy Vault"))
+        p.patent_state["energy_vault"] = 7
+        p.rates[Resource.PWR] = 3  # base rate is +3 PWR
+        money_before = p.money
+        do_power_bill(state)
+        pwr_price = state.market.price(Resource.PWR)
+        # Effective rate = 3 + 7 = 10 → earnings = 10 × price
+        assert p.money == money_before + 10 * pwr_price
+        # Vault exhausted after the bill
+        assert p.patent_state["energy_vault"] == 0
+
+    def test_power_bill_vault_offsets_negative_rate(self):
+        """A negative PWR rate is offset by the vault: 10 vault + (-3) rate
+        = +7 effective. Result: earnings of 7 × price, no debt."""
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        p.buildings_played.append(_patent("Energy Vault"))
+        p.patent_state["energy_vault"] = 10
+        p.rates[Resource.PWR] = -3
+        money_before = p.money
+        debt_before = p.debt
+        do_power_bill(state)
+        pwr_price = state.market.price(Resource.PWR)
+        assert p.money == money_before + 7 * pwr_price
+        assert p.debt == debt_before  # no debt, vault absorbed the negative
+        assert p.patent_state["energy_vault"] == 0
+
+    def test_power_bill_vault_partially_offsets_large_negative(self):
+        """A large negative rate is partially offset: 10 vault + (-15)
+        rate = -5 effective. Result: -5 × price as debt."""
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        p = state.players[0]
+        p.buildings_played.append(_patent("Energy Vault"))
+        p.patent_state["energy_vault"] = 10
+        p.rates[Resource.PWR] = -15
+        money_before = p.money
+        debt_before = p.debt
+        do_power_bill(state)
+        pwr_price = state.market.price(Resource.PWR)
+        assert p.money == money_before
+        assert p.debt == debt_before + 5 * pwr_price
         assert p.patent_state["energy_vault"] == 0
 
     def test_power_bill_pays_out_only_once(self):
