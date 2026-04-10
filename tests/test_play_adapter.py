@@ -328,9 +328,10 @@ def test_last_player_gets_full_turn_before_end_game():
     has_built_this_turn must be reset for that player (proving they got a
     fresh turn), and the turn record must show event=END_GAME.
     """
+    # num_rounds=1 so the game plays through the deck once (END_GAME at turn 24).
     # disable_prompts so this test doesn't have to dance around the auction
     # / OC pause flow when patent auctions or futures fire.
-    game = PlayableGame(seed=42, max_turns=8, disable_prompts=True)
+    game = PlayableGame(seed=42, max_turns=8, num_rounds=1, disable_prompts=True)
 
     # Play through. Mark the last player's begin-turn state.
     last_player_had_fresh_turn = False

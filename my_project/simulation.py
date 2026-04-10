@@ -232,8 +232,10 @@ class EventType(StrEnum):
     NEWS_BULLETIN = "news_bulletin"
     # Refreshes the building pool by drawing a fresh card.
     DRAW_BUILDING_CARD = "draw_building_card"
-    # Stub for the future patent auction system. Currently a no-op.
     PATENT_AUCTION = "patent_auction"
+    # End-of-round: fires PB + Futures Settlement like END_GAME, but the
+    # game continues into the next round with a fresh event deck shuffle.
+    END_ROUND = "end_round"
     END_GAME = "end_game"
 
 
@@ -389,31 +391,28 @@ def _resolve_or_default(spec, default):
     return _resolve_count(spec)
 
 
-def build_event_deck(
+def _build_single_round(
     num_turns: int,
     num_players: int,
-    config: EventDeckConfig | None = None,
+    config: EventDeckConfig,
+    terminal_type: EventType,
 ) -> list[EventCard]:
-    """Build a shuffled event deck for one full game.
+    """Build a shuffled event deck for ONE round of play.
 
     Composition defaults come from default_event_counts(num_players). The
     deck is sized to num_turns * num_players PLUS the number of redraw
     cards, since each redraw consumes an extra event slot during play.
-    The last card is always END_GAME.
-
-    Any user-supplied EventDeckConfig fields override the defaults; fields
-    left as None use default_event_counts.
+    The terminal card (END_GAME or END_ROUND) is always at the bottom.
     """
-    cfg = config or EventDeckConfig()
     defaults = default_event_counts(num_players)
 
-    n_news_bulletin = _resolve_or_default(cfg.news_bulletin_count, defaults["news_bulletin"])
-    n_debt = _resolve_or_default(cfg.debt_collection_count, defaults["debt_collection"])
-    n_power = _resolve_or_default(cfg.power_bill_count, defaults["power_bill"])
-    n_futures = _resolve_or_default(cfg.futures_settlement_count, defaults["futures_settlement"])
-    n_patent = _resolve_or_default(cfg.patent_auction_count, defaults["patent_auction"])
-    n_draw_reg = _resolve_or_default(cfg.draw_building_count, defaults["draw_building"])
-    n_draw_redraw = _resolve_or_default(cfg.draw_building_redraw_count, defaults["draw_building_redraw"])
+    n_news_bulletin = _resolve_or_default(config.news_bulletin_count, defaults["news_bulletin"])
+    n_debt = _resolve_or_default(config.debt_collection_count, defaults["debt_collection"])
+    n_power = _resolve_or_default(config.power_bill_count, defaults["power_bill"])
+    n_futures = _resolve_or_default(config.futures_settlement_count, defaults["futures_settlement"])
+    n_patent = _resolve_or_default(config.patent_auction_count, defaults["patent_auction"])
+    n_draw_reg = _resolve_or_default(config.draw_building_count, defaults["draw_building"])
+    n_draw_redraw = _resolve_or_default(config.draw_building_redraw_count, defaults["draw_building_redraw"])
 
     events: list[EventCard] = []
     events.extend([_ec(EventType.NEWS_BULLETIN)] * n_news_bulletin)
@@ -425,9 +424,9 @@ def build_event_deck(
     events.extend([_ec(EventType.DRAW_BUILDING_CARD, redraws=True)] * n_draw_redraw)
 
     # Legacy direct-NEWS pool (JSON Advanced section). Sampled with replacement.
-    news_n = _resolve_count(cfg.news_count)
-    if news_n > 0 and cfg.news_pool:
-        events.extend(random.choices(cfg.news_pool, k=news_n))
+    news_n = _resolve_count(config.news_count)
+    if news_n > 0 and config.news_pool:
+        events.extend(random.choices(config.news_pool, k=news_n))
 
     # Size the deck to player_turns + redraws so each player-turn gets at
     # least one event after redraws have consumed extras.
@@ -436,7 +435,7 @@ def build_event_deck(
     target_size = player_turns + redraw_count
 
     # Truncate if the structured composition already exceeds target size.
-    if len(events) > target_size - 1:  # -1 leaves room for END_GAME
+    if len(events) > target_size - 1:  # -1 leaves room for terminal card
         events = events[: target_size - 1]
         redraw_count = sum(1 for ec in events if ec.redraws)
         target_size = player_turns + redraw_count
@@ -444,14 +443,40 @@ def build_event_deck(
     # Pad with PWR_ADJUST / NO_EVENT fillers up to target_size - 1.
     fillers_needed = (target_size - 1) - len(events)
     if fillers_needed > 0:
-        pwr_adjusts = int(fillers_needed * cfg.pwr_adjust_fraction)
+        pwr_adjusts = int(fillers_needed * config.pwr_adjust_fraction)
         events.extend([_ec(EventType.PWR_ADJUST)] * pwr_adjusts)
         events.extend([_ec(EventType.NO_EVENT)] * (fillers_needed - pwr_adjusts))
 
     random.shuffle(events)
-    # END_GAME always goes at the bottom (fires on the final player-turn)
-    events.append(_ec(EventType.END_GAME))
+    # Terminal card always at the bottom
+    events.append(_ec(terminal_type))
     return events
+
+
+def build_event_deck(
+    num_turns: int,
+    num_players: int,
+    config: EventDeckConfig | None = None,
+    num_rounds: int = 1,
+) -> list[EventCard]:
+    """Build a shuffled event deck for a full game of one or more rounds.
+
+    Each round is a separate shuffled pass through the event composition.
+    Rounds 1..N-1 end with END_ROUND (Power Bill + Futures Settlement, then
+    the game continues). Round N ends with END_GAME.
+
+    Composition defaults come from default_event_counts(num_players). Any
+    user-supplied EventDeckConfig fields override the defaults; fields left
+    as None use default_event_counts.
+    """
+    cfg = config or EventDeckConfig()
+    all_events: list[EventCard] = []
+    for round_idx in range(num_rounds):
+        is_last = round_idx == num_rounds - 1
+        terminal = EventType.END_GAME if is_last else EventType.END_ROUND
+        round_events = _build_single_round(num_turns, num_players, cfg, terminal)
+        all_events.extend(round_events)
+    return all_events
 
 
 # --- Actions ---
@@ -579,6 +604,7 @@ class GameState:
     #    "net_worth_after": 112}
     last_event_lines: list[dict] = field(default_factory=list)
     max_turns: int = DEFAULT_MAX_TURNS
+    num_rounds: int = 1
 
     def remaining_events(self) -> dict[EventType, int]:
         """Count remaining events from current position in event deck."""
@@ -602,6 +628,7 @@ class GameState:
         event_deck: list[EventCard] | None = None,
         news_deck: list[NewsCard] | None = None,
         patent_pile: list[Card] | None = None,
+        num_rounds: int = 1,
     ) -> GameState:
         market = Market.create(start_market_pos)
 
@@ -633,7 +660,9 @@ class GameState:
 
         # Build event deck (use explicit deck if provided, else build from config)
         if event_deck is None:
-            event_deck = build_event_deck(max_turns, num_players, event_deck_config)
+            event_deck = build_event_deck(
+                max_turns, num_players, event_deck_config, num_rounds=num_rounds,
+            )
 
         # Build news deck (defaults to one card per NEWS_EFFECTS entry,
         # shuffled). Callers can supply a custom list for tests / playtesting.
@@ -686,6 +715,7 @@ class GameState:
             news_deck=news_deck,
             patent_pile=patent_pile,
             max_turns=max_turns,
+            num_rounds=num_rounds,
         )
 
 
@@ -2103,6 +2133,11 @@ def execute_event(state: GameState, event: EventCard, active_player: Player) -> 
             return do_draw_building_card(state)
         case EventType.PATENT_AUCTION:
             return do_patent_auction(state)
+        case EventType.END_ROUND:
+            _record_event_line(state, kind="header", text="END OF ROUND")
+            do_power_bill(state)
+            do_futures_settlement(state)
+            return "END OF ROUND (power bill + futures settlement)"
         case EventType.END_GAME:
             _record_event_line(state, kind="header", text="END GAME")
             do_power_bill(state)
@@ -2222,6 +2257,7 @@ def run_game(
     max_turns: int = DEFAULT_MAX_TURNS,
     corporation_rates: list[dict[Resource, int]] | None = None,
     strategies: list | None = None,
+    num_rounds: int = 1,
 ) -> GameState:
     """Run a complete game and return the final state.
 
@@ -2229,6 +2265,9 @@ def run_game(
         strategy: Single strategy function applied to all players.
         strategies: Per-player strategy list (overrides `strategy`).
                     Length must match num_players.
+        num_rounds: How many times to play through the event deck.
+                    Each round reshuffles the same composition; the final
+                    round ends with END_GAME.
     """
     state = GameState.create(
         all_cards=all_cards,
@@ -2239,6 +2278,7 @@ def run_game(
         randomize_market=randomize_market,
         max_turns=max_turns,
         corporation_rates=corporation_rates,
+        num_rounds=num_rounds,
     )
 
     # Build per-player strategy list
@@ -2249,7 +2289,8 @@ def run_game(
     else:
         raise ValueError("Must provide either `strategy` or `strategies`")
 
-    for _ in range(max_turns):
+    total_turns = max_turns * num_rounds
+    for _ in range(total_turns):
         for i, player in enumerate(state.players):
             event = state.event_deck[state.event_idx] if state.event_idx < len(state.event_deck) else _ec(EventType.NO_EVENT)
             state.event_idx += 1

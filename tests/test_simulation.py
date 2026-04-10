@@ -104,6 +104,34 @@ class TestEventDeck:
         redraw_count = sum(1 for ec in deck if ec.redraws)
         assert redraw_count == 0
 
+    def test_multi_round_deck_has_end_round_then_end_game(self):
+        """A 2-round deck ends round 1 with END_ROUND and round 2 with END_GAME."""
+        deck = build_event_deck(8, 3, num_rounds=2)
+        # Find END_ROUND and END_GAME positions
+        end_round_idxs = [i for i, ec in enumerate(deck) if ec.type == EventType.END_ROUND]
+        end_game_idxs = [i for i, ec in enumerate(deck) if ec.type == EventType.END_GAME]
+        assert len(end_round_idxs) == 1, f"Expected 1 END_ROUND, got {len(end_round_idxs)}"
+        assert len(end_game_idxs) == 1, f"Expected 1 END_GAME, got {len(end_game_idxs)}"
+        # END_ROUND comes before END_GAME
+        assert end_round_idxs[0] < end_game_idxs[0]
+        # END_GAME is the very last card
+        assert end_game_idxs[0] == len(deck) - 1
+
+    def test_multi_round_deck_is_roughly_double_size(self):
+        """A 2-round deck should be approximately twice the size of a 1-round deck."""
+        single = build_event_deck(8, 3, num_rounds=1)
+        double = build_event_deck(8, 3, num_rounds=2)
+        # Allow some variance due to redraw padding, but should be close to 2x
+        assert 1.8 * len(single) <= len(double) <= 2.2 * len(single)
+
+    def test_single_round_no_end_round(self):
+        """A 1-round deck has END_GAME but no END_ROUND."""
+        deck = build_event_deck(8, 3, num_rounds=1)
+        end_round_count = sum(1 for ec in deck if ec.type == EventType.END_ROUND)
+        end_game_count = sum(1 for ec in deck if ec.type == EventType.END_GAME)
+        assert end_round_count == 0
+        assert end_game_count == 1
+
 
 class TestPwrAdjust:
     def test_positive_pwr_lowers_price(self):

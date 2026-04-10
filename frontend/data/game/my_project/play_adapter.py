@@ -95,6 +95,7 @@ class PlayableGame:
     # back to the engine's `Player_{i+1}` default.
     names: list[str] | None = None
     max_turns: int = DEFAULT_MAX_TURNS
+    num_rounds: int = 2
     event_deck_config: EventDeckConfig | None = None
     # When provided, overrides build_event_deck entirely.
     custom_event_deck: list[EventCard] | None = None
@@ -169,6 +170,7 @@ class PlayableGame:
             event_deck_config=self.event_deck_config,
             event_deck=self.custom_event_deck,
             patent_pile=patents,
+            num_rounds=self.num_rounds,
         )
         # Apply custom names if provided. Strict length check, empty entries
         # silently keep the engine's `Player_{i+1}` default so the UI can pass
@@ -219,11 +221,12 @@ class PlayableGame:
         return self._active_player_idx >= 0
 
     def is_over(self) -> bool:
-        # Game ends when we've played all the player-turns OR the event deck
-        # is exhausted (which can happen if redraws consume END_GAME early).
+        # Game ends when we've played all player-turns across all rounds OR
+        # the event deck is exhausted (redraws can consume END_GAME early).
         if self._turn_in_progress():
             return False
-        if self._turn_count >= self.max_turns * self.num_players:
+        total_turns = self.max_turns * self.num_rounds * self.num_players
+        if self._turn_count >= total_turns:
             return True
         return self.state.event_idx >= len(self.state.event_deck)
 
@@ -251,9 +254,17 @@ class PlayableGame:
         return self._turn_count + 1
 
     def round_number(self) -> int:
-        """1-indexed round (1..max_turns). Each round is num_players player-turns."""
+        """1-indexed round within the current deck-round (1..max_turns).
+        Each round is num_players player-turns."""
         effective = self._turn_count - 1 if self._turn_in_progress() else self._turn_count
-        return (effective // self.num_players) + 1
+        return (effective // self.num_players) % self.max_turns + 1
+
+    def deck_round_number(self) -> int:
+        """1-indexed deck-round (1..num_rounds). Which pass through the event
+        deck we're currently in."""
+        effective = self._turn_count - 1 if self._turn_in_progress() else self._turn_count
+        turns_per_deck_round = self.max_turns * self.num_players
+        return min(self.num_rounds, (effective // turns_per_deck_round) + 1)
 
     # --- Human turn control ---
 
@@ -820,8 +831,10 @@ class PlayableGame:
             "seed": self.seed,
             "round": self.round_number(),
             "max_rounds": self.max_turns,
+            "deck_round": self.deck_round_number(),
+            "num_rounds": self.num_rounds,
             "turn_index": turn_index,
-            "total_turns": len(s.event_deck),
+            "total_turns": self.max_turns * self.num_rounds * self.num_players,
             "is_over": self.is_over(),
             "current_player_index": cur_idx,
             "human_index": self.human_index,
