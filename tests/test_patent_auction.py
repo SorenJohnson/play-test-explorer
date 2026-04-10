@@ -82,8 +82,8 @@ class TestSettleSilentAuction:
         result = settle_silent_auction(state, patent, bids={0: 20, 1: 20, 2: 5})
         winner_idx, amount = result
         assert winner_idx == 0  # earlier seat wins ties
-        # Tied bids are still the runner-up: 20 + 5 = 25
-        assert amount == 25
+        # Tied bids: winner pays their own bid (not runner_up + $5)
+        assert amount == 20
 
     def test_only_one_bidder_pays_5(self):
         cards, contracts = _load()

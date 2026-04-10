@@ -60,6 +60,7 @@ def cmd_simulate(args: argparse.Namespace) -> None:
         start_market_pos=args.market_pos,
         randomize_market=args.randomize_market,
         max_turns=args.turns,
+        num_rounds=args.rounds,
         strategy=args.strategy,
         player_strategies=player_strategies,
     )
@@ -235,7 +236,8 @@ def main() -> None:
     sim.add_argument("-m", "--money", type=int, default=20, help="Starting money")
     sim.add_argument("--market-pos", type=int, default=DEFAULT_MARKET_POS, help="Starting market position")
     sim.add_argument("--randomize-market", action="store_true", help="Randomize starting prices")
-    sim.add_argument("-t", "--turns", type=int, default=DEFAULT_MAX_TURNS, help="Turns per player")
+    sim.add_argument("-t", "--turns", type=int, default=DEFAULT_MAX_TURNS, help="Turns per round per player")
+    sim.add_argument("-r", "--rounds", type=int, default=2, help="Deck rounds (passes through event deck)")
     sim.add_argument("-s", "--strategy", choices=["greedy", "random", "smart"], default="greedy",
                      help="Default strategy for all players")
     sim.add_argument("--player-strategies", nargs="+", choices=["greedy", "random", "smart"],

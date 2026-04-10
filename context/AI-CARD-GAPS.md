@@ -43,91 +43,44 @@ mold and need their own AI plumbing.
 
 ## Gaps — cards the AI does not yet use
 
-For each entry, the **Suggested AI strategy** is a starting point for
-when we wire it up. Tweak before implementing.
-
-### Optimization Center (slot-4 building)
-
-- **Effect**: Free action — −1 PWR rate, +1 to any positive non-PWR
-  resource rate. Once per turn.
-- **Where in code**: [my_project/play_adapter.py](../my_project/play_adapter.py) → `PlayableGame.use_optimization_center`
-- **Current AI behavior**: Builds it (slot-4 cards are part of the deck),
-  but never invokes it. The slot of the card sits inert.
-- **History**: Used to fire automatically during Futures Settlement; we
-  removed that auto-trigger when the rules changed to "free action".
-  This is a regression for AI parity that needs to be closed.
-- **Suggested AI strategy**: Auto-fire at the start of every AI turn if
-  the player owns one and hasn't used it. Pick the highest-priced
-  positive non-PWR rate as the target (mirrors the old auto-pick logic).
-  Always strictly beneficial — there's no opportunity cost to NOT using
-  it on most turns.
-- **Priority**: HIGH — this used to be a working AI behavior and is
-  silently suppressed today.
-
-### Water Engine (patent)
-
-- **Effect**: Free action — −1 H2O rate, +2 PWR rate. Once per turn.
-- **Where in code**: [my_project/play_adapter.py](../my_project/play_adapter.py) → `PlayableGame.use_water_engine`
-- **Current AI behavior**: Wins it via auction, gets nothing from it.
-- **Suggested AI strategy**: Auto-fire at the start of every AI turn if
-  the player has H2O ≥ 1. Same "always beneficial" reasoning as OC, with
-  one wrinkle: if PWR is the most-valuable resource for the rest of the
-  game and the player has spare H2O, this is an obvious yes.
-- **Priority**: MEDIUM — patent is rare (one of 12) so the impact on MC
-  averages is small per game, but compounds across runs.
-
-### Nanotechnology (patent)
-
-- **Effect**: Free action — discard one card from hand, draw one new
-  card. Once per turn.
-- **Where in code**: [my_project/play_adapter.py](../my_project/play_adapter.py) → `PlayableGame.use_nanotechnology`
-- **Current AI behavior**: Wins it via auction, gets nothing from it.
-- **Suggested AI strategy**: Trickier than the others because the AI
-  has to decide WHICH card is worst. Initial heuristic: discard the
-  highest-cost card in hand that the AI cannot afford and that doesn't
-  match any contract on the board. Or: discard the card with the lowest
-  rate/cost ratio. Worth experimenting.
-- **Priority**: LOW — strategic value depends on a smarter hand-quality
-  metric than the AI currently has, so we may want to defer until the
-  greedy strategy itself is revised.
-
-### Teleportation (patent)
-
-- **Effect**: Free action — sell any positive non-PWR resource at market
-  price (gain cash equal to that price), −1 PWR rate. Once per turn.
-- **Where in code**: [my_project/play_adapter.py](../my_project/play_adapter.py) → `PlayableGame.use_teleportation`
-- **Current AI behavior**: Wins it via auction, gets nothing from it.
-- **Suggested AI strategy**: Auto-fire each turn if the player has any
-  positive non-PWR rate. Pick the resource with the highest current
-  market price. Cost analysis: −1 PWR rate is a permanent loss, so we
-  should only fire when (current price of chosen resource) ×
-  (remaining_turns) > (PWR price × remaining_power_bills). The naive
-  version: always fire if sell price > 5 and PWR rate stays ≥ 0.
-- **Priority**: MEDIUM — balanced trade-off makes this a non-trivial
-  strategic decision.
-
-### Discard-2 contract path (rule, not a card)
-
-- **Effect**: Alternative way to fulfill a contract. Instead of spending
-  a hand card with `can_fulfill_contract=True`, the player discards any
-  2 hand cards. Costs 1 AP, same as the regular contract path.
-- **Where in code**: [my_project/simulation.py](../my_project/simulation.py) → `execute_contract` (`discard_card_indices` parameter), [my_project/play_adapter.py](../my_project/play_adapter.py) → `apply_human_action` "contract" branch with `use_discard: true`.
-- **Current AI behavior**: AI strategies (`random_strategy`, `greedy_strategy`, `smart_greedy_strategy`) only enumerate the contract-card and Launch-Pad paths. They never consider the discard-2 path.
-- **Suggested AI strategy**: When the AI has no `can_fulfill_contract`
-  card in hand BUT has 2 spare cards AND a contract is affordable from
-  current rates, propose a `discard_card_indices` action with the 2
-  lowest-EV cards in hand (e.g. cheapest builds the AI doesn't plan to
-  use). Score the action against the regular contract reward minus the
-  EV of the 2 discarded cards. Only fire if positive.
-- **Priority**: LOW — the AI rarely sits on hands with 0 contract cards,
-  and the discard-2 path is more of a human convenience option that adds
-  strategic depth in late-game corner cases.
+(No open gaps. All known card/rule gaps have been closed.)
 
 ---
 
 ## Closed — cards the AI now uses correctly
 
-(Empty — populate as we close gaps.)
+### Optimization Center (slot-4 building) — CLOSED
+
+Auto-fired at start of every AI turn via `_execute_free_actions()` in
+`simulation.py`. Picks the highest-priced positive non-PWR rate.
+
+### Water Engine (patent) — CLOSED
+
+Auto-fired via `_execute_free_actions()` when H2O rate ≥ 1.
+
+### Nanotechnology (patent) — CLOSED
+
+Auto-fired via `_execute_free_actions()`. Discards the lowest-value
+hand card and draws 1 replacement.
+
+### Teleportation (patent) — CLOSED
+
+Auto-fired via `_execute_free_actions()` when the highest-priced
+positive resource is worth ≥ $5. Conservative threshold avoids
+unprofitable sells.
+
+### Launch Pad in greedy_strategy — CLOSED
+
+`greedy_strategy` now enumerates Launch Pad as a fallback contract
+path (same pattern as `smart_greedy_strategy`).
+
+### Discard-2-for-contract — CLOSED (smart_greedy only)
+
+`smart_greedy_strategy` now considers the discard-2 path as a last
+resort when no contract-icon card or Launch Pad is available. Proposes
+the 2 lowest-value hand cards if the contract reward exceeds their
+opportunity cost. `random_strategy` and `greedy_strategy` do not use
+this path.
 
 ---
 

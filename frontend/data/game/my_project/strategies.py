@@ -300,15 +300,34 @@ def greedy_strategy(state: GameState, player: Player) -> Action:
                     best_score = sell_score
                     best_action = Action(ActionType.SELL, sell_card=i)
 
-    # Score contract options (spends 1 card each — LP not enumerated by greedy)
-    if has_cards:
-        for i, card in enumerate(player.hand):
-            if card.can_fulfill_contract:
-                for ci, contract in enumerate(state.available_contracts):
-                    contract_score = _score_contract(state, player, contract)
-                    if contract_score is not None and contract_score > best_score:
-                        best_score = contract_score
-                        best_action = Action(ActionType.CONTRACT, contract_card=i, contract_idx=ci)
+    # Score contract options. Hand-card path (spends 1 card) and Launch Pad
+    # fallback (FREE — 0 cards).
+    lp_available = (
+        _count_buildings(player, "Launch Pad") > 0
+        and not player.has_used_launch_pad_this_turn
+    )
+    for ci, contract in enumerate(state.available_contracts):
+        contract_score = _score_contract(state, player, contract)
+        if contract_score is None or contract_score <= best_score:
+            continue
+        # Try hand-card path first (costs 1 card)
+        chosen = None
+        if has_cards:
+            for i, card in enumerate(player.hand):
+                if card.can_fulfill_contract:
+                    chosen = Action(
+                        ActionType.CONTRACT, contract_card=i, contract_idx=ci,
+                    )
+                    break
+        # Fall back to Launch Pad (FREE)
+        if chosen is None and lp_available:
+            chosen = Action(
+                ActionType.CONTRACT, contract_card=-1, contract_idx=ci,
+                use_launch_pad=True,
+            )
+        if chosen is not None:
+            best_score = contract_score
+            best_action = chosen
 
     return best_action
 
@@ -679,7 +698,7 @@ def smart_greedy_strategy(state: GameState, player: Player) -> Action:
                         use_elevator=use_elev and se_available,
                     )
                     break
-        # Fall back to Launch Pad (FREE — works even at AP=0)
+        # Fall back to Launch Pad (FREE — works even with 0 cards remaining)
         if chosen is None and lp_available:
             chosen = Action(
                 ActionType.CONTRACT,
@@ -688,6 +707,35 @@ def smart_greedy_strategy(state: GameState, player: Player) -> Action:
                 use_launch_pad=True,
                 use_elevator=use_elev and se_available,
             )
+        # Fall back to discard-2 path (costs 2 cards, no contract-icon needed)
+        if chosen is None and player.cards_remaining() >= 2 and len(player.hand) >= 2:
+            # Pick the 2 lowest-value cards to discard
+            indexed_values = sorted(
+                range(len(player.hand)),
+                key=lambda i: sum(
+                    state.market.price(ra.resource) * ra.amount
+                    for ra in player.hand[i].rates
+                    if ra.amount > 0
+                ),
+            )
+            discard_idxs = indexed_values[:2]
+            # Only propose if the contract reward outweighs the lost cards
+            discard_cost = sum(
+                sum(
+                    state.market.price(ra.resource) * abs(ra.amount)
+                    for ra in player.hand[i].rates
+                    if ra.amount > 0
+                )
+                for i in discard_idxs
+            )
+            if contract_score > discard_cost:
+                chosen = Action(
+                    ActionType.CONTRACT,
+                    contract_card=-1,
+                    contract_idx=ci,
+                    use_elevator=use_elev and se_available,
+                    discard_card_indices=sorted(discard_idxs),
+                )
         if chosen is not None and (plain_affordable or disc_affordable):
             best_score = contract_score
             best_action = chosen

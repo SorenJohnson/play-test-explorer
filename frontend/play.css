@@ -419,6 +419,18 @@ body {
   border-top: 1px solid #21262d;
   padding-top: 6px;
 }
+.hand-card-effect {
+  color: #d2a8ff;
+  font-size: 0.7rem;
+  font-style: italic;
+  margin-bottom: 4px;
+}
+.pool-card-effect {
+  color: #d2a8ff;
+  font-size: 0.65rem;
+  font-style: italic;
+  margin-bottom: 2px;
+}
 .resource-plus { color: #3fb950; }
 .resource-minus { color: #f85149; }
 

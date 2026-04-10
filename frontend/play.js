@@ -83,6 +83,9 @@ let useLaunchPadThisFulfill = false;
 // 2 hand cards — no contract-icon requirement). Mutually exclusive with
 // useLaunchPadThisFulfill.
 let useDiscardForContract = false;
+// Patent Office pick: when building a Patent Office, the index (0 or 1) of
+// the patent the human wants to keep. null = auto-pick (AI default).
+let patentOfficePick = null;
 let hackerTarget = "";
 let hackerDirection = 0;
 
@@ -425,6 +428,7 @@ function clearSelection() {
   elevatorTargetResource = "";
   useLaunchPadThisFulfill = false;
   useDiscardForContract = false;
+  patentOfficePick = null;
   hackerTarget = "";
   hackerDirection = 0;
 }
@@ -819,9 +823,14 @@ function renderPool() {
       ? card.can_sell.join("/")
       : "—";
 
+    const effectLine = card.effect
+      ? `<div class="pool-card-effect">${card.effect}</div>`
+      : "";
+
     return `
       <div class="${classes.join(" ")}" data-pool-idx="${i}">
         <div class="pool-card-name">${card.building}</div>
+        ${effectLine}
         <div class="pool-card-line">Cost: ${costText}</div>
         <div class="pool-card-line">Rates: ${rateText}</div>
         <div class="pool-card-line">Sell: ${sellText}</div>
@@ -897,6 +906,10 @@ function renderHand() {
       ? `Sell: ${card.can_sell.join("/")}`
       : "";
 
+    const effectText = card.effect
+      ? `<div class="hand-card-effect">${card.effect}</div>`
+      : "";
+
     const marker = inBuild ? "✓ BUILD" : inDiscard ? "✗ DISCARD" : "";
 
     return `
@@ -904,6 +917,7 @@ function renderHand() {
         <div class="hand-card-name">${card.building}
           ${marker ? `<span class="card-marker">${marker}</span>` : ""}
         </div>
+        ${effectText}
         <div class="hand-card-section">
           <span class="hand-card-label">Cost:</span> ${costText}
         </div>
@@ -984,6 +998,33 @@ function renderHand() {
         cost <strong class="positive">$${buildEstimate.cost}</strong></span>`;
     } else if (buildEstimate) {
       summaryEl.innerHTML = `<span class="negative">Build: ${buildEstimate.reason}</span>`;
+    }
+    // Patent Office picker: when a Patent Office card is in the build
+    // selection, show the top 2 patents so the human can choose which to keep.
+    const selectedCards = [...selectedBuildIdxs].map((i) => p.hand[i]).filter(Boolean);
+    const hasPatentOffice = selectedCards.some((c) => c.building === "Patent Office");
+    const preview = s.patent_office_preview || [];
+    if (hasPatentOffice && preview.length > 0) {
+      const opts = preview.map((pat, i) => {
+        const checked = (patentOfficePick === i) ? "checked" : "";
+        return `<label style="display:block; margin:4px 0; cursor:pointer; color:#c9d1d9;">
+          <input type="radio" name="po-pick" value="${i}" ${checked}>
+          <strong>${pat.name}</strong> — <em style="color:#d2a8ff">${pat.effect}</em>
+        </label>`;
+      }).join("");
+      summaryEl.innerHTML += `
+        <div style="margin-top:8px; padding:8px; border:1px solid #30363d; border-radius:4px;">
+          <span style="color:#8b949e; font-size:0.8rem;">Patent Office: choose a patent to keep</span>
+          ${opts}
+        </div>`;
+      // Wire radio buttons
+      summaryEl.querySelectorAll('input[name="po-pick"]').forEach((radio) => {
+        radio.addEventListener("change", () => {
+          patentOfficePick = parseInt(radio.value, 10);
+        });
+      });
+    } else if (!hasPatentOffice) {
+      patentOfficePick = null;
     }
   }
 }
@@ -1772,6 +1813,10 @@ function onBuild() {
     build_cards: [...selectedBuildIdxs],
     discard_cards: [...selectedDiscardIdxs],
   };
+  // Pass patent_office_pick if a Patent Office is being built
+  if (patentOfficePick !== null) {
+    action.patent_office_pick = patentOfficePick;
+  }
   applyHumanAction(action, (result) => {
     if (result.ok) {
       logHumanAction(result);

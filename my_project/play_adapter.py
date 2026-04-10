@@ -377,7 +377,13 @@ class PlayableGame:
             total_cards = len(build_idx) + len(discard_idx)
             if total_cards > player.cards_remaining():
                 return {"ok": False, "reason": f"Would spend {total_cards} cards but only {player.cards_remaining()} left this turn"}
-            record = execute_build(self.state, player, build_idx, discard_idx)
+            patent_office_pick = action.get("patent_office_pick")
+            if patent_office_pick is not None:
+                patent_office_pick = int(patent_office_pick)
+            record = execute_build(
+                self.state, player, build_idx, discard_idx,
+                patent_office_pick=patent_office_pick,
+            )
             if record is None:
                 return {"ok": False, "reason": "Cannot afford build (or duplicate special)"}
             self._turn_action_records.append(record)
@@ -711,6 +717,10 @@ class PlayableGame:
         player.has_used_teleportation_this_turn = False
         player.cards_spent_this_turn = 0
 
+        # Free actions phase (same as run_turn in simulation.py).
+        from my_project.simulation import _execute_free_actions
+        _execute_free_actions(self.state, player)
+
         # Look up this seat's strategy. seats is fully populated by __post_init__.
         strategy_fn = _resolve_strategy(self.seats[acting_player_idx])
 
@@ -861,6 +871,12 @@ class PlayableGame:
             # Patent state — patent_pile_remaining is just for stats / debug
             # since the modal handles the bid flow at auction time.
             "patent_pile_remaining": max(0, len(s.patent_pile) - s.patent_idx),
+            # Preview of the next 2 patents (for Patent Office pick UI).
+            # Only shown when a human has a Patent Office card in hand.
+            "patent_office_preview": [
+                {"name": p.building, "effect": p.effect}
+                for p in s.patent_pile[s.patent_idx : s.patent_idx + 2]
+            ],
             # Mid-event prompt (None when no prompt is active)
             "pending_prompt": dict(s.pending_prompt) if s.pending_prompt else None,
         }

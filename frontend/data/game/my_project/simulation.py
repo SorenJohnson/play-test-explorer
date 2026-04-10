@@ -482,6 +482,9 @@ class Action:
     # Per-sell Hacker Array choice (used by execute_sell when set)
     hacker_target: str = ""        # resource value (e.g. "GLS"); empty = no bonus
     hacker_direction: int = 0      # +1 / -1 / 0 for no bonus
+    # Discard-2-for-contract: indices of 2 hand cards to discard instead of
+    # using a contract-icon card. When set, contract_card is ignored.
+    discard_card_indices: list[int] | None = None
     detail: str = ""
 
 
@@ -768,6 +771,7 @@ def execute_build(
     player: Player,
     build_indices: list[int],
     discard_indices: list[int],
+    patent_office_pick: int | None = None,
 ) -> ActionRecord | None:
     """Play one or more building cards. Optionally discard cards to reduce deficit.
 
@@ -874,10 +878,11 @@ def execute_build(
     for card in build_cards:
         player.apply_rates(card)
         player.buildings_played.append(card)
-        # Patent Office build-time trigger: draw 2 patents, keep the better
-        # one (by total rate sum), put the other back on top of the pile.
+        # Patent Office build-time trigger: draw 2 patents, keep one,
+        # return the other. AI auto-picks; human pick_idx comes from the
+        # play adapter.
         if card.building == "Patent Office":
-            _patent_office_trigger(state, player)
+            _patent_office_trigger(state, player, pick_idx=patent_office_pick)
 
     # Remove cards from hand (highest indices first to avoid shifting) → discard pile
     all_indices = sorted(set(build_indices) | set(discard_indices), reverse=True)
@@ -1372,21 +1377,24 @@ def _pleasure_dome_bonus(state: GameState, player: Player) -> int:
     return bonus
 
 
-def _patent_office_trigger(state: GameState, player: Player) -> None:
-    """Build-time trigger: draw 2 patents, keep the better, return the other.
+def _patent_office_trigger(
+    state: GameState, player: Player, pick_idx: int | None = None,
+) -> list[Card]:
+    """Build-time trigger: draw 2 patents, keep one, return the other.
 
-    "Better" is the patent with the higher total positive rate sum (a simple
-    proxy for value). Ties pick the first drawn. If only 1 patent is left,
-    just take it. If 0, no-op.
+    When `pick_idx` is None (AI), auto-picks the patent with the higher
+    total positive rate sum (or the higher AI_Value from the CSV).
+    When `pick_idx` is 0 or 1 (human), keeps the indicated patent.
 
     The kept patent is appended to player.buildings_played and its rates
-    are applied. The returned patent goes back on TOP of the pile so the
-    next Patent Office (or other patent-related event) can pick it up.
+    are applied. The returned patent goes back on TOP of the pile.
+
+    Returns the list of drawn patents (for UI display). Empty list if
+    no patents are available.
     """
-    # How many patents are still available?
     available = len(state.patent_pile) - state.patent_idx
     if available <= 0:
-        return
+        return []
     drawn: list[Card] = []
     for _ in range(min(2, available)):
         drawn.append(state.patent_pile[state.patent_idx])
@@ -1395,21 +1403,28 @@ def _patent_office_trigger(state: GameState, player: Player) -> None:
     if len(drawn) == 1:
         kept = drawn[0]
     else:
-        a, b = drawn
-        score_a = sum(ra.amount for ra in a.rates if ra.amount > 0)
-        score_b = sum(ra.amount for ra in b.rates if ra.amount > 0)
-        if score_b > score_a:
-            kept, returned = b, a
+        # Determine which to keep
+        if pick_idx is not None and 0 <= pick_idx < len(drawn):
+            kept_i = pick_idx
         else:
-            kept, returned = a, b
-        # Put the returned patent back on TOP of the pile (next card drawn).
-        # The cursor advanced past 2 cards; rewind it 1 and overwrite the
-        # slot just past the cursor with the returned card.
+            # AI auto-pick: higher AI_Value, then positive rate sum as tiebreaker
+            values = _get_patent_base_values()
+            def _patent_score(c: Card) -> float:
+                base = values.get(c.building, 0)
+                rate_sum = sum(ra.amount for ra in c.rates if ra.amount > 0)
+                return base + rate_sum
+            kept_i = 0 if _patent_score(drawn[0]) >= _patent_score(drawn[1]) else 1
+        returned_i = 1 - kept_i
+        kept = drawn[kept_i]
+        returned = drawn[returned_i]
+        # Put the returned patent back on TOP of the pile
         state.patent_idx -= 1
         state.patent_pile[state.patent_idx] = returned
 
     player.buildings_played.append(kept)
     player.apply_rates(kept)
+    _apply_patent_acquisition(state, player, kept)
+    return drawn
 
 
 def effective_contract_requirements(
@@ -1520,10 +1535,24 @@ def do_pwr_adjust(state: GameState, player: Player) -> None:
     Positive PWR shifts price down (like selling), negative shifts up.
     """
     pwr_rate = player.rate(Resource.PWR)
+    price_before = state.market.price(Resource.PWR)
     if pwr_rate > 0:
         state.market.adjust(Resource.PWR, -pwr_rate)
     elif pwr_rate < 0:
         state.market.adjust(Resource.PWR, abs(pwr_rate))
+    price_after = state.market.price(Resource.PWR)
+    if pwr_rate != 0:
+        direction = "↓" if pwr_rate > 0 else "↑"
+        _record_event_line(
+            state,
+            kind="header",
+            text=f"PWR Adjust — {player.name} has {pwr_rate:+d} PWR",
+        )
+        _record_event_line(
+            state,
+            kind="note",
+            text=f"PWR price: ${price_before} → ${price_after} ({direction}{abs(pwr_rate)})",
+        )
 
 
 def do_power_bill(state: GameState) -> None:
@@ -1829,8 +1858,9 @@ def settle_silent_auction(
     Rules:
       - Highest bidder wins
       - Ties broken by turn order (lower index first)
-      - Winner pays runner_up + 5 as DEBT (per the rules doc)
-      - If only one player bids, they pay 5 (since runner_up = 0)
+      - Winner pays runner_up + $5, UNLESS they tied (same bid as
+        runner-up), in which case they pay their own bid exactly
+      - If only one player bids, they pay $5 (since runner_up = 0)
     """
     positive_bids = {idx: amt for idx, amt in bids.items() if amt > 0}
     if not positive_bids:
@@ -1841,8 +1871,8 @@ def settle_silent_auction(
     winner_idx, winner_bid = sorted_bidders[0]
     runner_up_bid = sorted_bidders[1][1] if len(sorted_bidders) > 1 else 0
 
-    # Pay runner_up + 5 (as debt — credit absorbs first if any)
-    amount_paid = runner_up_bid + 5
+    # Pay runner_up + 5, capped at winner's own bid (so ties pay exact bid)
+    amount_paid = min(runner_up_bid + 5, winner_bid)
     winner = state.players[winner_idx]
     _apply_debt(winner, amount_paid)
     winner.buildings_played.append(patent)
@@ -2174,12 +2204,89 @@ def _execute_action(state: GameState, player: Player, action: Action) -> ActionR
             player,
             action.contract_card,
             action.contract_idx,
+            discard_card_indices=action.discard_card_indices,
             use_elevator=action.use_elevator,
             use_launch_pad=action.use_launch_pad,
             elevator_target=action.elevator_target or None,
         )
 
     return None
+
+
+def _execute_free_actions(state: GameState, player: Player) -> None:
+    """Auto-fire free actions for AI players at the start of their turn.
+
+    Free actions don't cost cards and don't count toward the per-turn budget.
+    They're fired BEFORE the action loop so the AI benefits from them (e.g.
+    Water Engine's +2 PWR changes power-bill economics, Optimization Center's
+    +1 rate makes builds/contracts cheaper).
+
+    Heuristics are simple and conservative — a more sophisticated AI would
+    evaluate these in the context of the full turn plan.
+    """
+    # Optimization Center: -1 PWR, +1 highest-priced positive non-PWR rate.
+    # Always beneficial if the player has any positive non-PWR rate.
+    if (
+        _count_buildings(player, "Optimization Center") > 0
+        and not player.has_used_optimization_center_this_turn
+    ):
+        candidates = [
+            r for r in Resource
+            if r != Resource.PWR and player.rate(r) > 0
+        ]
+        if candidates:
+            target = max(candidates, key=lambda r: state.market.price(r))
+            player.rates[Resource.PWR] = player.rate(Resource.PWR) - 1
+            player.rates[target] = player.rate(target) + 1
+            player.has_used_optimization_center_this_turn = True
+
+    # Water Engine: -1 H2O, +2 PWR. Always beneficial when H2O ≥ 1.
+    if (
+        _player_owns_patent(player, "Water Engine")
+        and not player.has_used_water_engine_this_turn
+        and player.rate(Resource.H2O) >= 1
+    ):
+        player.rates[Resource.H2O] = player.rate(Resource.H2O) - 1
+        player.rates[Resource.PWR] = player.rate(Resource.PWR) + 2
+        player.has_used_water_engine_this_turn = True
+
+    # Teleportation: sell highest-priced positive non-PWR resource for cash,
+    # -1 PWR. Only fire when the price is worth the permanent PWR loss.
+    if (
+        _player_owns_patent(player, "Teleportation")
+        and not player.has_used_teleportation_this_turn
+    ):
+        candidates = [
+            r for r in Resource
+            if r != Resource.PWR and player.rate(r) > 0
+        ]
+        if candidates:
+            best = max(candidates, key=lambda r: state.market.price(r))
+            price = state.market.price(best)
+            if price >= 5:  # conservative threshold
+                player.money += price
+                player.rates[Resource.PWR] = player.rate(Resource.PWR) - 1
+                player.has_used_teleportation_this_turn = True
+
+    # Nanotechnology: discard the weakest hand card, draw 1. Modest value
+    # but always a net positive if the replacement is random.
+    if (
+        _player_owns_patent(player, "Nanotechnology")
+        and not player.has_used_nanotechnology_this_turn
+        and player.hand
+    ):
+        # Discard the card with the lowest total positive rate value
+        def _card_value(card: Card) -> float:
+            return sum(
+                state.market.price(ra.resource) * ra.amount
+                for ra in card.rates
+                if ra.amount > 0
+            )
+        worst_idx = min(range(len(player.hand)), key=lambda i: _card_value(player.hand[i]))
+        state.deck.discard.append(player.hand.pop(worst_idx))
+        drawn = state.deck.draw(1)
+        player.hand.extend(drawn)
+        player.has_used_nanotechnology_this_turn = True
 
 
 def run_turn(state: GameState, player: Player, strategy, event: EventCard) -> None:
@@ -2197,6 +2304,11 @@ def run_turn(state: GameState, player: Player, strategy, event: EventCard) -> No
     player.has_used_nanotechnology_this_turn = False
     player.has_used_teleportation_this_turn = False
     player.cards_spent_this_turn = 0
+
+    # Free actions phase (before pool swaps and the action loop).
+    # Auto-fires Optimization Center, Water Engine, Teleportation,
+    # Nanotechnology using simple heuristics.
+    _execute_free_actions(state, player)
 
     # Pool swapping phase (free, before actions)
     swap_fn = getattr(strategy, 'pool_swap', None)

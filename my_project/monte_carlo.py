@@ -32,6 +32,7 @@ class SimulationConfig:
     start_market_pos: int = DEFAULT_MARKET_POS
     randomize_market: bool = True
     max_turns: int = DEFAULT_MAX_TURNS
+    num_rounds: int = 2  # match play UI default: 2 passes through the event deck
     strategy: str = "greedy"
     player_strategies: list[str] | None = None  # per-player override, e.g. ["greedy", "random", "random"]
 
@@ -184,6 +185,7 @@ def run_monte_carlo(
             start_market_pos=config.start_market_pos,
             randomize_market=config.randomize_market,
             max_turns=config.max_turns,
+            num_rounds=config.num_rounds,
         )
         games.append(_summarize_game(state))
 
