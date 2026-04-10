@@ -20,7 +20,10 @@ const PY_FILES = [
   "__init__.py", "accounting.py", "models.py", "parsing.py",
   "play_adapter.py", "simulation.py", "strategies.py",
 ];
-const CSV_FILES = ["Cards.csv", "Contracts.csv", "market.csv", "Patents.csv"];
+const CSV_FILES = [
+  "Cards.csv", "Contracts.csv", "market.csv", "Patents.csv",
+  "News.csv", "Corporations.csv", "GameConfig.csv", "Events.csv",
+];
 
 let pyodide = null;
 let game = null;              // Pyodide proxy to PlayableGame instance
