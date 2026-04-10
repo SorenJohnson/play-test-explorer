@@ -193,13 +193,13 @@ class TestDefaultAiBid:
         bid = _default_ai_bid(state.players[0], _patent("X", rates=[(Resource.PWR, 2)]))
         assert bid % 5 == 0
 
-    def test_bid_capped_at_40(self):
+    def test_bid_capped_at_50(self):
         cards, contracts = _load()
         state = GameState.create(cards, contracts, num_players=3)
         state.players[0].money = 1000
         state.players[0].debt = 0
         bid = _default_ai_bid(state.players[0], _patent("X", rates=[(Resource.PWR, 10)]))
-        assert bid <= 40
+        assert bid <= 50
 
     def test_bid_scales_with_patent_value(self):
         """Higher-rate patents draw bigger bids."""

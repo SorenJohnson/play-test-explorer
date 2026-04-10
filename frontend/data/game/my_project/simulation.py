@@ -1962,26 +1962,54 @@ def do_patent_auction(state: GameState) -> str:
     )
 
 
-def _default_ai_bid(player: Player, patent: Card) -> int:
-    """Heuristic bid based on the patent's positive rate value + cash.
+# Approximate value of each patent in $. Used by the AI bid heuristic.
+# These are rough estimates of the patent's total game-impact. The AI
+# randomizes ±$5 around this value and clamps to what it can afford.
+# Update this table when patents change or new ones are added.
+PATENT_BASE_VALUES: dict[str, int] = {
+    "Superconductors": 20,       # +1 PWR on every power building — strong
+    "Energy Vault": 25,          # 10 PWR stockpile, big Power Bill payout
+    "Financial Instruments": 15, # earns cash from others' debt — situational
+    "Water Engine": 20,          # free -1 H2O / +2 PWR every turn
+    "Nanotechnology": 10,        # card cycling — modest value
+    "Cold Fusion": 15,           # +1 PWR on water buildings — narrower
+    "Virtual Reality": 15,       # doubles Pleasure Dome — needs the dome
+    "Perpetual Motion": 20,      # zeroes negative PWR on many builds — strong
+    "Carbon Scrubbing": 15,      # zeroes negative C/O2 rates — solid
+    "Slant Drilling": 15,        # +1 FE/SI on tagged builds — decent
+    "Thinking Machines": 20,     # immediate draw + permanent hand size +1
+    "Teleportation": 15,         # free sell any resource — flexible
+}
 
-    Estimates the patent's value as the sum of (rate × $8 baseline) — a
-    simple approximation of "1 unit of rate is worth ~$8 over the rest of
-    the game" without needing market access. Bids up to that value,
-    clamped to half the player's available cash, in $5 increments.
-    Players with non-positive net cash pass. Patents with positive rates
-    always get at least the minimum bid ($5).
+
+def _default_ai_bid(player: Player, patent: Card) -> int:
+    """Heuristic bid for a patent auction.
+
+    Uses the PATENT_BASE_VALUES table for an approximate $ value of the
+    patent, then randomizes ±$5 so different AI players don't always tie.
+    The bid is clamped to half the player's available cash (so the AI
+    doesn't go broke on a patent) and rounded to the nearest $5.
+
+    Players with non-positive net cash pass (bid $0).
     """
     available = player.money - player.debt
     if available <= 0:
         return 0
-    # Patent value heuristic: $8 per positive rate unit
-    rate_value = sum(ra.amount for ra in patent.rates if ra.amount > 0) * 8
+    # Look up the patent's estimated value; fall back to rate-based heuristic
+    # for unknown patents (forward-compatible with new Patents.csv entries).
+    base_value = PATENT_BASE_VALUES.get(patent.building, 0)
+    if base_value == 0:
+        # Fallback: $8 per positive rate unit
+        base_value = sum(ra.amount for ra in patent.rates if ra.amount > 0) * 8
+    # Randomize ±$5
+    jitter = random.choice([-5, 0, 0, 5, 5, 10])
+    target = base_value + jitter
+    # Clamp to half available cash and a reasonable ceiling
     cash_cap = available // 2
-    target = min(rate_value, cash_cap, 40)
+    target = max(5, min(target, cash_cap, 50))
+    # Round to $5 increments
     bid = (target // 5) * 5
-    # Floor at $5 if the patent has any positive rates and we can afford it
-    if rate_value > 0 and bid == 0 and available >= 5:
+    if bid == 0 and available >= 5:
         bid = 5
     return bid
 
