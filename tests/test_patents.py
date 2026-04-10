@@ -292,66 +292,70 @@ class TestPerpetualMotion:
 
 
 class TestCarbonScrubbing:
-    def test_strips_c_from_costs(self):
+    def test_strips_negative_c_rate(self):
+        """The patent zeroes out negative C rates on new buildings."""
         state, p = _setup_player_with_patent("Carbon Scrubbing")
-        # Card costs 1 C; player has 0 C rate. Without the patent, this
-        # would deficit 1 C and require buying it from market.
+        card = _build_card("CarbonDrain", rates=[(Resource.PWR, 1), (Resource.C, -1)])
+        c_before = p.rate(Resource.C)
+        pwr_before = p.rate(Resource.PWR)
+        _execute_single_build(state, p, card)
+        # The -1 C rate is removed
+        assert p.rate(Resource.C) == c_before
+        # PWR rate gained +1
+        assert p.rate(Resource.PWR) == pwr_before + 1
+
+    def test_strips_negative_o2_rate(self):
+        state, p = _setup_player_with_patent("Carbon Scrubbing")
+        card = _build_card("OxygenDrain", rates=[(Resource.O2, -2)])
+        o2_before = p.rate(Resource.O2)
+        _execute_single_build(state, p, card)
+        # The -2 O2 rate is removed
+        assert p.rate(Resource.O2) == o2_before
+
+    def test_does_not_strip_c_from_costs(self):
+        """Costs are NOT affected — the patent only touches per-turn rates.
+        A card with 1 C cost still needs 1 C at build time."""
+        state, p = _setup_player_with_patent("Carbon Scrubbing")
+        # Zero out all rates so we can be sure the C cost has nothing
+        # to cover it (the corp setup randomizes starting rates).
+        for r in Resource:
+            p.rates[r] = 0
         card = _build_card(
             "Scrubbed",
             costs=[(Resource.C, 1), (Resource.FE, 1)],
             rates=[(Resource.PWR, 1)],
         )
         p.hand = [card]
-        # Player has 1 FE rate so the FE cost is covered
-        p.rates[Resource.FE] = 1
+        p.rates[Resource.FE] = 1  # FE cost covered
         money_before = p.money
         record = execute_build(state, p, build_indices=[0], discard_indices=[])
-        # Build succeeded, player paid no market cost (C was stripped, FE was covered)
+        # Build succeeded and the player paid market cost for the C
         assert record is not None
-        assert p.money == money_before
+        assert p.money < money_before
 
-    def test_strips_o2_from_costs(self):
+    def test_does_not_strip_o2_from_costs(self):
         state, p = _setup_player_with_patent("Carbon Scrubbing")
+        for r in Resource:
+            p.rates[r] = 0
         card = _build_card("OxygenHog", costs=[(Resource.O2, 2)], rates=[(Resource.PWR, 1)])
         p.hand = [card]
         money_before = p.money
         record = execute_build(state, p, build_indices=[0], discard_indices=[])
+        # Build succeeded and the player paid market cost for the O2
         assert record is not None
-        assert p.money == money_before
+        assert p.money < money_before
 
-    def test_does_not_strip_negative_c_rate(self):
-        """The patent only affects build-time costs, NOT per-turn negative
-        rates. A card with -1 C rate keeps that rate even with the patent."""
+    def test_does_not_strip_other_negative_rates(self):
+        """Only C and O2 negative rates are stripped — H2O etc. stay."""
         state, p = _setup_player_with_patent("Carbon Scrubbing")
-        card = _build_card("CarbonDrain", rates=[(Resource.PWR, 1), (Resource.C, -1)])
-        c_before = p.rate(Resource.C)
-        pwr_before = p.rate(Resource.PWR)
+        card = _build_card("WaterDrain", rates=[(Resource.H2O, -1)])
+        h2o_before = p.rate(Resource.H2O)
         _execute_single_build(state, p, card)
-        # The -1 C rate is preserved (Carbon Scrubbing only affects costs)
-        assert p.rate(Resource.C) == c_before - 1
-        # PWR rate gained +1
-        assert p.rate(Resource.PWR) == pwr_before + 1
-
-    def test_does_not_strip_negative_o2_rate(self):
-        state, p = _setup_player_with_patent("Carbon Scrubbing")
-        card = _build_card("OxygenDrain", rates=[(Resource.O2, -2)])
-        o2_before = p.rate(Resource.O2)
-        _execute_single_build(state, p, card)
-        # The -2 O2 rate is preserved
-        assert p.rate(Resource.O2) == o2_before - 2
-
-    def test_does_not_strip_other_resource_costs(self):
-        state, p = _setup_player_with_patent("Carbon Scrubbing")
-        card = _build_card("WaterCost", costs=[(Resource.H2O, 1)], rates=[(Resource.PWR, 1)])
-        # Player has 1 H2O rate to cover the cost
-        p.rates[Resource.H2O] = 1
-        money_before = p.money
-        _execute_single_build(state, p, card)
-        # H2O cost should still apply (covered by rate, no money paid)
-        assert p.money == money_before
+        # The -1 H2O rate is preserved
+        assert p.rate(Resource.H2O) == h2o_before - 1
 
     def test_does_not_strip_positive_c_or_o2(self):
-        """The patent only strips C/O2 from costs. Positive rates are kept."""
+        """The patent only strips negative C/O2 rates. Positive rates are kept."""
         state, p = _setup_player_with_patent("Carbon Scrubbing")
         card = _build_card("Producer", rates=[(Resource.C, 2), (Resource.O2, 1)])
         c_before = p.rate(Resource.C)
@@ -756,41 +760,44 @@ class TestWaterEngine:
 
 
 class TestNanotechnology:
-    def test_use_discards_and_redraws_same_count(self):
+    def test_discards_one_and_draws_one(self):
         game = _make_game_with_human()
         p = game.state.players[0]
         p.buildings_played.append(_patent("Nanotechnology"))
-        # Snapshot the hand size and remember the original cards
         n_before = len(p.hand)
-        original_cards = list(p.hand)
-        result = game.use_nanotechnology(0)
+        target = p.hand[1]
+        result = game.use_nanotechnology(0, 1)
         assert result["ok"]
+        # Hand size unchanged: -1 + 1 = same
         assert len(p.hand) == n_before
-        # The hand should be different cards (drew from the deck)
-        # Note: this could theoretically be the same cards if the deck happens
-        # to have shuffled them back, but with 50+ cards in the deck the
-        # chance of collision on every slot is negligible.
-        assert p.hand != original_cards
+        # The targeted card is gone (or replaced) — the slot now has a new card
+        # The discarded card landed in the discard pile
+        assert target in game.state.deck.discard
         assert p.has_used_nanotechnology_this_turn
 
     def test_use_blocked_when_already_used(self):
         game = _make_game_with_human()
         p = game.state.players[0]
         p.buildings_played.append(_patent("Nanotechnology"))
-        game.use_nanotechnology(0)
-        result = game.use_nanotechnology(0)
+        game.use_nanotechnology(0, 0)
+        result = game.use_nanotechnology(0, 0)
         assert not result["ok"]
 
-    def test_empty_hand_no_op(self):
+    def test_empty_hand_blocked(self):
         game = _make_game_with_human()
         p = game.state.players[0]
         p.buildings_played.append(_patent("Nanotechnology"))
         p.hand = []
-        result = game.use_nanotechnology(0)
-        # Allowed but a no-op (hand stays empty); flag still gets set
-        assert result["ok"]
-        assert p.has_used_nanotechnology_this_turn
-        assert p.hand == []
+        result = game.use_nanotechnology(0, 0)
+        assert not result["ok"]
+        assert "empty" in result["reason"].lower()
+
+    def test_invalid_card_index_blocked(self):
+        game = _make_game_with_human()
+        p = game.state.players[0]
+        p.buildings_played.append(_patent("Nanotechnology"))
+        result = game.use_nanotechnology(0, 99)
+        assert not result["ok"]
 
 
 class TestTeleportation:

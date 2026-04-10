@@ -29,7 +29,10 @@ POOL_SIZE = 4
 CONTRACTS_AVAILABLE_BASE = 2  # base + num_players contract cards drawn
 CONTRACT_REWARD = 50  # net worth value of a fulfilled contract
 DEBT_INTEREST_DIVISOR = 10  # $1 interest per $X owed
-MAX_ACTIONS_PER_TURN = 10  # safety limit
+MAX_ACTIONS_PER_TURN = 10  # safety limit against infinite loops
+MAX_CARDS_PER_TURN = 2     # max hand cards a player can spend per turn (builds,
+                            # sells, contracts, and build-deficit discards all
+                            # count; Nanotechnology is exempt)
 
 # Event deck composition (random within ranges)
 POWER_BILL_RANGE = (3, 4)
@@ -43,7 +46,7 @@ PWR_ADJUST_FRACTION = 0.5  # fraction of remaining slots
 # building handler so the deck starts dealing it.
 SUPPORTED_SPECIAL_EFFECTS: set[str] = {
     "Pleasure Dome",        # passive: power-bill bonus, tier by global count
-    "Optimization Center",  # active: pre-declared rate target on futures
+    "Optimization Center",  # active: free action -1 PWR / +1 any positive resource
     "Space Elevator",       # active: once-per-turn -1 contract requirement
     "Hacker Array",         # active: per-sell market bump (player picks)
     "Launch Pad",           # active: once-per-turn free contract icon
@@ -140,10 +143,16 @@ class Player:
     # capability that refreshes between turns, NOT a one-shot consumable).
     has_used_space_elevator_this_turn: bool = False
     has_used_launch_pad_this_turn: bool = False
+    has_used_optimization_center_this_turn: bool = False
     # Active-patent per-turn flags (same shape).
     has_used_water_engine_this_turn: bool = False
     has_used_nanotechnology_this_turn: bool = False
     has_used_teleportation_this_turn: bool = False
+    # Tracks how many hand cards have been spent this turn (builds, sells,
+    # contracts, and build-deficit discards all count). Resets to 0 at the
+    # start of each player turn. Capped at MAX_CARDS_PER_TURN.
+    # Nanotechnology is explicitly exempt.
+    cards_spent_this_turn: int = 0
     # Per-patent stateful storage. Currently used by Energy Vault — key
     # "energy_vault" → remaining PWR units in the vault. Other patents may
     # add their own keys later.
@@ -151,6 +160,10 @@ class Player:
 
     def net_worth(self) -> int:
         return self.money - self.debt + self.credit
+
+    def cards_remaining(self) -> int:
+        """How many more hand cards the player can spend this turn."""
+        return MAX_CARDS_PER_TURN - self.cards_spent_this_turn
 
     def rate(self, resource: Resource) -> int:
         return self.rates.get(resource, 0)
@@ -526,16 +539,11 @@ class GameState:
     # play adapter to thread human-supplied bids in. Key = seat index,
     # value = bid in $5 increments. Defaults to None for "use AI heuristic".
     pending_bids: dict[int, int] = field(default_factory=dict)
-    # Per-player Optimization Center target picks for the next futures
-    # settlement. Key = seat index, value = resource value string (e.g. "FE").
-    # Consumed by do_futures_settlement.
-    pending_oc_picks: dict[int, str] = field(default_factory=dict)
     # Mid-event interruption state. When set, the event resolution loop has
     # paused waiting for human input. The play adapter exposes this to the
     # UI and resumes after the resolve_prompt call.
     # Shape:
     #   {"kind": "patent_auction", "patent_card_dict": {...}}
-    #   {"kind": "optimization_center", "seats": [{"seat_idx": 0, "options": [...]}, ...]}
     pending_prompt: dict | None = None
     # When pending_prompt is set, this captures the in-flight event so the
     # play adapter can resume it after the prompt is answered.
@@ -759,10 +767,23 @@ def execute_build(
 ) -> ActionRecord | None:
     """Play one or more building cards. Optionally discard cards to reduce deficit.
 
-    Returns ActionRecord on success, None if the build is unaffordable OR if
-    the player has already built this turn (one build action per turn).
+    Returns ActionRecord on success, None if:
+      - the player has already built this turn (one build action per turn),
+      - the total cards used (build cards + discards) would exceed
+        MAX_CARDS_PER_TURN when added to cards already spent this turn.
+
+    Every card that leaves the hand counts toward the per-turn cap:
+    both the cards being built AND any discards used to reduce the
+    market deficit.
     """
     if player.has_built_this_turn:
+        return None
+
+    n_build_cards = len(build_indices)
+    total_cards_used = n_build_cards + len(discard_indices)
+    if n_build_cards == 0:
+        return None
+    if total_cards_used > player.cards_remaining():
         return None
 
     build_cards = [player.hand[i] for i in build_indices]
@@ -861,6 +882,8 @@ def execute_build(
 
     # Enforce one build per turn
     player.has_built_this_turn = True
+    # Count all hand cards consumed (builds + discards) toward the per-turn cap
+    player.cards_spent_this_turn += total_cards_used
 
     names = ", ".join(c.building for c in build_cards)
     detail = f"Built {names}"
@@ -885,14 +908,19 @@ def execute_sell(
     card_idx: int,
     hacker_target: str | None = None,
     hacker_direction: int = 0,
-) -> ActionRecord:
+) -> ActionRecord | None:
     """Sell resources using a card's alternate sell types.
 
     `hacker_target` + `hacker_direction` are used by the Hacker Array picker:
     if the player owns a Hacker Array, they can specify a non-sold resource
     and a direction (+1 or -1) to bump the market by ±3. If the params
     aren't supplied (or the player doesn't own an HA), no bonus fires.
+
+    Returns None if the player has no remaining card budget (sell spends 1
+    hand card).
     """
+    if player.cards_remaining() < 1:
+        return None
     card = player.hand[card_idx]
     best_resource = None
     best_revenue = 0
@@ -908,6 +936,7 @@ def execute_sell(
 
     if best_resource is None:
         state.deck.discard.append(player.hand.pop(card_idx))
+        player.cards_spent_this_turn += 1
         return ActionRecord(action_type="sell", detail="Sold (no matching resources)")
 
     rate = max(0, player.rate(best_resource))
@@ -935,6 +964,7 @@ def execute_sell(
         except ValueError:
             pass
 
+    player.cards_spent_this_turn += 1
     return ActionRecord(
         action_type="sell",
         detail=f"Sold {rate} {best_resource.value} for ${revenue}{detail_extra}",
@@ -949,28 +979,55 @@ def execute_contract(
     player: Player,
     card_idx: int,
     contract_idx: int,
+    *,
+    discard_card_indices: list[int] | None = None,
     use_elevator: bool = False,
     use_launch_pad: bool = False,
     elevator_target: str | None = None,
 ) -> ActionRecord | None:
     """Fulfill a contract.
 
-    Normal mode: requires a hand card with `can_fulfill_contract`.
+    Three ways to fulfill a contract:
 
-    `use_launch_pad=True`: skips the hand-card requirement entirely
-    (Launch Pad acts as a free contract icon, once per turn). card_idx
-    is ignored in this branch.
+    1. **Hand card** (default): pass `card_idx` pointing at a hand card
+       with `can_fulfill_contract=True`. Costs 1 AP.
+
+    2. **Discard 2 cards** (new): pass `discard_card_indices` with exactly
+       2 distinct hand indices. The cards are discarded as the cost; no
+       contract-capable card is required. Costs 1 AP. `card_idx` is ignored.
+
+    3. **Launch Pad** (free): pass `use_launch_pad=True`. Skips the
+       hand-card requirement entirely. **Free** (0 AP) but still gated by
+       `has_used_launch_pad_this_turn` (only one Launch Pad contract per
+       turn). `card_idx` and `discard_card_indices` are ignored.
 
     `use_elevator=True`: applies a one-time -1 to ONE resource (Space
     Elevator's per-turn discount). The resource is `elevator_target`
     (e.g. "FE"); if not provided, defaults to the first requirement.
-    Also gated by the per-turn flag.
+    Also gated by the per-turn flag. Combines with all three paths.
 
-    Returns ActionRecord on success, None if any precondition fails.
+    Returns ActionRecord on success, None if any precondition fails
+    (including insufficient action points).
     """
     if contract_idx < 0 or contract_idx >= len(state.available_contracts):
         return None
     contract = state.available_contracts[contract_idx]
+
+    # Determine which path is being taken and how many hand cards will be
+    # consumed. Launch Pad spends 0 cards (it IS the free icon).
+    use_discard = (
+        not use_launch_pad
+        and discard_card_indices is not None
+        and len(discard_card_indices) > 0
+    )
+    if use_launch_pad:
+        cards_cost = 0
+    elif use_discard:
+        cards_cost = 2  # the two discarded hand cards
+    else:
+        cards_cost = 1  # the contract-icon hand card
+    if cards_cost > player.cards_remaining():
+        return None
 
     # Validate Launch Pad path
     if use_launch_pad:
@@ -978,6 +1035,16 @@ def execute_contract(
             return None
         if _count_buildings(player, "Launch Pad") == 0:
             return None
+    elif use_discard:
+        # Discard-2 path: validate that we have exactly 2 distinct in-range
+        # hand indices.
+        if len(discard_card_indices) != 2:
+            return None
+        if discard_card_indices[0] == discard_card_indices[1]:
+            return None
+        for idx in discard_card_indices:
+            if idx < 0 or idx >= len(player.hand):
+                return None
     else:
         if card_idx < 0 or card_idx >= len(player.hand):
             return None
@@ -1025,8 +1092,15 @@ def execute_contract(
         player.credit += leftover
     player.contracts_fulfilled += 1
 
-    # Burn the contract-icon card unless we used Launch Pad (free icon)
-    if not use_launch_pad:
+    # Burn the contract-icon card or the two discards, depending on path.
+    if use_launch_pad:
+        pass  # no card consumed — Launch Pad is the free icon
+    elif use_discard:
+        # Pop indices in descending order so the second pop doesn't shift
+        # the first.
+        for idx in sorted(discard_card_indices, reverse=True):
+            state.deck.discard.append(player.hand.pop(idx))
+    else:
         state.deck.discard.append(player.hand.pop(card_idx))
 
     # Set per-turn flags
@@ -1034,6 +1108,8 @@ def execute_contract(
         player.has_used_space_elevator_this_turn = True
     if use_launch_pad:
         player.has_used_launch_pad_this_turn = True
+    # Count hand cards spent toward per-turn cap
+    player.cards_spent_this_turn += cards_cost
 
     # Display label uses the ORIGINAL requirements so the log is consistent
     # (the discount is reflected in rates_spent for analytics).
@@ -1181,16 +1257,15 @@ def _hook_perpetual_motion(state: GameState, player: Player, card: Card) -> None
 
 
 def _hook_carbon_scrubbing(state: GameState, player: Player, card: Card) -> None:
-    """New buildings do not consume C or O2.
+    """New buildings do not produce negative rates of C or O2.
 
-    Strips C and O2 entries from the card's costs (build-time payment).
-    Negative C/O2 rates are LEFT ALONE — "consume" in the patent text
-    refers to the build-time cost, not the ongoing per-turn drain.
-    Positive C/O2 rates are also untouched.
+    Strips negative C and O2 rates from the card. Build-time costs are
+    UNTOUCHED (the patent only affects the per-turn drain, not what you
+    pay to put the building down). Positive C/O2 rates are also untouched.
     """
-    card.costs = [
-        ra for ra in card.costs
-        if ra.resource not in (Resource.C, Resource.O2)
+    card.rates = [
+        ra for ra in card.rates
+        if not (ra.resource in (Resource.C, Resource.O2) and ra.amount < 0)
     ]
 
 
@@ -1567,42 +1642,11 @@ def do_futures_settlement(state: GameState) -> None:
 
     All players pay the price at the start of settlement. Then the market
     rises by the total negative rates across all players for each resource.
-
-    Optimization Center owners get +1 to a positive non-PWR rate, applied
-    BEFORE the settlement is calculated. The target is the player's
-    pre-declared pick from `state.pending_oc_picks` if set; otherwise it
-    auto-falls back to the highest-priced positive non-PWR rate.
     """
     _record_event_line(state, kind="header", text="Futures Settlement")
     # Snapshot prices before any market shifts
     starting_prices = {r: state.market.price(r) for r in Resource if r != Resource.PWR}
     total_negatives: dict[Resource, int] = {r: 0 for r in starting_prices}
-
-    # Optimization Center: pre-settlement rate boost (one OC per player max)
-    for idx, player in enumerate(state.players):
-        if _count_buildings(player, "Optimization Center") == 0:
-            continue
-        pending_pick = state.pending_oc_picks.pop(idx, None)
-        target = None
-        if pending_pick is not None:
-            try:
-                resource = Resource(pending_pick)
-                if resource != Resource.PWR and player.rate(resource) > 0:
-                    target = resource
-            except ValueError:
-                pass
-        if target is None:
-            # Auto-fallback: highest-priced positive non-PWR rate
-            candidates = [r for r in starting_prices if player.rate(r) > 0]
-            if not candidates:
-                continue
-            target = max(candidates, key=lambda r: starting_prices[r])
-        player.rates[target] = player.rate(target) + 1
-        _record_event_line(
-            state,
-            kind="note",
-            text=f"{player.name}: Optimization Center +1 {target.value}",
-        )
 
     # All players pay debt at the snapshot price
     for player in state.players:
@@ -1918,16 +1962,9 @@ def _event_needs_prompt(state: GameState, event: EventCard) -> dict | None:
     Patent Auction: needs a bid from each human seat (so they can see the
     upcoming patent before bidding).
 
-    Futures Settlement: needs an OC target pick from each human seat that
-    owns an Optimization Center.
-
     Returns None if no human input is required (all-AI game, or the event
     doesn't need prompts).
     """
-    # Need at least one human player for any prompt to be relevant.
-    # The play adapter sets this via PlayableGame initialization. We detect
-    # humans here by checking flags on Player; for now we treat ANY game as
-    # potentially-human and let the play adapter filter.
     if event.type == EventType.PATENT_AUCTION:
         # Peek at the next patent without drawing it
         if state.patent_idx >= len(state.patent_pile):
@@ -1936,31 +1973,6 @@ def _event_needs_prompt(state: GameState, event: EventCard) -> dict | None:
         return {
             "kind": "patent_auction",
             "patent": _patent_to_dict(patent),
-        }
-    if event.type == EventType.FUTURES_SETTLEMENT or event.type == EventType.END_GAME:
-        # END_GAME fires futures settlement as part of its sequence
-        seats_with_oc: list[int] = []
-        for idx, p in enumerate(state.players):
-            if _count_buildings(p, "Optimization Center") > 0:
-                # Skip if they already have a pending pick (e.g. AI auto-set)
-                if idx in state.pending_oc_picks:
-                    continue
-                seats_with_oc.append(idx)
-        if not seats_with_oc:
-            return None
-        # Build the option list per seat — only show resources where the
-        # player has a positive non-PWR rate (those are the only valid picks)
-        seats_data = []
-        for idx in seats_with_oc:
-            p = state.players[idx]
-            options = [
-                r.value for r in Resource
-                if r != Resource.PWR and p.rate(r) > 0
-            ]
-            seats_data.append({"seat_idx": idx, "options": options})
-        return {
-            "kind": "optimization_center",
-            "seats": seats_data,
         }
     return None
 
@@ -2148,18 +2160,23 @@ def run_turn(state: GameState, player: Player, strategy, event: EventCard) -> No
     player.has_built_this_turn = False
     player.has_used_space_elevator_this_turn = False
     player.has_used_launch_pad_this_turn = False
+    player.has_used_optimization_center_this_turn = False
     player.has_used_water_engine_this_turn = False
     player.has_used_nanotechnology_this_turn = False
     player.has_used_teleportation_this_turn = False
+    player.cards_spent_this_turn = 0
 
     # Pool swapping phase (free, before actions)
     swap_fn = getattr(strategy, 'pool_swap', None)
     if swap_fn:
         swap_fn(state, player)
 
-    # Action phase: keep taking actions until hand is empty or player passes
+    # Action phase: keep taking actions until the strategy passes. The
+    # strategy is responsible for returning PASS when no legal action is
+    # available (whether due to AP=0, empty hand, or no affordable plays).
+    # MAX_ACTIONS_PER_TURN is a safety cap against infinite loops.
     actions_taken = 0
-    while player.hand and actions_taken < MAX_ACTIONS_PER_TURN:
+    while actions_taken < MAX_ACTIONS_PER_TURN:
         action = strategy(state, player)
         if action.action_type == ActionType.PASS:
             break

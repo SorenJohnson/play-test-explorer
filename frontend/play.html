@@ -45,6 +45,10 @@
           <span class="status-value" id="active-player">—</span>
         </div>
         <div class="status-cell">
+          <span class="status-label">Cards Left</span>
+          <span class="status-value" id="action-points-display">—</span>
+        </div>
+        <div class="status-cell">
           <span class="status-label">Seed</span>
           <span class="status-value" id="seed-display">—</span>
         </div>
@@ -113,12 +117,12 @@
         </div>
       </section>
 
-      <!-- Patent free actions (Water Engine, Nanotechnology, Teleportation) -->
+      <!-- Free actions: Optimization Center + active patents (Water Engine,
+           Nanotechnology, Teleportation). Each can be used once per turn. -->
       <section id="patent-actions-section" style="display:none;">
-        <h2>Patent Actions</h2>
+        <h2>Free Actions</h2>
         <p class="subtitle">
-          Active patent abilities. Each can be used once per turn (refreshes
-          between turns).
+          Once-per-turn abilities from Optimization Center and active patents.
         </p>
         <div id="patent-actions-list"></div>
       </section>

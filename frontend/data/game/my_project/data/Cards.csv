@@ -98,6 +98,6 @@ O2/FOOD,4,Launch Pad,"2 FE, 2 ELX",-1 O2,Free Action: Fulfill Contract
 O2/FOOD,4,Space Elevator,"5 C, 2 GLS",-2 PWR,-1 Contract Resource Requirements
 Contract,4,Space Elevator,"5 C, 2 GLS",-2 PWR,-1 Contract Resource Requirements
 Contract,4,Space Elevator,"5 C, 2 GLS",-2 PWR,-1 Contract Resource Requirements
-GLS/ELX,4,Optimization Center,"2 FE, 2 GLS",,Futures: Increase a positive resource rate +1
-O2/FOOD,4,Optimization Center,"2 FE, 2 GLS",,Futures: Increase a positive resource rate +1
-Contract,4,Optimization Center,"2 FE, 2 GLS",,Futures: Increase a positive resource rate +1
+GLS/ELX,4,Optimization Center,"2 FE, 2 GLS",,Free Action: -1 PWR and +1 any positive resource
+O2/FOOD,4,Optimization Center,"2 FE, 2 GLS",,Free Action: -1 PWR and +1 any positive resource
+Contract,4,Optimization Center,"2 FE, 2 GLS",,Free Action: -1 PWR and +1 any positive resource

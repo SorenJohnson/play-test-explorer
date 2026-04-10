@@ -75,6 +75,11 @@ let pendingPoolSwapIdx = null;
 let useElevatorThisFulfill = false;
 let elevatorTargetResource = "";
 let useLaunchPadThisFulfill = false;
+// useDiscardForContract: when true, the next "Fulfill Contract" click uses
+// the discard-2 path. selectedBuildIdxs holds the 2 cards to discard (any
+// 2 hand cards — no contract-icon requirement). Mutually exclusive with
+// useLaunchPadThisFulfill.
+let useDiscardForContract = false;
 let hackerTarget = "";
 let hackerDirection = 0;
 
@@ -412,6 +417,7 @@ function clearSelection() {
   useElevatorThisFulfill = false;
   elevatorTargetResource = "";
   useLaunchPadThisFulfill = false;
+  useDiscardForContract = false;
   hackerTarget = "";
   hackerDirection = 0;
 }
@@ -428,7 +434,7 @@ function refreshState() {
 
 function advanceUntilHuman() {
   // Run AI turns until it's the human's turn or game ends. If an AI turn
-  // pauses for a human prompt (auction / OC pick), stop and let the modal
+  // pauses for a human prompt (patent auction), stop and let the modal
   // handle it; resume advancing after the prompt is resolved.
   while (!game.is_over() && !game.is_human_turn()) {
     const result = game.step_ai_turn().toJs({ dict_converter: Object.fromEntries });
@@ -474,8 +480,10 @@ function renderStatusBar() {
   const activeIdx = s.current_player_index;
   const humans = s.human_indices || [s.human_index ?? 0];
   const activeEl = document.getElementById("active-player");
+  const crEl = document.getElementById("action-points-display");
   if (activeIdx < 0) {
     activeEl.innerHTML = "Game Over";
+    if (crEl) crEl.textContent = "—";
     return;
   }
   const youSuffix = humans.includes(activeIdx) ? " (You)" : "";
@@ -483,6 +491,20 @@ function renderStatusBar() {
   const color = playerColor(activeIdx);
   activeEl.innerHTML =
     `<span class="player-swatch" style="background:${color}"></span>${label}`;
+  // Cards remaining: pulled from currentLegal during human turns; for AI
+  // turns we read player.cards_remaining from the state snapshot.
+  if (crEl) {
+    const cr = currentLegal && currentLegal.cards_remaining != null
+      ? currentLegal.cards_remaining
+      : (s.players[activeIdx].cards_remaining ?? "—");
+    crEl.textContent = `${cr} / 2`;
+    crEl.className = "status-value";
+    if (typeof cr === "number") {
+      if (cr >= 2) crEl.classList.add("ap-full");
+      else if (cr === 1) crEl.classList.add("ap-half");
+      else crEl.classList.add("ap-empty");
+    }
+  }
 }
 
 function renderOpponents() {
@@ -903,10 +925,30 @@ function renderHand() {
           selectedBuildIdxs.delete(idx);
         }
       } else {
-        // Toggle as build; mutually exclusive with discard
+        // Toggle as "selected hand card". The same selection set is reused
+        // for build / sell / contract / discard-2-for-contract paths.
         if (selectedBuildIdxs.has(idx)) {
           selectedBuildIdxs.delete(idx);
         } else {
+          // Cap selection size:
+          //   - discard-2-for-contract mode: max 2 cards (you'll discard them)
+          //   - normal mode: max is min(2, action_points_remaining), since
+          //     each additional build card costs 1 AP. Sell/contract use 1
+          //     of the selected cards as the target, so 1 is always fine.
+          const legal = currentLegal || {};
+          const cr = legal.cards_remaining ?? 2;
+          let cap;
+          if (useDiscardForContract) {
+            cap = 2;
+          } else {
+            // Allow selecting up to cards_remaining — this enables
+            // multi-card builds. For sell/contract the user picks 1.
+            cap = Math.max(1, cr);
+          }
+          if (selectedBuildIdxs.size >= cap) {
+            // Refuse silently — render will show a hint
+            return;
+          }
           selectedBuildIdxs.add(idx);
           selectedDiscardIdxs.delete(idx);
         }
@@ -961,55 +1003,89 @@ function renderActionBar() {
 
   passBtn.disabled = false;
 
-  // Build: requires at least one card in build set AND not yet built this turn.
-  // Live affordability is checked via the estimate call in renderHand.
+  // Build: requires at least one card in build set, not yet built this turn,
+  // AP ≥ #cards, and ≤ 2 cards selected.
   const alreadyBuilt = !!s.human_already_built;
+  const cr = legal.cards_remaining ?? 0;
   const hasBuildCards = selectedBuildIdxs.size > 0;
-  let canBuild = hasBuildCards && !alreadyBuilt;
-  if (canBuild) {
-    // Quick check: must have affordable estimate. We could call again, but
-    // the enable state is checked in onBuild as well.
-    // Here, tentatively enable; onBuild will guard against unaffordable.
-  }
+  const buildSize = selectedBuildIdxs.size;
+  const canBuild =
+    hasBuildCards &&
+    !alreadyBuilt &&
+    !useDiscardForContract &&
+    (buildSize + selectedDiscardIdxs.size) <= cr;
   buildBtn.disabled = !canBuild;
 
-  // Sell: requires exactly one card in build set AND it must be sellable
+  // Sell: requires exactly one card selected, sellable, AND ≥ 1 card remaining.
   const canSellIdxs = new Set(legal.can_sell || []);
   const singleSelected = selectedBuildIdxs.size === 1 ? [...selectedBuildIdxs][0] : null;
-  const canSell = singleSelected !== null && canSellIdxs.has(singleSelected);
+  const canSell =
+    !useDiscardForContract &&
+    singleSelected !== null &&
+    canSellIdxs.has(singleSelected) &&
+    cr >= 1;
   sellBtn.disabled = !canSell;
 
   // Contract: legal if a contract is selected and EITHER:
   //   (a) a hand-card is selected and the (card,contract) pair is in can_contract
-  //   (b) Launch Pad toggle is on, owned, unused, and (-1,contract) is in can_contract
-  // Each path can compose with the Space Elevator toggle (which targets one
-  // specific resource on the contract via elevatorTargetResource).
+  //   (b) Launch Pad toggle is on (FREE — no AP gate)
+  //   (c) discard-2 mode is on AND exactly 2 hand cards are selected AND the
+  //       (contract, elevator?) pair is in can_contract_via_discard
+  // Paths (a) and (c) cost 1 AP; (b) is free.
   const canContractList = legal.can_contract || [];
   const matchKey = (entry) =>
     `${entry.card_idx}-${entry.contract_idx}-${entry.use_elevator ? 1 : 0}-${entry.use_launch_pad ? 1 : 0}-${entry.elevator_target || ""}`;
   const validKeys = new Set(canContractList.map(matchKey));
-  const targetCardIdx = useLaunchPadThisFulfill ? -1 : singleSelected;
-  const elevatorKey = useElevatorThisFulfill ? (elevatorTargetResource || "") : "";
-  const canContract =
-    selectedContractIdx !== null &&
-    targetCardIdx !== null &&
-    targetCardIdx !== undefined &&
-    (useLaunchPadThisFulfill || singleSelected !== null) &&
-    validKeys.has(
-      `${targetCardIdx}-${selectedContractIdx}-${useElevatorThisFulfill ? 1 : 0}-${useLaunchPadThisFulfill ? 1 : 0}-${elevatorKey}`
-    );
+  const discardCandidates = legal.can_contract_via_discard || [];
+  const discardValidKeys = new Set(
+    discardCandidates.map((e) => `${e.contract_idx}-${e.use_elevator ? 1 : 0}-${e.elevator_target || ""}`)
+  );
+  let canContract = false;
+  if (selectedContractIdx !== null) {
+    if (useDiscardForContract) {
+      const elevatorKey = useElevatorThisFulfill ? (elevatorTargetResource || "") : "";
+      canContract =
+        selectedBuildIdxs.size === 2 &&
+        cr >= 2 &&
+        discardValidKeys.has(
+          `${selectedContractIdx}-${useElevatorThisFulfill ? 1 : 0}-${elevatorKey}`
+        );
+    } else {
+      const targetCardIdx = useLaunchPadThisFulfill ? -1 : singleSelected;
+      const elevatorKey = useElevatorThisFulfill ? (elevatorTargetResource || "") : "";
+      const crOk = useLaunchPadThisFulfill || cr >= 1;
+      canContract =
+        targetCardIdx !== null &&
+        targetCardIdx !== undefined &&
+        (useLaunchPadThisFulfill || singleSelected !== null) &&
+        crOk &&
+        validKeys.has(
+          `${targetCardIdx}-${selectedContractIdx}-${useElevatorThisFulfill ? 1 : 0}-${useLaunchPadThisFulfill ? 1 : 0}-${elevatorKey}`
+        );
+    }
+  }
   contractBtn.disabled = !canContract;
 
   // Render the special-building toggles (SE / LP / HA picker)
   renderSpecialToggles(legal, singleSelected);
 
   // Hint text
-  if (alreadyBuilt && selectedBuildIdxs.size === 0 && selectedContractIdx === null) {
+  if (cr === 0 && !useLaunchPadThisFulfill) {
+    instr.textContent = "No cards left to spend this turn. Free actions / Launch Pad still available, otherwise pass.";
+  } else if (useDiscardForContract) {
+    if (selectedContractIdx === null) {
+      instr.textContent = "Discard-2 mode: pick a contract first.";
+    } else if (selectedBuildIdxs.size < 2) {
+      instr.textContent = `Discard-2 mode: select 2 hand cards to discard (${selectedBuildIdxs.size}/2).`;
+    } else {
+      instr.textContent = "Click Fulfill Contract to discard these 2 cards and claim the reward.";
+    }
+  } else if (alreadyBuilt && selectedBuildIdxs.size === 0 && selectedContractIdx === null) {
     instr.textContent = "You've already built this turn. You can still sell, fulfill contracts, or pass.";
   } else if (selectedBuildIdxs.size === 0 && selectedContractIdx === null) {
-    instr.textContent = "Click hand cards to select for build (multiple OK). Shift-click to mark as a discard. Click Pass to end your turn.";
+    instr.textContent = `Cards: ${cr}/2. Click hand cards to build, sell, or pick a contract.`;
   } else if (selectedBuildIdxs.size > 1) {
-    instr.textContent = `Building ${selectedBuildIdxs.size} cards together. Click Build to confirm.`;
+    instr.textContent = `Building ${selectedBuildIdxs.size} card(s) (+ ${selectedDiscardIdxs.size} discard). Click Build to confirm.`;
   } else if (canContract) {
     instr.textContent = "Click Fulfill Contract to pay the rate cost and claim the reward.";
   } else if (singleSelected !== null) {
@@ -1095,9 +1171,26 @@ function renderSpecialToggles(legal, singleSelected) {
       <div class="toggle-row">
         <label class="toggle-checkbox-label">
           <input type="checkbox" id="lp-toggle" ${useLaunchPadThisFulfill && !used ? "checked" : ""} ${used ? "disabled" : ""}>
-          <span>Use Launch Pad (free contract icon)</span>
+          <span>Use Launch Pad (free contract — 0 AP)</span>
         </label>
         ${used ? '<span style="color:#8b949e; font-size:0.75rem;">already used this turn</span>' : ''}
+      </div>
+    `);
+  }
+
+  // Discard-2-for-contract toggle. Visible whenever the player has ≥ 2 hand
+  // cards and is currently looking at a contract. When checked, the next
+  // "Fulfill Contract" click discards the 2 selected hand cards instead of
+  // requiring a contract-icon card.
+  const discardCandidates = (legal && legal.can_contract_via_discard) || [];
+  const hasDiscardOption = discardCandidates.length > 0;
+  if (hasDiscardOption) {
+    parts.push(`
+      <div class="toggle-row">
+        <label class="toggle-checkbox-label">
+          <input type="checkbox" id="discard-2-toggle" ${useDiscardForContract ? "checked" : ""}>
+          <span>Discard 2 cards to fulfill contract (1 AP, no contract icon needed)</span>
+        </label>
       </div>
     `);
   }
@@ -1148,6 +1241,22 @@ function renderSpecialToggles(legal, singleSelected) {
   if (lpToggleEl) {
     lpToggleEl.addEventListener("change", (e) => {
       useLaunchPadThisFulfill = e.target.checked;
+      // LP and discard-2 are mutually exclusive
+      if (useLaunchPadThisFulfill) useDiscardForContract = false;
+      render();
+    });
+  }
+  const discard2El = document.getElementById("discard-2-toggle");
+  if (discard2El) {
+    discard2El.addEventListener("change", (e) => {
+      useDiscardForContract = e.target.checked;
+      // Discard-2 and LP are mutually exclusive
+      if (useDiscardForContract) {
+        useLaunchPadThisFulfill = false;
+        // Clear any single-card selection — the user now needs 2 cards.
+        // Don't clear the set entirely so any in-progress selection of 2
+        // cards is preserved.
+      }
       render();
     });
   }
@@ -1212,35 +1321,6 @@ function renderPromptModal(prompt) {
         heuristic based on the patent's rate value.
       </p>
     `;
-  } else if (prompt.kind === "optimization_center") {
-    titleEl.textContent = "Optimization Center";
-    const seats = prompt.seats || [];
-    const humans = new Set(currentState.human_indices || []);
-    // Show one picker per human seat that owns an OC
-    const inputs = seats
-      .filter((s) => humans.has(s.seat_idx))
-      .map((s) => {
-        const player = currentState.players[s.seat_idx];
-        const options = (s.options || [])
-          .map((r) => `<option value="${r}">${r}</option>`)
-          .join("");
-        return `
-          <div class="prompt-row">
-            <label>${player.name}:</label>
-            <select class="prompt-oc-input" data-seat-idx="${s.seat_idx}">
-              <option value="">— auto-pick —</option>
-              ${options}
-            </select>
-          </div>
-        `;
-      })
-      .join("");
-    bodyEl.innerHTML = `
-      <p>Optimization Center: pick which positive resource rate to boost
-      by +1 before the futures settlement fires. Auto-pick falls back to
-      the highest-priced positive non-PWR rate.</p>
-      ${inputs}
-    `;
   } else {
     titleEl.textContent = "Pending";
     bodyEl.innerHTML = `<p>Unknown prompt: ${prompt.kind}</p>`;
@@ -1260,13 +1340,6 @@ function submitPromptAnswer() {
       bids[idx] = amt;
     });
     answers = { bids };
-  } else if (prompt.kind === "optimization_center") {
-    const picks = {};
-    document.querySelectorAll(".prompt-oc-input").forEach((sel) => {
-      const idx = parseInt(sel.dataset.seatIdx, 10);
-      if (sel.value) picks[idx] = sel.value;
-    });
-    answers = { picks };
   } else {
     answers = {};
   }
@@ -1341,7 +1414,12 @@ function renderPatentActions() {
   const section = document.getElementById("patent-actions-section");
   if (!section) return;
   const pa = legal.patent_actions || {};
-  const ownsAny = pa.water_engine?.owned || pa.nanotechnology?.owned || pa.teleportation?.owned;
+  const oc = legal.optimization_center_status || {};
+  const ownsAny =
+    pa.water_engine?.owned ||
+    pa.nanotechnology?.owned ||
+    pa.teleportation?.owned ||
+    oc.owned;
   const isHumanTurn = (s.human_indices || []).includes(s.current_player_index);
   if (!ownsAny || !isHumanTurn) {
     section.style.display = "none";
@@ -1352,6 +1430,7 @@ function renderPatentActions() {
   const host = document.getElementById("patent-actions-list");
   if (!host) return;
   const youIdx = activeHumanIndex(s);
+  const youPlayer = s.players[youIdx];
 
   const parts = [];
 
@@ -1363,6 +1442,24 @@ function renderPatentActions() {
     }
     return "";
   };
+
+  if (oc.owned) {
+    const opts = (oc.valid_resources || [])
+      .map((r) => `<option value="${r}">${r}</option>`)
+      .join("");
+    parts.push(`
+      <div class="patent-action-row">
+        <strong>Optimization Center</strong> &mdash; -1 PWR rate, +1 to any positive resource.
+        <select id="pa-oc-resource" class="toggle-select" ${oc.available ? "" : "disabled"}>
+          ${opts || '<option value="">— no positive rates —</option>'}
+        </select>
+        <button id="pa-oc-btn" class="action-btn" ${oc.available ? "" : "disabled"}>
+          Use Optimization Center
+        </button>
+        ${statusLabel(oc, "no positive rates")}
+      </div>
+    `);
+  }
 
   if (pa.water_engine?.owned) {
     const status = pa.water_engine;
@@ -1380,14 +1477,21 @@ function renderPatentActions() {
 
   if (pa.nanotechnology?.owned) {
     const status = pa.nanotechnology;
+    // Build a dropdown of hand cards so the user can pick which one to discard.
+    const handOpts = (youPlayer.hand || [])
+      .map((c, i) => `<option value="${i}">${i + 1}: ${c.building}</option>`)
+      .join("");
+    const canUse = status.available && (youPlayer.hand || []).length > 0;
     parts.push(`
       <div class="patent-action-row">
-        <strong>Nanotechnology</strong> &mdash; discard your hand and draw fresh.
-        <button id="pa-nanotech-btn" class="action-btn"
-                ${status.available ? "" : "disabled"}>
-          Discard &amp; Redraw
+        <strong>Nanotechnology</strong> &mdash; discard 1 card, draw 1 card.
+        <select id="pa-nano-card" class="toggle-select" ${canUse ? "" : "disabled"}>
+          ${handOpts || '<option value="">— hand is empty —</option>'}
+        </select>
+        <button id="pa-nanotech-btn" class="action-btn" ${canUse ? "" : "disabled"}>
+          Discard &amp; Draw
         </button>
-        ${statusLabel(status, "cannot use")}
+        ${statusLabel(status, "hand is empty")}
       </div>
     `);
   }
@@ -1414,6 +1518,24 @@ function renderPatentActions() {
   host.innerHTML = parts.join("");
 
   // Wire button handlers
+  const ocBtn = document.getElementById("pa-oc-btn");
+  if (ocBtn) {
+    ocBtn.addEventListener("click", () => {
+      const sel = document.getElementById("pa-oc-resource");
+      if (!sel || !sel.value) {
+        alert("Pick a resource to boost first.");
+        return;
+      }
+      const result = game.use_optimization_center(youIdx, sel.value)
+        .toJs({ dict_converter: Object.fromEntries });
+      if (result.ok) {
+        logHumanAction(result);
+      } else {
+        alert(`Optimization Center failed: ${result.reason}`);
+      }
+      refreshState();
+    });
+  }
   const weBtn = document.getElementById("pa-water-engine-btn");
   if (weBtn) {
     weBtn.addEventListener("click", () => {
@@ -1429,7 +1551,14 @@ function renderPatentActions() {
   const nanoBtn = document.getElementById("pa-nanotech-btn");
   if (nanoBtn) {
     nanoBtn.addEventListener("click", () => {
-      const result = game.use_nanotechnology(youIdx).toJs({ dict_converter: Object.fromEntries });
+      const sel = document.getElementById("pa-nano-card");
+      if (!sel || sel.value === "") {
+        alert("Pick a card to discard first.");
+        return;
+      }
+      const cardIdx = parseInt(sel.value, 10);
+      const result = game.use_nanotechnology(youIdx, cardIdx)
+        .toJs({ dict_converter: Object.fromEntries });
       if (result.ok) {
         logHumanAction(result);
       } else {
@@ -1659,20 +1788,36 @@ function onSell() {
 }
 
 function onContract() {
-  // With Launch Pad, no hand card is required.
   if (selectedContractIdx === null) return;
-  if (!useLaunchPadThisFulfill && selectedBuildIdxs.size !== 1) return;
-  const cardIdx = useLaunchPadThisFulfill
-    ? -1
-    : [...selectedBuildIdxs][0];
-  const action = {
-    type: "contract",
-    card_idx: cardIdx,
-    contract_idx: selectedContractIdx,
-    use_elevator: useElevatorThisFulfill,
-    use_launch_pad: useLaunchPadThisFulfill,
-    elevator_target: useElevatorThisFulfill ? elevatorTargetResource : "",
-  };
+  // Three paths:
+  //   - useLaunchPadThisFulfill: card_idx = -1, no hand card needed (FREE)
+  //   - useDiscardForContract: 2 selected cards become discard_card_indices
+  //   - default: exactly 1 selected card becomes the contract card
+  let action;
+  if (useDiscardForContract) {
+    if (selectedBuildIdxs.size !== 2) return;
+    action = {
+      type: "contract",
+      card_idx: -1,
+      contract_idx: selectedContractIdx,
+      use_discard: true,
+      discard_card_indices: [...selectedBuildIdxs],
+      use_elevator: useElevatorThisFulfill,
+      use_launch_pad: false,
+      elevator_target: useElevatorThisFulfill ? elevatorTargetResource : "",
+    };
+  } else {
+    if (!useLaunchPadThisFulfill && selectedBuildIdxs.size !== 1) return;
+    const cardIdx = useLaunchPadThisFulfill ? -1 : [...selectedBuildIdxs][0];
+    action = {
+      type: "contract",
+      card_idx: cardIdx,
+      contract_idx: selectedContractIdx,
+      use_elevator: useElevatorThisFulfill,
+      use_launch_pad: useLaunchPadThisFulfill,
+      elevator_target: useElevatorThisFulfill ? elevatorTargetResource : "",
+    };
+  }
   applyHumanAction(action, (result) => {
     if (result.ok) {
       logHumanAction(result);

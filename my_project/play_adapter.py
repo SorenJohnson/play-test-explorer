@@ -39,6 +39,7 @@ from my_project.simulation import (
     EventType,
     GameState,
     HAND_SIZE,
+    MAX_CARDS_PER_TURN,
     Player,
     _default_ai_bid,
     _player_owns_patent,
@@ -273,9 +274,11 @@ class PlayableGame:
         active.has_built_this_turn = False
         active.has_used_space_elevator_this_turn = False
         active.has_used_launch_pad_this_turn = False
+        active.has_used_optimization_center_this_turn = False
         active.has_used_water_engine_this_turn = False
         active.has_used_nanotechnology_this_turn = False
         active.has_used_teleportation_this_turn = False
+        active.cards_spent_this_turn = 0
         # Pre-advance event_idx and stash the current turn's event so that
         # state.remaining_events() does NOT reveal it to the UI or any helper
         # that inspects remaining events during the action phase.
@@ -358,6 +361,11 @@ class PlayableGame:
             discard_idx = list(action.get("discard_cards") or [])
             if not build_idx:
                 return {"ok": False, "reason": "No cards selected"}
+            if len(build_idx) > 2:
+                return {"ok": False, "reason": "Max 2 cards per build"}
+            total_cards = len(build_idx) + len(discard_idx)
+            if total_cards > player.cards_remaining():
+                return {"ok": False, "reason": f"Would spend {total_cards} cards but only {player.cards_remaining()} left this turn"}
             record = execute_build(self.state, player, build_idx, discard_idx)
             if record is None:
                 return {"ok": False, "reason": "Cannot afford build (or duplicate special)"}
@@ -365,6 +373,8 @@ class PlayableGame:
             return _record_to_dict(record, ok=True, player=player)
 
         if atype == "sell":
+            if player.cards_remaining() < 1:
+                return {"ok": False, "reason": "No cards left to spend this turn"}
             idx = action.get("card_idx", -1)
             if idx < 0 or idx >= len(player.hand):
                 return {"ok": False, "reason": "Invalid card"}
@@ -378,6 +388,8 @@ class PlayableGame:
                 hacker_target=action.get("hacker_target") or None,
                 hacker_direction=int(action.get("hacker_direction", 0) or 0),
             )
+            if record is None:
+                return {"ok": False, "reason": "Sell failed"}
             self._turn_action_records.append(record)
             return _record_to_dict(record, ok=True, player=player)
 
@@ -386,8 +398,30 @@ class PlayableGame:
             contract_idx = action.get("contract_idx", -1)
             use_elevator = bool(action.get("use_elevator", False))
             use_launch_pad = bool(action.get("use_launch_pad", False))
+            use_discard = bool(action.get("use_discard", False))
+            discard_card_indices = list(action.get("discard_card_indices") or [])
             elevator_target = action.get("elevator_target") or None
-            if not use_launch_pad:
+            # Card-spend check (Launch Pad is free; discard-2 costs 2; hand card costs 1)
+            if use_launch_pad:
+                cards_cost = 0
+            elif use_discard:
+                cards_cost = 2
+            else:
+                cards_cost = 1
+            if cards_cost > player.cards_remaining():
+                return {"ok": False, "reason": f"Would spend {cards_cost} cards but only {player.cards_remaining()} left this turn"}
+            # Path-specific validation
+            if use_launch_pad:
+                pass  # execute_contract validates the LP-once-per-turn flag
+            elif use_discard:
+                if len(discard_card_indices) != 2:
+                    return {"ok": False, "reason": "Pick exactly 2 cards to discard"}
+                if discard_card_indices[0] == discard_card_indices[1]:
+                    return {"ok": False, "reason": "Cannot discard the same card twice"}
+                for di in discard_card_indices:
+                    if di < 0 or di >= len(player.hand):
+                        return {"ok": False, "reason": "Invalid discard card"}
+            else:
                 if card_idx < 0 or card_idx >= len(player.hand):
                     return {"ok": False, "reason": "Invalid card"}
                 if not player.hand[card_idx].can_fulfill_contract:
@@ -399,6 +433,7 @@ class PlayableGame:
                 player,
                 card_idx,
                 contract_idx,
+                discard_card_indices=discard_card_indices if use_discard else None,
                 use_elevator=use_elevator,
                 use_launch_pad=use_launch_pad,
                 elevator_target=elevator_target,
@@ -461,9 +496,9 @@ class PlayableGame:
             **_nw_snapshot(player),
         }
 
-    def use_nanotechnology(self, seat_idx: int) -> dict:
-        """Nanotechnology: discard the entire hand and draw the same number
-        of fresh cards. Once per turn."""
+    def use_nanotechnology(self, seat_idx: int, card_idx: int) -> dict:
+        """Nanotechnology: discard ONE card from your hand, draw ONE back.
+        Once per turn."""
         if seat_idx not in self._human_indices:
             return {"ok": False, "reason": "Not a human seat"}
         player = self.state.players[seat_idx]
@@ -471,26 +506,55 @@ class PlayableGame:
             return {"ok": False, "reason": "No Nanotechnology"}
         if player.has_used_nanotechnology_this_turn:
             return {"ok": False, "reason": "Already used this turn"}
-        n = len(player.hand)
-        if n == 0:
-            # Mark as used to prevent infinite UI clicks; otherwise no-op
-            player.has_used_nanotechnology_this_turn = True
-            return {
-                "ok": True,
-                "type": "patent",
-                "detail": "Nanotechnology: empty hand, no-op",
-                **_nw_snapshot(player),
-            }
-        # Discard entire hand
-        self.state.deck.discard.extend(player.hand)
-        player.hand = []
-        # Draw same number back
-        player.hand.extend(self.state.deck.draw(n))
+        if not player.hand:
+            return {"ok": False, "reason": "Hand is empty"}
+        if card_idx < 0 or card_idx >= len(player.hand):
+            return {"ok": False, "reason": f"Invalid card index: {card_idx}"}
+        # Discard the chosen card and draw one fresh card back.
+        discarded = player.hand.pop(card_idx)
+        self.state.deck.discard.append(discarded)
+        drawn = self.state.deck.draw(1)
+        player.hand.extend(drawn)
         player.has_used_nanotechnology_this_turn = True
+        new_name = drawn[0].building if drawn else "(deck empty)"
         return {
             "ok": True,
             "type": "patent",
-            "detail": f"Nanotechnology: discarded and redrew {n} cards",
+            "detail": (
+                f"Nanotechnology: discarded {discarded.building}, "
+                f"drew {new_name}"
+            ),
+            **_nw_snapshot(player),
+        }
+
+    def use_optimization_center(self, seat_idx: int, resource: str) -> dict:
+        """Optimization Center: free action — −1 PWR rate, +1 to any
+        positive non-PWR resource rate. Once per turn.
+        """
+        if seat_idx not in self._human_indices:
+            return {"ok": False, "reason": "Not a human seat"}
+        from my_project.simulation import _count_buildings
+        player = self.state.players[seat_idx]
+        if _count_buildings(player, "Optimization Center") == 0:
+            return {"ok": False, "reason": "No Optimization Center"}
+        if player.has_used_optimization_center_this_turn:
+            return {"ok": False, "reason": "Already used this turn"}
+        try:
+            res = Resource(resource)
+        except ValueError:
+            return {"ok": False, "reason": f"Invalid resource: {resource}"}
+        if res == Resource.PWR:
+            return {"ok": False, "reason": "Cannot target PWR"}
+        if player.rate(res) < 1:
+            return {"ok": False, "reason": f"Need at least +1 {resource} rate"}
+        # Apply: -1 PWR, +1 chosen resource
+        player.rates[Resource.PWR] = player.rate(Resource.PWR) - 1
+        player.rates[res] = player.rate(res) + 1
+        player.has_used_optimization_center_this_turn = True
+        return {
+            "ok": True,
+            "type": "special",
+            "detail": f"Optimization Center: -1 PWR, +1 {resource}",
             **_nw_snapshot(player),
         }
 
@@ -541,8 +605,6 @@ class PlayableGame:
 
         For patent_auction prompts, `answers` should be:
             {"bids": {seat_idx: amount, ...}}
-        For optimization_center prompts:
-            {"picks": {seat_idx: resource_value, ...}}
 
         After answers are written to state, fires the suspended event by
         calling resume_pending_event(state, active_player). If the event
@@ -559,13 +621,6 @@ class PlayableGame:
             for seat_idx_raw, amount in bids.items():
                 seat_idx = int(seat_idx_raw)
                 self.state.pending_bids[seat_idx] = max(0, int(amount))
-        elif kind == "optimization_center":
-            picks = answers.get("picks", {})
-            for seat_idx_raw, resource in picks.items():
-                seat_idx = int(seat_idx_raw)
-                if not resource:
-                    continue
-                self.state.pending_oc_picks[seat_idx] = resource
 
         # Resume the suspended event
         if self.human_turn_in_progress:
@@ -639,9 +694,11 @@ class PlayableGame:
         player.has_built_this_turn = False
         player.has_used_space_elevator_this_turn = False
         player.has_used_launch_pad_this_turn = False
+        player.has_used_optimization_center_this_turn = False
         player.has_used_water_engine_this_turn = False
         player.has_used_nanotechnology_this_turn = False
         player.has_used_teleportation_this_turn = False
+        player.cards_spent_this_turn = 0
 
         # Look up this seat's strategy. seats is fully populated by __post_init__.
         strategy_fn = _resolve_strategy(self.seats[acting_player_idx])
@@ -651,11 +708,14 @@ class PlayableGame:
         if swap_fn:
             swap_fn(self.state, player)
 
-        # Action phase
+        # Action phase. Loop runs until the strategy returns PASS — empty
+        # hand is no longer a stopping condition because free actions
+        # (notably Launch Pad contracts) remain legal at hand=0 and AP=0.
+        # max_actions is a safety cap against infinite loops.
         self.state.turn += 1
         actions_taken = 0
         max_actions = 10  # mirrors MAX_ACTIONS_PER_TURN
-        while player.hand and actions_taken < max_actions:
+        while actions_taken < max_actions:
             action = strategy_fn(self.state, player)
             if action.action_type == ActionType.PASS:
                 break
@@ -799,22 +859,36 @@ class PlayableGame:
 
         Returns a dict with:
           - already_built: bool — True if a build action has already been taken
+          - cards_remaining: int — how many more hand cards can be spent this turn
+          - max_build_cards: int — max # of cards the player can build
+            (one-build-per-turn constraint + cards_remaining)
           - affordable_single_builds: list of {card_idx, cost} for single-card
-            builds that are currently affordable (UI hint only; real build is
-            a multi-card action).
-          - can_sell: list of card indices sellable this turn
-          - can_contract: list of {card_idx, contract_idx} pairs currently legal
+            builds that are currently affordable (filtered by cards_remaining)
+          - can_sell: list of card indices sellable this turn (filtered by cards_remaining)
+          - can_contract: list of {card_idx, contract_idx, ...} entries (Path A
+            entries need cards_remaining ≥ 1; Launch Pad Path C entries are always
+            shown when LP is unused since LP spends 0 cards)
+          - can_contract_via_discard: list of {contract_idx, elevator_target}
+            entries that can be fulfilled by discarding 2 hand cards (the new
+            Path B). Only emitted if the player has ≥ 2 hand cards AND
+            cards_remaining ≥ 2.
         """
         if not self.is_human_turn():
             return {
                 "already_built": False,
+                "cards_remaining": 0,
+                "max_build_cards": 0,
                 "affordable_single_builds": [],
                 "can_sell": [],
                 "can_contract": [],
+                "can_contract_via_discard": [],
                 "space_elevator_status": {"owned": False, "used": False},
                 "launch_pad_status": {"owned": False, "used": False},
                 "hacker_array_status": {"owned": False},
-                "optimization_center_owned": False,
+                "optimization_center_status": {
+                    "owned": False, "used": False, "available": False,
+                    "valid_resources": [],
+                },
                 "patent_actions": {
                     "water_engine": {"owned": False, "used": False, "available": False},
                     "nanotechnology": {"owned": False, "used": False, "available": False},
@@ -823,13 +897,16 @@ class PlayableGame:
             }
         player = self.current_player()
         already_built = player.has_built_this_turn
+        cr = player.cards_remaining()
+        max_build_cards = 0 if already_built else min(cr, len(player.hand))
 
         from my_project.simulation import _count_buildings
 
-        # Affordable single-card builds (only meaningful if not already built).
-        # Skips slot-4 specials the player already owns (one-of-each rule).
+        # Affordable single-card builds (only meaningful if not already built
+        # AND player has ≥ 1 AP). Skips slot-4 specials the player already
+        # owns (one-of-each rule).
         affordable = []
-        if not already_built:
+        if max_build_cards >= 1:
             for i, card in enumerate(player.hand):
                 if card.effect and _count_buildings(player, card.building) > 0:
                     continue  # already owns this special
@@ -838,13 +915,14 @@ class PlayableGame:
                     _, cost = result
                     affordable.append({"card_idx": i, "cost": cost})
 
-        # Sellable cards
+        # Sellable cards (require ≥ 1 AP to sell anything)
         can_sell = []
-        for i, card in enumerate(player.hand):
-            if not card.can_sell:
-                continue
-            if any(player.rate(r) > 0 for r in card.can_sell):
-                can_sell.append(i)
+        if cr >= 1:
+            for i, card in enumerate(player.hand):
+                if not card.can_sell:
+                    continue
+                if any(player.rate(r) > 0 for r in card.can_sell):
+                    can_sell.append(i)
 
         # Special-building consumable status
         se_owned = _count_buildings(player, "Space Elevator") > 0
@@ -853,11 +931,19 @@ class PlayableGame:
         lp_used = player.has_used_launch_pad_this_turn
         ha_owned = _count_buildings(player, "Hacker Array") > 0
         oc_owned = _count_buildings(player, "Optimization Center") > 0
+        oc_used = player.has_used_optimization_center_this_turn
+        oc_resources = [
+            r.value for r in Resource
+            if r != Resource.PWR and player.rate(r) > 0
+        ]
 
         # Contract-fulfillable combinations. Each entry includes flags for
         # which special-building paths it requires. With the new SE semantics
         # (-1 to ONE resource), we enumerate per-resource elevator picks too.
-        can_contract = []
+        # Path A (hand card) and Path B (discard 2) cost 1 AP; Path C
+        # (Launch Pad) is free, so LP entries are emitted regardless of AP.
+        can_contract: list[dict] = []
+        can_contract_via_discard: list[dict] = []
         for j, contract in enumerate(self.state.available_contracts):
             plain_reqs = effective_contract_requirements(player, contract, apply_elevator=False)
             plain_ok = all(player.rate(req.resource) >= req.amount for req in plain_reqs)
@@ -876,23 +962,38 @@ class PlayableGame:
             if not plain_ok and not se_targets:
                 continue
 
-            # Real hand cards
-            for i, card in enumerate(player.hand):
-                if not card.can_fulfill_contract:
-                    continue
+            # Path A — hand cards (spends 1 card)
+            if cr >= 1:
+                for i, card in enumerate(player.hand):
+                    if not card.can_fulfill_contract:
+                        continue
+                    if plain_ok:
+                        can_contract.append({
+                            "card_idx": i, "contract_idx": j,
+                            "use_elevator": False, "use_launch_pad": False,
+                            "elevator_target": "",
+                        })
+                    for target in se_targets:
+                        can_contract.append({
+                            "card_idx": i, "contract_idx": j,
+                            "use_elevator": True, "use_launch_pad": False,
+                            "elevator_target": target,
+                        })
+            # Path B — discard 2 cards (spends 2 cards, no contract-card requirement)
+            if cr >= 2 and len(player.hand) >= 2:
                 if plain_ok:
-                    can_contract.append({
-                        "card_idx": i, "contract_idx": j,
-                        "use_elevator": False, "use_launch_pad": False,
+                    can_contract_via_discard.append({
+                        "contract_idx": j,
+                        "use_elevator": False,
                         "elevator_target": "",
                     })
                 for target in se_targets:
-                    can_contract.append({
-                        "card_idx": i, "contract_idx": j,
-                        "use_elevator": True, "use_launch_pad": False,
+                    can_contract_via_discard.append({
+                        "contract_idx": j,
+                        "use_elevator": True,
                         "elevator_target": target,
                     })
-            # Launch Pad path (no hand card needed)
+            # Path C — Launch Pad (FREE, no AP cost; still gated by per-turn flag)
             if lp_owned and not lp_used:
                 if plain_ok:
                     can_contract.append({
@@ -951,13 +1052,21 @@ class PlayableGame:
 
         return {
             "already_built": already_built,
+            "cards_remaining": cr,
+            "max_build_cards": max_build_cards,
             "affordable_single_builds": affordable,
             "can_sell": can_sell,
             "can_contract": can_contract,
+            "can_contract_via_discard": can_contract_via_discard,
             "space_elevator_status": {"owned": se_owned, "used": se_used},
             "launch_pad_status": {"owned": lp_owned, "used": lp_used},
             "hacker_array_status": {"owned": ha_owned},
-            "optimization_center_owned": oc_owned,
+            "optimization_center_status": {
+                "owned": oc_owned,
+                "used": oc_used,
+                "available": oc_owned and not oc_used and len(oc_resources) > 0,
+                "valid_resources": oc_resources,
+            },
             "patent_actions": patent_actions,
         }
 
@@ -1047,6 +1156,7 @@ def _player_dict(player: Player, is_human: bool, reveal_hand: bool = False) -> d
         "contracts_fulfilled": player.contracts_fulfilled,
         "hand_size": len(player.hand),
         "hand": [_card_dict(c) for c in player.hand] if reveal_hand else [],
+        "cards_remaining": player.cards_remaining(),
         "is_human": is_human,
     }
 

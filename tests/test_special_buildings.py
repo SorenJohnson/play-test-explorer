@@ -330,77 +330,83 @@ class TestSpaceElevator:
 
 
 # --- Optimization Center ---
+#
+# OC is now a per-turn free action: -1 PWR rate, +1 to any positive non-PWR
+# resource rate. Tested through PlayableGame.use_optimization_center, since
+# the action lives on the play adapter (not in simulation.py).
 
 
 class TestOptimizationCenter:
-    def test_no_oc_no_boost(self):
-        cards, contracts = _load()
-        state = GameState.create(cards, contracts, num_players=3)
-        # Force a known positive rate
-        state.players[0].rates[Resource.FE] = 2
-        before = state.players[0].rate(Resource.FE)
-        do_futures_settlement(state)
-        # Without OC, the rate stays the same (the settlement debits debt
-        # for negatives but doesn't touch positives).
-        assert state.players[0].rate(Resource.FE) == before
+    def _make_game_with_oc(self):
+        from my_project.play_adapter import PlayableGame
+        game = PlayableGame(seats=["human", "smart"], seed=123)
+        p = game.state.players[0]
+        p.buildings_played.append(_build_special("Optimization Center"))
+        p.has_used_optimization_center_this_turn = False
+        return game, p
 
-    def test_oc_boosts_highest_priced_positive_rate(self):
+    def test_no_oc_no_boost(self):
+        """Calling without owning the building is rejected."""
+        from my_project.play_adapter import PlayableGame
+        game = PlayableGame(seats=["human", "smart"], seed=123)
+        p = game.state.players[0]
+        p.rates[Resource.FE] = 2
+        result = game.use_optimization_center(0, "FE")
+        assert not result["ok"]
+        # Rate is unchanged
+        assert p.rate(Resource.FE) == 2
+
+    def test_use_boosts_chosen_resource(self):
+        game, p = self._make_game_with_oc()
+        p.rates[Resource.FE] = 2
+        pwr_before = p.rate(Resource.PWR)
+        result = game.use_optimization_center(0, "FE")
+        assert result["ok"]
+        assert p.rate(Resource.FE) == 3
+        # PWR rate dropped by 1
+        assert p.rate(Resource.PWR) == pwr_before - 1
+        assert p.has_used_optimization_center_this_turn
+
+    def test_blocked_when_already_used(self):
+        game, p = self._make_game_with_oc()
+        p.rates[Resource.FE] = 2
+        game.use_optimization_center(0, "FE")
+        result = game.use_optimization_center(0, "FE")
+        assert not result["ok"]
+
+    def test_blocked_when_resource_not_positive(self):
+        game, p = self._make_game_with_oc()
+        # Player has 0 FE rate
+        p.rates[Resource.FE] = 0
+        result = game.use_optimization_center(0, "FE")
+        assert not result["ok"]
+        assert not p.has_used_optimization_center_this_turn
+
+    def test_cannot_target_pwr(self):
+        game, p = self._make_game_with_oc()
+        p.rates[Resource.PWR] = 5  # plenty of PWR
+        result = game.use_optimization_center(0, "PWR")
+        assert not result["ok"]
+
+    def test_invalid_resource_rejected(self):
+        game, p = self._make_game_with_oc()
+        result = game.use_optimization_center(0, "BOGUS")
+        assert not result["ok"]
+
+    def test_futures_settlement_no_longer_touches_oc(self):
+        """OC has no effect on futures settlement under the new rules."""
         cards, contracts = _load()
         state = GameState.create(cards, contracts, num_players=3)
         p = state.players[0]
-        # Two positive rates, one priced higher than the other
+        p.buildings_played.append(_build_special("Optimization Center"))
         p.rates[Resource.FE] = 2
         p.rates[Resource.GLS] = 1
-        # Manually adjust market so GLS is priced higher than FE
-        state.market.adjust(Resource.GLS, 5)
-        gls_price = state.market.price(Resource.GLS)
-        fe_price = state.market.price(Resource.FE)
-        assert gls_price > fe_price
-        p.buildings_played.append(_build_special("Optimization Center"))
+        before_fe = p.rate(Resource.FE)
+        before_gls = p.rate(Resource.GLS)
         do_futures_settlement(state)
-        # GLS got the +1 boost (highest priced positive)
-        assert p.rate(Resource.GLS) == 2
-        assert p.rate(Resource.FE) == 2
-
-    def test_oc_uses_pre_declared_pick(self):
-        """When state.pending_oc_picks has the player's pick, that resource gets the boost."""
-        cards, contracts = _load()
-        state = GameState.create(cards, contracts, num_players=3)
-        p = state.players[0]
-        p.rates[Resource.FE] = 1
-        p.rates[Resource.GLS] = 2
-        # Set up so GLS is most expensive (the auto-pick) but pick FE explicitly
-        state.market.adjust(Resource.GLS, 8)
-        p.buildings_played.append(_build_special("Optimization Center"))
-        state.pending_oc_picks[0] = "FE"
-        do_futures_settlement(state)
-        # The explicit pick wins over the auto-pick
-        assert p.rate(Resource.FE) == 2
-        assert p.rate(Resource.GLS) == 2  # not boosted
-
-    def test_pending_oc_pick_consumed(self):
-        """The pick is consumed (popped) after the settlement fires."""
-        cards, contracts = _load()
-        state = GameState.create(cards, contracts, num_players=3)
-        p = state.players[0]
-        p.rates[Resource.FE] = 1
-        p.buildings_played.append(_build_special("Optimization Center"))
-        state.pending_oc_picks[0] = "FE"
-        do_futures_settlement(state)
-        assert 0 not in state.pending_oc_picks
-
-    def test_invalid_pick_falls_back_to_auto(self):
-        """Picking PWR / a 0-rate resource / a bad string falls back to auto-pick."""
-        cards, contracts = _load()
-        state = GameState.create(cards, contracts, num_players=3)
-        p = state.players[0]
-        p.rates[Resource.FE] = 2
-        p.buildings_played.append(_build_special("Optimization Center"))
-        # Pick a resource the player doesn't actually have a positive rate for
-        state.pending_oc_picks[0] = "GLS"
-        do_futures_settlement(state)
-        # Should fall back to auto-pick (FE, the only positive rate)
-        assert p.rate(Resource.FE) == 3
+        # Neither rate should be boosted by the settlement
+        assert p.rate(Resource.FE) == before_fe
+        assert p.rate(Resource.GLS) == before_gls
 
 
 # --- Hacker Array ---

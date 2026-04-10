@@ -56,6 +56,15 @@ body {
   font-size: 1rem;
   font-weight: 600;
 }
+.status-value.ap-full {
+  color: #3fb950;
+}
+.status-value.ap-half {
+  color: #d29922;
+}
+.status-value.ap-empty {
+  color: #8b949e;
+}
 .primary-btn {
   margin-left: auto;
   background: #238636;

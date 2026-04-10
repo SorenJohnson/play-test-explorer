@@ -3,11 +3,11 @@ Superconductors,New Power Buildings: +1 PWR
 Energy Vault,10 PWR stockpile (consumed during Power Bill)
 Financial Instruments,Debt Collection: +$1 per +$1 added to others’ debt
 Water Engine,Free Action: turn +1 H2O into +2 PWR
-Nanotechnology,"Before passing, can discard and redraw once"
+Nanotechnology,"Free Action: Discard one card and draw one card"
 Cold Fusion,+1 PWR from new Water Buildings
 Virtual Reality,Double revenue from Pleasure Dome
 Perpetual Motion,New H2O/FE/C/SI buildings consume no PWR
-Carbon Scrubbing,New buildings do not consume C or O2
+Carbon Scrubbing,New buildings do not produce negative rates C or O2
 Slant Drilling,+1 from new FE/SI Buildings
 Thinking Machines,"Draw 1 Card, +1 Hand Size"
 Teleportation,"Free Action: Sell any resource, -1 PWR"
