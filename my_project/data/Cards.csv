@@ -86,18 +86,18 @@ GLS/ELX,3,Electronics Factory,"2 FE, 1 ELX","-2 PWR, -1 SI, -1 C, +3 ELX",
 GLS/ELX,4,Pleasure Dome,"1 GLS, 1 ELX",-1 PWR,Power Bill: $20/$15/$10 if 1/2/3 PD in play
 C/SI,4,Pleasure Dome,"1 GLS, 1 ELX",-1 PWR,Power Bill: $20/$15/$10 if 1/2/3 PD in play
 GLS/ELX,4,Pleasure Dome,"1 GLS, 1 ELX",-1 PWR,Power Bill: $20/$15/$10 if 1/2/3 PD in play
-O2/FOOD,4,Patent Office,"2 GLS, 2 ELX",,"Draw 2 Patents, Play 1, Place other on Deck"
-GLS/ELX,4,Patent Office,"2 GLS, 2 ELX",,"Draw 2 Patents, Play 1, Place other on Deck"
-C/SI,4,Patent Office,"2 GLS, 2 ELX",,"Draw 2 Patents, Play 1, Place other on Deck"
-GLS/ELX,4,Hacker Array,"2 SI, 1 ELX",,Sell: Adjust a different resource price by 3
-H2O/FE,4,Hacker Array,"2 SI, 1 ELX",,Sell: Adjust a different resource price by 3
-C/SI,4,Hacker Array,"2 SI, 1 ELX",,Sell: Adjust a different resource price by 3
+O2/FOOD,4,Patent Office,"2 GLS, 2 ELX",-1 FOOD,"Draw 2 Patents, Play 1, Place other on Deck"
+GLS/ELX,4,Patent Office,"2 GLS, 2 ELX",-1 FOOD,"Draw 2 Patents, Play 1, Place other on Deck"
+C/SI,4,Patent Office,"2 GLS, 2 ELX",-1 FOOD,"Draw 2 Patents, Play 1, Place other on Deck"
+GLS/ELX,4,Hacker Array,"2 SI, 1 ELX",-1 FOOD,Sell: Adjust a different resource price by 3
+H2O/FE,4,Hacker Array,"2 SI, 1 ELX",-1 FOOD,Sell: Adjust a different resource price by 3
+C/SI,4,Hacker Array,"2 SI, 1 ELX",-1 FOOD,Sell: Adjust a different resource price by 3
 H2O/FE,4,Launch Pad,"2 FE, 2 ELX",-1 O2,Free Action: Fulfill Contract
 GLS/ELX,4,Launch Pad,"2 FE, 2 ELX",-1 O2,Free Action: Fulfill Contract
 O2/FOOD,4,Launch Pad,"2 FE, 2 ELX",-1 O2,Free Action: Fulfill Contract
 O2/FOOD,4,Space Elevator,"5 C, 2 GLS",-2 PWR,-1 Contract Resource Requirements
 Contract,4,Space Elevator,"5 C, 2 GLS",-2 PWR,-1 Contract Resource Requirements
 Contract,4,Space Elevator,"5 C, 2 GLS",-2 PWR,-1 Contract Resource Requirements
-GLS/ELX,4,Optimization Center,"2 FE, 2 GLS",,Free Action: -1 PWR and +1 any positive resource
-O2/FOOD,4,Optimization Center,"2 FE, 2 GLS",,Free Action: -1 PWR and +1 any positive resource
-Contract,4,Optimization Center,"2 FE, 2 GLS",,Free Action: -1 PWR and +1 any positive resource
+GLS/ELX,4,Optimization Center,"2 FE, 2 GLS",-1 FOOD,Free Action: -1 PWR and +1 any positive resource
+O2/FOOD,4,Optimization Center,"2 FE, 2 GLS",-1 FOOD,Free Action: -1 PWR and +1 any positive resource
+Contract,4,Optimization Center,"2 FE, 2 GLS",-1 FOOD,Free Action: -1 PWR and +1 any positive resource

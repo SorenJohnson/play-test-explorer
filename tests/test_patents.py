@@ -623,7 +623,6 @@ class TestVirtualReality:
         state = GameState.create(cards, contracts, num_players=3)
         p = state.players[0]
         # Player 0 owns Pleasure Dome AND Virtual Reality (one PD globally → $20 base)
-        from my_project.simulation import SUPPORTED_SPECIAL_EFFECTS
         # Build a fake Pleasure Dome card directly into buildings_played
         pd_card = Card(
             alternate="GLS/ELX",

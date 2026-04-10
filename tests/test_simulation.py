@@ -153,27 +153,6 @@ class TestPwrAdjust:
         assert state.market.price(Resource.PWR) >= price_before
 
 
-class TestSpecialCardFilter:
-    def test_only_supported_special_cards_in_deck(self):
-        """Cards with non-empty `effect` only appear if their building name is
-        listed in SUPPORTED_SPECIAL_EFFECTS. Unsupported special-effect cards
-        stay out of the deck so the AI can't deal a building it can't resolve.
-        """
-        from my_project.simulation import SUPPORTED_SPECIAL_EFFECTS
-        cards, contracts = _load_data()
-        state = GameState.create(cards, contracts)
-        all_deck_cards = state.deck.cards + state.deck.discard
-        for card in state.pool:
-            all_deck_cards.append(card)
-        for player in state.players:
-            all_deck_cards.extend(player.hand)
-        for card in all_deck_cards:
-            if card.effect:
-                assert card.building in SUPPORTED_SPECIAL_EFFECTS, (
-                    f"Unsupported special card in deck: {card.building}"
-                )
-
-
 class TestBuildDeficit:
     def test_no_deficit_when_rate_covers(self):
         player = Player(name="test", money=100)

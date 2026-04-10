@@ -1,0 +1,12 @@
+Parameter,Value,Description
+default_max_turns,8,Turns per round (each turn = one player acts)
+default_num_players,3,Number of players if not overridden
+default_start_money,20,Starting cash for each player
+default_market_position,9,Starting price track index for all resources
+hand_size,3,Cards in hand
+pool_size,4,Cards in the building pool
+contracts_available_base,2,Base contracts available (+ num_players)
+contract_reward,50,Cash reward per fulfilled contract
+debt_interest_divisor,10,$1 interest per $X owed at debt collection
+max_cards_per_turn,2,Max hand cards a player can spend per turn
+pleasure_dome_tiers,"20,15,10","Per-dome power bill bonus by global dome count (1st, 2nd, 3rd+)"

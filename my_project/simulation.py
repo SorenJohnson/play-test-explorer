@@ -10,29 +10,45 @@ import random
 from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import Path
 
 from my_project.accounting import CostLedger
 from my_project.models import Card, Contract, Resource, ResourceAmount
 
 
+# --- Game configuration (loaded from GameConfig.csv) ---
+#
+# These module-level constants are the single source of truth consumed by
+# the engine. They are loaded from data/GameConfig.csv at import time so
+# non-technical users can tune them by editing the CSV. The names are kept
+# as module-level constants (ALL_CAPS) for backward compatibility with
+# existing imports throughout the codebase.
+
+def _load_game_config() -> dict[str, str]:
+    from my_project.parsing import parse_game_config
+    cfg_path = Path(__file__).parent / "data" / "GameConfig.csv"
+    if cfg_path.exists():
+        return parse_game_config(cfg_path)
+    return {}
+
+_CFG = _load_game_config()
+
 # --- Market ---
 
 PRICE_TRACK = [1, 1, 1, 2, 2, 2, 3, 3, 4, 4, 5, 5, 6, 7, 8, 9, 10]
 
-# Game balance constants
-DEFAULT_MAX_TURNS = 8
-DEFAULT_NUM_PLAYERS = 3
-DEFAULT_START_MONEY = 20
-DEFAULT_MARKET_POS = 9
-HAND_SIZE = 3
-POOL_SIZE = 4
-CONTRACTS_AVAILABLE_BASE = 2  # base + num_players contract cards drawn
-CONTRACT_REWARD = 50  # net worth value of a fulfilled contract
-DEBT_INTEREST_DIVISOR = 10  # $1 interest per $X owed
-MAX_ACTIONS_PER_TURN = 10  # safety limit against infinite loops
-MAX_CARDS_PER_TURN = 2     # max hand cards a player can spend per turn (builds,
-                            # sells, contracts, and build-deficit discards all
-                            # count; Nanotechnology is exempt)
+# Game balance constants (sourced from GameConfig.csv, with hardcoded fallbacks)
+DEFAULT_MAX_TURNS = int(_CFG.get("default_max_turns", "8"))
+DEFAULT_NUM_PLAYERS = int(_CFG.get("default_num_players", "3"))
+DEFAULT_START_MONEY = int(_CFG.get("default_start_money", "20"))
+DEFAULT_MARKET_POS = int(_CFG.get("default_market_position", "9"))
+HAND_SIZE = int(_CFG.get("hand_size", "3"))
+POOL_SIZE = int(_CFG.get("pool_size", "4"))
+CONTRACTS_AVAILABLE_BASE = int(_CFG.get("contracts_available_base", "2"))
+CONTRACT_REWARD = int(_CFG.get("contract_reward", "50"))
+DEBT_INTEREST_DIVISOR = int(_CFG.get("debt_interest_divisor", "10"))
+MAX_CARDS_PER_TURN = int(_CFG.get("max_cards_per_turn", "2"))
+MAX_ACTIONS_PER_TURN = 10  # safety limit — not a design parameter
 
 # Event deck composition (random within ranges)
 POWER_BILL_RANGE = (3, 4)
@@ -40,26 +56,16 @@ DEBT_COLLECTION_RANGE = (2, 4)
 FUTURES_SETTLEMENT_RANGE = (3, 4)
 PWR_ADJUST_FRACTION = 0.5  # fraction of remaining slots
 
-# Slot-4 special buildings whose effects are wired up. Cards in Cards.csv
-# with `effect` strings are excluded from the deck unless their `Building`
-# name appears here. Add to this set when implementing a new special-
-# building handler so the deck starts dealing it.
-SUPPORTED_SPECIAL_EFFECTS: set[str] = {
-    "Pleasure Dome",        # passive: power-bill bonus, tier by global count
-    "Optimization Center",  # active: free action -1 PWR / +1 any positive resource
-    "Space Elevator",       # active: once-per-turn -1 contract requirement
-    "Hacker Array",         # active: per-sell market bump (player picks)
-    "Launch Pad",           # active: once-per-turn free contract icon
-    "Patent Office",        # build-time: draw 2 patents, keep best
-}
 
 
-# Corporations (name, starting rates)
-CORPORATIONS: list[tuple[str, dict[str, int]]] = [
-    ("Seneca Development", {"PWR": 2, "FE": 1, "FOOD": -1}),
-    ("Yoshimi Robotics", {"PWR": -2, "FE": 2}),
-    ("Reclamation Inc.", {"PWR": 1, "SI": 1, "C": 1, "H2O": -1}),
-]
+
+
+def _load_corporations(data_dir: Path | None = None) -> list[tuple[str, dict[str, int]]]:
+    """Load corporations from Corporations.csv."""
+    from my_project.parsing import parse_corporations
+    if data_dir is None:
+        data_dir = Path(__file__).parent / "data"
+    return parse_corporations(data_dir / "Corporations.csv")
 
 
 @dataclass
@@ -291,32 +297,25 @@ class NewsCard:
     effects: list[NewsEffect] = field(default_factory=list)
 
 
-# Hardcoded effect dispatch keyed by exact card name from Events.csv (the
-# "NEWS: " prefix is stripped before lookup). The CSV's freeform Effect column
-# is documentation; the truth lives here.
-NEWS_EFFECTS: dict[str, list[NewsEffect]] = {
-    "Colonist Shuttle":         [NewsEffect("rate_all", {"PWR": -1, "O2": -1})],
-    "Population Growth":        [NewsEffect("rate_all", {"PWR": -1, "FOOD": -1})],
-    "Infrastructure Added":     [NewsEffect("rate_all", {"PWR": -1, "H2O": -1})],
-    "MARSQUAKE":                [NewsEffect("rate_all", {"PWR": -1, "FE": -1})],
-    "Wage Increases":           [NewsEffect("rate_all", {"GLS": -1, "ELX": -1})],
-    "Life Support Volatile":    [NewsEffect("market_random", {"resources": ["H2O", "O2", "FOOD"], "rolls": 1})],
-    "Raw Materials Volatile":   [NewsEffect("market_random", {"resources": ["FE", "C", "SI"], "rolls": 1})],
-    "Consumer Goods Volatile":  [NewsEffect("market_random", {"resources": ["GLS", "ELX"], "rolls": 1})],
-    "Power Market Volatile":    [NewsEffect("market_random", {"resources": ["PWR"], "rolls": 2})],
-    "All Quiet":                [],
-    "Debt Collection":          [NewsEffect("trigger", {"event": "debt_collection"})],
-    "Power Bill":               [NewsEffect("trigger", {"event": "power_bill"})],
-    "Futures Settlement":       [NewsEffect("trigger", {"event": "futures_settlement"})],
-}
-
 # Same d20 distribution used by GameState.create's randomize_market roll.
 _D20_DELTAS = [3, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, -2, -2, -2, -3, -3, -4, -4, 0]
 
 
-def build_default_news_deck() -> list[NewsCard]:
-    """Build a fresh news deck containing one card per entry in NEWS_EFFECTS."""
-    return [NewsCard(name=name, effects=list(effects)) for name, effects in NEWS_EFFECTS.items()]
+def build_default_news_deck(data_dir: Path | None = None) -> list[NewsCard]:
+    """Build a fresh news deck from News.csv.
+
+    Each row in News.csv becomes one NewsCard with typed effects. The CSV
+    is the single source of truth for news content — no hardcoded effects.
+    """
+    from my_project.parsing import parse_news
+    if data_dir is None:
+        data_dir = Path(__file__).parent / "data"
+    raw = parse_news(data_dir / "News.csv")
+    cards: list[NewsCard] = []
+    for entry in raw:
+        effects = [NewsEffect(kind=e["kind"], payload=e["payload"]) for e in entry["effects"]]
+        cards.append(NewsCard(name=entry["name"], effects=effects))
+    return cards
 
 
 @dataclass
@@ -344,37 +343,17 @@ class EventDeckConfig:
     pwr_adjust_fraction: float = PWR_ADJUST_FRACTION
 
 
-def default_event_counts(num_players: int) -> dict[str, int]:
+def default_event_counts(num_players: int, data_dir: Path | None = None) -> dict[str, int]:
     """Return the default per-event-type counts for a given player count.
 
-    These values mirror Events.csv. The player-count conditionals from the
-    CSV (3-4P Patent Auction vs 2P News Bulletin, redraw flags on Draw
-    Building Card) are resolved here.
+    Reads Events.csv — the single source of truth for event deck composition.
+    Each CSV row has a Condition column that filters by player count and a
+    Redraw column that flags draw_building_card redraws.
     """
-    # Base counts from Events.csv rows 2-10
-    counts = {
-        "news_bulletin": 3,
-        "debt_collection": 2,
-        "power_bill": 1,
-        "futures_settlement": 1,
-        "patent_auction": 3,
-        "draw_building": 5,         # row 9: regular draws (no redraw at 3-4P)
-        "draw_building_redraw": 5,  # row 10: redraw at 2-3P
-    }
-    # Row 7 conditional: 3-4P → Patent Auction, 2P → News Bulletin
-    if num_players >= 3:
-        counts["patent_auction"] += 1
-    else:
-        counts["news_bulletin"] += 1
-    # Row 9 redraws at 2P
-    if num_players == 2:
-        counts["draw_building_redraw"] += counts["draw_building"]
-        counts["draw_building"] = 0
-    # Row 10 redraws at 2-3P (already in counts as redraw); at 4P+ they're regular
-    if num_players >= 4:
-        counts["draw_building"] += counts["draw_building_redraw"]
-        counts["draw_building_redraw"] = 0
-    return counts
+    from my_project.parsing import parse_event_counts
+    if data_dir is None:
+        data_dir = Path(__file__).parent / "data"
+    return parse_event_counts(data_dir / "Events.csv", num_players)
 
 
 def _resolve_count(spec: int | tuple[int, int]) -> int:
@@ -637,16 +616,11 @@ class GameState:
                 roll = random.choice([3, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, -2, -2, -2, -3, -3, -4, -4, 0])
                 market.adjust(r, roll)
 
-        # Filter the deck to only include cards whose effect we know how to
-        # handle. Slot-4 buildings live in Cards.csv with non-empty `effect`
-        # strings; SUPPORTED_SPECIAL_EFFECTS gates which ones are wired up.
-        # Anything with an unrecognized effect is silently excluded so the
-        # deck can't deal "broken" cards.
-        playable_cards = [
-            c for c in all_cards
-            if not c.effect or c.building in SUPPORTED_SPECIAL_EFFECTS
-        ]
-        deck = Deck.from_cards(playable_cards)
+        # All cards from Cards.csv are playable. Cards with an `effect`
+        # column have their mechanical effects wired up via patent/build
+        # hooks keyed on the building name. Unknown effects are harmless —
+        # the card plays as a vanilla building with its rates/costs.
+        deck = Deck.from_cards(list(all_cards))
 
         # Draw contracts
         contracts = list(all_contracts)
@@ -679,7 +653,7 @@ class GameState:
             random.shuffle(patent_pile)
 
         # Create players. Assign unique corporations randomly (capped at # of corps).
-        corp_pool = list(CORPORATIONS)
+        corp_pool = list(_load_corporations())
         random.shuffle(corp_pool)
         players = []
         for i in range(num_players):
@@ -1370,7 +1344,7 @@ def _apply_patent_acquisition(state: GameState, player: Player, patent: Card) ->
 #   3+ PDs globally → each owner gets $10
 # With one-of-each enforcement, "PDs globally" == number of distinct
 # owners (each owner has 0 or 1 PD).
-PLEASURE_DOME_TIERS = [20, 15, 10]
+PLEASURE_DOME_TIERS = [int(x) for x in _CFG.get("pleasure_dome_tiers", "20,15,10").split(",")]
 
 
 def _global_dome_count(state: GameState) -> int:
@@ -1962,24 +1936,19 @@ def do_patent_auction(state: GameState) -> str:
     )
 
 
-# Approximate value of each patent in $. Used by the AI bid heuristic.
-# These are rough estimates of the patent's total game-impact. The AI
-# randomizes ±$5 around this value and clamps to what it can afford.
-# Update this table when patents change or new ones are added.
-PATENT_BASE_VALUES: dict[str, int] = {
-    "Superconductors": 20,       # +1 PWR on every power building — strong
-    "Energy Vault": 25,          # 10 PWR stockpile, big Power Bill payout
-    "Financial Instruments": 15, # earns cash from others' debt — situational
-    "Water Engine": 20,          # free -1 H2O / +2 PWR every turn
-    "Nanotechnology": 10,        # card cycling — modest value
-    "Cold Fusion": 15,           # +1 PWR on water buildings — narrower
-    "Virtual Reality": 15,       # doubles Pleasure Dome — needs the dome
-    "Perpetual Motion": 20,      # zeroes negative PWR on many builds — strong
-    "Carbon Scrubbing": 15,      # zeroes negative C/O2 rates — solid
-    "Slant Drilling": 15,        # +1 FE/SI on tagged builds — decent
-    "Thinking Machines": 20,     # immediate draw + permanent hand size +1
-    "Teleportation": 15,         # free sell any resource — flexible
-}
+# Lazily loaded from Patents.csv AI_Value column. Populated on first
+# call to _default_ai_bid. Module-level cache avoids re-reading on
+# every auction.
+_patent_base_values: dict[str, int] | None = None
+
+
+def _get_patent_base_values() -> dict[str, int]:
+    global _patent_base_values
+    if _patent_base_values is None:
+        from my_project.parsing import parse_patent_values
+        data_dir = Path(__file__).parent / "data"
+        _patent_base_values = parse_patent_values(data_dir / "Patents.csv")
+    return _patent_base_values
 
 
 def _default_ai_bid(player: Player, patent: Card) -> int:
@@ -1997,7 +1966,7 @@ def _default_ai_bid(player: Player, patent: Card) -> int:
         return 0
     # Look up the patent's estimated value; fall back to rate-based heuristic
     # for unknown patents (forward-compatible with new Patents.csv entries).
-    base_value = PATENT_BASE_VALUES.get(patent.building, 0)
+    base_value = _get_patent_base_values().get(patent.building, 0)
     if base_value == 0:
         # Fallback: $8 per positive rate unit
         base_value = sum(ra.amount for ra in patent.rates if ra.amount > 0) * 8

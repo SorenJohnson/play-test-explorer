@@ -7,7 +7,6 @@ from my_project.parsing import parse_cards, parse_contracts
 from my_project.simulation import (
     GameState,
     Player,
-    SUPPORTED_SPECIAL_EFFECTS,
     _count_buildings,
     _patent_office_trigger,
     _pleasure_dome_bonus,
@@ -679,29 +678,3 @@ class TestLaunchPad:
         assert p.has_used_space_elevator_this_turn
 
 
-# --- Filter gate ---
-
-
-class TestSupportedSpecialEffects:
-    def test_supported_set_includes_all(self):
-        for name in [
-            "Pleasure Dome",
-            "Optimization Center",
-            "Space Elevator",
-            "Hacker Array",
-            "Patent Office",
-            "Launch Pad",
-        ]:
-            assert name in SUPPORTED_SPECIAL_EFFECTS
-
-    def test_unsupported_specials_excluded_from_deck(self):
-        cards, contracts = _load()
-        state = GameState.create(cards, contracts)
-        all_in_play = state.deck.cards + state.deck.discard + list(state.pool)
-        for player in state.players:
-            all_in_play.extend(player.hand)
-        for c in all_in_play:
-            if c.effect:
-                assert c.building in SUPPORTED_SPECIAL_EFFECTS, (
-                    f"Unsupported special card in deck: {c.building}"
-                )

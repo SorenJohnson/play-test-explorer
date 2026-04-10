@@ -94,12 +94,12 @@ class TestParseCards:
         for c in contract_cards:
             assert c.can_sell == []
 
-    def test_patent_office_empty_rates(self):
+    def test_patent_office_has_food_rate(self):
         cards = parse_cards(DATA_DIR / "Cards.csv")
         offices = [c for c in cards if c.building == "Patent Office"]
         assert len(offices) > 0
         for o in offices:
-            assert o.rates == []
+            assert any(r.resource == Resource.FOOD and r.amount == -1 for r in o.rates)
             assert len(o.costs) > 0
             assert o.effect != ""
 
