@@ -445,6 +445,7 @@ function advanceUntilHuman() {
   // handle it; resume advancing after the prompt is resolved.
   while (!game.is_over() && !game.is_human_turn()) {
     const result = game.step_ai_turn().toJs({ dict_converter: Object.fromEntries });
+    if (!result.ok) break;  // e.g. "It's the human's turn" or "Game is over"
     logAiTurn(result);
     if (result.awaiting_prompt) {
       refreshState();
@@ -459,7 +460,14 @@ function advanceUntilHuman() {
   }
   // begin_human_turn resets has_built_this_turn. Must call BEFORE refreshState
   // so the rendered state reflects the fresh turn, not stale flags from prior.
+  // It may also consume terminal events (END_ROUND / END_GAME) which can
+  // end the game — check is_over afterward.
   game.begin_human_turn();
+  if (game.is_over()) {
+    refreshState();
+    showEndgame();
+    return;
+  }
   refreshState();
 }
 
