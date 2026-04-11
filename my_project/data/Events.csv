@@ -10,3 +10,4 @@ Count,Event,Condition,Redraw
 5,draw_building_card,2,true
 5,draw_building_card,4+,
 5,draw_building_card,2-3,true
+6,pwr_adjust,,

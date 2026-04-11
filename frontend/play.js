@@ -161,7 +161,6 @@ const DEFAULT_EVENT_CONFIG = {
   futures_settlement_count: [3, 4],
   news_count: 0,
   news_pool: [],
-  pwr_adjust_fraction: 0.5,
 };
 
 // Pretty-printed string used to seed the textarea on first load.
@@ -244,8 +243,6 @@ if "news_count" in _raw:
     _kw["news_count"] = _coerce_count(_raw["news_count"])
 if "news_pool" in _raw:
     _kw["news_pool"] = _coerce_news(_raw["news_pool"])
-if "pwr_adjust_fraction" in _raw:
-    _kw["pwr_adjust_fraction"] = float(_raw["pwr_adjust_fraction"])
 _event_deck_config = _EDC(**_kw)
 `);
     extraKwargs = ", event_deck_config=_event_deck_config";
@@ -398,7 +395,6 @@ function parseEventConfig(text) {
     "futures_settlement_count",
     "news_count",
     "news_pool",
-    "pwr_adjust_fraction",
   ]);
   for (const key of Object.keys(parsed)) {
     if (!known.has(key)) {

@@ -221,13 +221,10 @@ class PlayableGame:
         return self._active_player_idx >= 0
 
     def is_over(self) -> bool:
-        # Game ends when we've played all player-turns across all rounds OR
-        # the event deck is exhausted (redraws can consume END_GAME early).
+        # Game ends when the event deck is exhausted. The deck defines the
+        # game length — not a hardcoded turn count.
         if self._turn_in_progress():
             return False
-        total_turns = self.max_turns * self.num_rounds * self.num_players
-        if self._turn_count >= total_turns:
-            return True
         return self.state.event_idx >= len(self.state.event_deck)
 
     def current_player_index(self) -> int:
@@ -254,17 +251,19 @@ class PlayableGame:
         return self._turn_count + 1
 
     def round_number(self) -> int:
-        """1-indexed round within the current deck-round (1..max_turns).
+        """1-indexed round within the current deck-round.
         Each round is num_players player-turns."""
         effective = self._turn_count - 1 if self._turn_in_progress() else self._turn_count
-        return (effective // self.num_players) % self.max_turns + 1
+        return (effective // self.num_players) + 1
 
     def deck_round_number(self) -> int:
-        """1-indexed deck-round (1..num_rounds). Which pass through the event
-        deck we're currently in."""
-        effective = self._turn_count - 1 if self._turn_in_progress() else self._turn_count
-        turns_per_deck_round = self.max_turns * self.num_players
-        return min(self.num_rounds, (effective // turns_per_deck_round) + 1)
+        """1-indexed deck-round (1..num_rounds). Determined by how many
+        END_ROUND events have already been consumed in the deck."""
+        # Count END_ROUND events in the already-consumed portion of the deck
+        from my_project.simulation import EventType
+        consumed = self.state.event_deck[: self.state.event_idx]
+        end_rounds_seen = sum(1 for e in consumed if e.type == EventType.END_ROUND)
+        return end_rounds_seen + 1
 
     # --- Human turn control ---
 
@@ -840,11 +839,11 @@ class PlayableGame:
         return {
             "seed": self.seed,
             "round": self.round_number(),
-            "max_rounds": self.max_turns,
+            "max_rounds": len(s.event_deck) // max(self.num_players, 1),
             "deck_round": self.deck_round_number(),
             "num_rounds": self.num_rounds,
             "turn_index": turn_index,
-            "total_turns": self.max_turns * self.num_rounds * self.num_players,
+            "total_turns": len(s.event_deck),
             "is_over": self.is_over(),
             "current_player_index": cur_idx,
             "human_index": self.human_index,

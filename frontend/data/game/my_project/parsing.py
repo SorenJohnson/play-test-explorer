@@ -251,6 +251,7 @@ def parse_event_counts(path: Path, num_players: int) -> dict[str, int]:
         "patent_auction": 0,
         "draw_building": 0,
         "draw_building_redraw": 0,
+        "pwr_adjust": 0,
     }
     with open(path, newline="") as f:
         reader = csv.DictReader(f)

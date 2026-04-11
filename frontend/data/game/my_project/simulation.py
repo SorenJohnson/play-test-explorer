@@ -54,7 +54,6 @@ MAX_ACTIONS_PER_TURN = 10  # safety limit — not a design parameter
 POWER_BILL_RANGE = (3, 4)
 DEBT_COLLECTION_RANGE = (2, 4)
 FUTURES_SETTLEMENT_RANGE = (3, 4)
-PWR_ADJUST_FRACTION = 0.5  # fraction of remaining slots
 
 
 
@@ -340,7 +339,6 @@ class EventDeckConfig:
     # Legacy direct-NEWS payload pool (used by the JSON Advanced section).
     news_pool: list[EventCard] = field(default_factory=list)
     news_count: int | tuple[int, int] = 0
-    pwr_adjust_fraction: float = PWR_ADJUST_FRACTION
 
 
 def default_event_counts(num_players: int, data_dir: Path | None = None) -> dict[str, int]:
@@ -393,6 +391,8 @@ def _build_single_round(
     n_draw_reg = _resolve_or_default(config.draw_building_count, defaults["draw_building"])
     n_draw_redraw = _resolve_or_default(config.draw_building_redraw_count, defaults["draw_building_redraw"])
 
+    n_pwr_adjust = _resolve_or_default(None, defaults.get("pwr_adjust", 0))
+
     events: list[EventCard] = []
     events.extend([_ec(EventType.NEWS_BULLETIN)] * n_news_bulletin)
     events.extend([_ec(EventType.DEBT_COLLECTION)] * n_debt)
@@ -401,33 +401,16 @@ def _build_single_round(
     events.extend([_ec(EventType.PATENT_AUCTION)] * n_patent)
     events.extend([_ec(EventType.DRAW_BUILDING_CARD)] * n_draw_reg)
     events.extend([_ec(EventType.DRAW_BUILDING_CARD, redraws=True)] * n_draw_redraw)
+    events.extend([_ec(EventType.PWR_ADJUST)] * n_pwr_adjust)
 
     # Legacy direct-NEWS pool (JSON Advanced section). Sampled with replacement.
     news_n = _resolve_count(config.news_count)
     if news_n > 0 and config.news_pool:
         events.extend(random.choices(config.news_pool, k=news_n))
 
-    # Size the deck to player_turns + redraws so each player-turn gets at
-    # least one event after redraws have consumed extras.
-    player_turns = num_turns * num_players
-    redraw_count = sum(1 for ec in events if ec.redraws)
-    target_size = player_turns + redraw_count
-
-    # Truncate if the structured composition already exceeds target size.
-    if len(events) > target_size - 1:  # -1 leaves room for terminal card
-        events = events[: target_size - 1]
-        redraw_count = sum(1 for ec in events if ec.redraws)
-        target_size = player_turns + redraw_count
-
-    # Pad with PWR_ADJUST / NO_EVENT fillers up to target_size - 1.
-    fillers_needed = (target_size - 1) - len(events)
-    if fillers_needed > 0:
-        pwr_adjusts = int(fillers_needed * config.pwr_adjust_fraction)
-        events.extend([_ec(EventType.PWR_ADJUST)] * pwr_adjusts)
-        events.extend([_ec(EventType.NO_EVENT)] * (fillers_needed - pwr_adjusts))
-
+    # The deck is exactly what Events.csv defines — no auto-padding.
+    # Shuffle and append the terminal card at the bottom.
     random.shuffle(events)
-    # Terminal card always at the bottom
     events.append(_ec(terminal_type))
     return events
 
@@ -2398,11 +2381,18 @@ def run_game(
     else:
         raise ValueError("Must provide either `strategy` or `strategies`")
 
-    total_turns = max_turns * num_rounds
-    for _ in range(total_turns):
-        for i, player in enumerate(state.players):
-            event = state.event_deck[state.event_idx] if state.event_idx < len(state.event_deck) else _ec(EventType.NO_EVENT)
-            state.event_idx += 1
-            run_turn(state, player, player_strategies[i], event)
+    # Play until the event deck is exhausted. The deck defines the game
+    # length — each player-turn consumes one event (plus redraws). The
+    # loop cycles through players in seat order. A safety cap prevents
+    # infinite loops if the deck is somehow malformed.
+    safety = len(state.event_deck) + 100
+    turn = 0
+    while state.event_idx < len(state.event_deck) and turn < safety:
+        player_idx = turn % num_players
+        player = state.players[player_idx]
+        event = state.event_deck[state.event_idx]
+        state.event_idx += 1
+        run_turn(state, player, player_strategies[player_idx], event)
+        turn += 1
 
     return state
