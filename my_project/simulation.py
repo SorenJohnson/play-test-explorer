@@ -2230,7 +2230,7 @@ def _execute_action(state: GameState, player: Player, action: Action) -> ActionR
     return None
 
 
-def _execute_free_actions(state: GameState, player: Player) -> None:
+def _execute_free_actions(state: GameState, player: Player) -> list[str]:
     """Auto-fire free actions for AI players at the start of their turn.
 
     Free actions don't cost cards and don't count toward the per-turn budget.
@@ -2238,11 +2238,12 @@ def _execute_free_actions(state: GameState, player: Player) -> None:
     Water Engine's +2 PWR changes power-bill economics, Optimization Center's
     +1 rate makes builds/contracts cheaper).
 
-    Heuristics are simple and conservative — a more sophisticated AI would
-    evaluate these in the context of the full turn plan.
+    Returns a list of human-readable descriptions of what fired (for the
+    turn log). Empty list if nothing fired.
     """
+    fired: list[str] = []
+
     # Optimization Center: -1 PWR, +1 highest-priced positive non-PWR rate.
-    # Always beneficial if the player has any positive non-PWR rate.
     if (
         _count_buildings(player, "Optimization Center") > 0
         and not player.has_used_optimization_center_this_turn
@@ -2256,6 +2257,7 @@ def _execute_free_actions(state: GameState, player: Player) -> None:
             player.rates[Resource.PWR] = player.rate(Resource.PWR) - 1
             player.rates[target] = player.rate(target) + 1
             player.has_used_optimization_center_this_turn = True
+            fired.append(f"Optimization Center: -1 PWR, +1 {target.value}")
 
     # Water Engine: -1 H2O, +2 PWR. Always beneficial when H2O ≥ 1.
     if (
@@ -2266,6 +2268,7 @@ def _execute_free_actions(state: GameState, player: Player) -> None:
         player.rates[Resource.H2O] = player.rate(Resource.H2O) - 1
         player.rates[Resource.PWR] = player.rate(Resource.PWR) + 2
         player.has_used_water_engine_this_turn = True
+        fired.append("Water Engine: -1 H2O, +2 PWR")
 
     # Teleportation: sell highest-priced positive non-PWR resource for cash,
     # -1 PWR. Only fire when the price is worth the permanent PWR loss.
@@ -2284,15 +2287,14 @@ def _execute_free_actions(state: GameState, player: Player) -> None:
                 player.money += price
                 player.rates[Resource.PWR] = player.rate(Resource.PWR) - 1
                 player.has_used_teleportation_this_turn = True
+                fired.append(f"Teleportation: sold {best.value} for ${price}, -1 PWR")
 
-    # Nanotechnology: discard the weakest hand card, draw 1. Modest value
-    # but always a net positive if the replacement is random.
+    # Nanotechnology: discard the weakest hand card, draw 1.
     if (
         _player_owns_patent(player, "Nanotechnology")
         and not player.has_used_nanotechnology_this_turn
         and player.hand
     ):
-        # Discard the card with the lowest total positive rate value
         def _card_value(card: Card) -> float:
             return sum(
                 state.market.price(ra.resource) * ra.amount
@@ -2300,10 +2302,15 @@ def _execute_free_actions(state: GameState, player: Player) -> None:
                 if ra.amount > 0
             )
         worst_idx = min(range(len(player.hand)), key=lambda i: _card_value(player.hand[i]))
-        state.deck.discard.append(player.hand.pop(worst_idx))
+        discarded = player.hand.pop(worst_idx)
+        state.deck.discard.append(discarded)
         drawn = state.deck.draw(1)
         player.hand.extend(drawn)
         player.has_used_nanotechnology_this_turn = True
+        new_name = drawn[0].building if drawn else "(empty)"
+        fired.append(f"Nanotechnology: discarded {discarded.building}, drew {new_name}")
+
+    return fired
 
 
 def run_turn(state: GameState, player: Player, strategy, event: EventCard) -> None:

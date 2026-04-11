@@ -510,7 +510,7 @@ function renderStatusBar() {
   const s = currentState;
   const roundSuffix = s.num_rounds > 1 ? ` (Rd ${s.deck_round}/${s.num_rounds})` : "";
   document.getElementById("round-indicator").textContent = `${s.round} / ${s.max_rounds}${roundSuffix}`;
-  document.getElementById("turn-indicator").textContent = `${s.turn_index + 1} / ${s.total_turns}`;
+  document.getElementById("turn-indicator").textContent = `${s.turn_index + 1} / ${s.total_turns} (${s.cards_in_deck} cards left)`;
   document.getElementById("seed-display").textContent = s.seed;
   const activeIdx = s.current_player_index;
   const humans = s.human_indices || [s.human_index ?? 0];

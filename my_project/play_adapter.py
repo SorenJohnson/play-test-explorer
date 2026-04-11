@@ -785,9 +785,6 @@ class PlayableGame:
         event = self.state.event_deck[self.state.event_idx]
         self.state.event_idx += 1
 
-        # Snapshot hand-before so we can diff action records into a log
-        actions_log: list[dict] = []
-
         # Reset per-turn state
         player.has_built_this_turn = False
         player.has_used_space_elevator_this_turn = False
@@ -800,7 +797,30 @@ class PlayableGame:
 
         # Free actions phase (same as run_turn in simulation.py).
         from my_project.simulation import _execute_free_actions
-        _execute_free_actions(self.state, player)
+        free_action_log = _execute_free_actions(self.state, player)
+
+        # Snapshot hand-before so we can diff action records into a log
+        actions_log: list[dict] = []
+
+        # Log free actions as action records so the frontend can show them
+        for fa_detail in free_action_log:
+            actions_log.append({
+                "ok": True,
+                "type": "free_action",
+                "detail": fa_detail,
+                "buildings": [],
+                "build_money_spent": 0,
+                "rates_gained": {},
+                "sell_resource": "",
+                "sell_amount": 0,
+                "sell_revenue": 0,
+                "contract_label": "",
+                "contract_reward": 0,
+                "money_after": player.money,
+                "debt_after": player.debt,
+                "credit_after": player.credit,
+                "net_worth_after": player.net_worth(),
+            })
 
         # Look up this seat's strategy. seats is fully populated by __post_init__.
         strategy_fn = _resolve_strategy(self.seats[acting_player_idx])
@@ -952,6 +972,7 @@ class PlayableGame:
             "num_rounds": self.num_rounds,
             "turn_index": turn_index,
             "total_turns": self._total_player_turns(),
+            "cards_in_deck": max(0, len(s.event_deck) - s.event_idx),
             "is_over": self.is_over(),
             "current_player_index": cur_idx,
             "human_index": self.human_index,
