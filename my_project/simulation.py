@@ -2314,26 +2314,52 @@ def _execute_free_actions(state: GameState, player: Player) -> list[str]:
                 player.has_used_teleportation_this_turn = True
                 fired.append(f"Teleportation: sold {rate} {best.value} for ${revenue}, -1 PWR")
 
-    # Nanotechnology: discard the weakest hand card, draw 1.
+    # Nanotechnology: discard the least useful hand card, draw 1.
+    # Only fire if the worst card is truly low-value — don't cycle good hands.
     if (
         _player_owns_patent(player, "Nanotechnology")
         and not player.has_used_nanotechnology_this_turn
         and player.hand
     ):
-        def _card_value(card: Card) -> float:
-            return sum(
-                state.market.price(ra.resource) * ra.amount
-                for ra in card.rates
-                if ra.amount > 0
-            )
-        worst_idx = min(range(len(player.hand)), key=lambda i: _card_value(player.hand[i]))
-        discarded = player.hand.pop(worst_idx)
-        state.deck.discard.append(discarded)
-        drawn = state.deck.draw(1)
-        player.hand.extend(drawn)
-        player.has_used_nanotechnology_this_turn = True
-        new_name = drawn[0].building if drawn else "(empty)"
-        fired.append(f"Nanotechnology: discarded {discarded.building}, drew {new_name}")
+        def _card_usefulness(card: Card) -> float:
+            """Score how useful a card is to the player right now.
+            Considers: build rate value, sell revenue, contract icon,
+            special building bonus, and negative rate costs."""
+            score = 0.0
+            for ra in card.rates:
+                price = state.market.price(ra.resource)
+                if ra.amount > 0:
+                    score += price * ra.amount * 3  # future earning potential
+                else:
+                    score -= price * abs(ra.amount) * 2  # future cost
+            # Sell value: best sell revenue from this card
+            if card.can_sell:
+                for r in card.can_sell:
+                    rate = max(0, player.rate(r))
+                    if rate > 0:
+                        score += state.market.price(r) * rate * 0.5
+            # Contract icon is valuable if contracts are available
+            if card.can_fulfill_contract and state.available_contracts:
+                score += CONTRACT_REWARD * 0.3
+            # Special building effect bonus
+            if card.effect:
+                from my_project.strategies import _get_learned_card_values
+                score += _get_learned_card_values().get(card.building, 0)
+            return score
+
+        worst_idx = min(range(len(player.hand)), key=lambda i: _card_usefulness(player.hand[i]))
+        worst_score = _card_usefulness(player.hand[worst_idx])
+
+        # Only discard if the worst card is genuinely bad (score < $10).
+        # A random replacement has unknown value — don't throw away decent cards.
+        if worst_score < 10:
+            discarded = player.hand.pop(worst_idx)
+            state.deck.discard.append(discarded)
+            drawn = state.deck.draw(1)
+            player.hand.extend(drawn)
+            player.has_used_nanotechnology_this_turn = True
+            new_name = drawn[0].building if drawn else "(empty)"
+            fired.append(f"Nanotechnology: discarded {discarded.building}, drew {new_name}")
 
     return fired
 
