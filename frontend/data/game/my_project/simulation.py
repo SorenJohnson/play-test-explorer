@@ -1271,31 +1271,11 @@ def _hook_carbon_scrubbing(state: GameState, player: Player, card: Card) -> None
     ]
 
 
-def _hook_energy_vault(state: GameState, player: Player, card: Card) -> None:
-    """Energy Vault: 10 PWR stockpile, consumed during Power Bill.
 
-    The vault absorbs negative PWR rates from new builds — instead of the
-    -PWR hitting the player's rate, it drains the vault. Vault absorbs as
-    much of a single -PWR rate as it can; the remainder hits the rate.
-    Once exhausted, the patent has no further build-time effect; the next
-    Power Bill pays out whatever's left in the vault and exhausts it.
-    """
-    vault = player.patent_state.get("energy_vault", 0)
-    if vault <= 0:
-        return
-    new_rates: list[ResourceAmount] = []
-    for ra in card.rates:
-        if ra.resource == Resource.PWR and ra.amount < 0 and vault > 0:
-            absorbed = min(vault, abs(ra.amount))
-            vault -= absorbed
-            new_amount = ra.amount + absorbed  # less negative
-            if new_amount != 0:
-                new_rates.append(ResourceAmount(resource=Resource.PWR, amount=new_amount))
-            # if new_amount == 0, we drop the rate entirely
-        else:
-            new_rates.append(ra)
-    card.rates = new_rates
-    player.patent_state["energy_vault"] = vault
+# Energy Vault no longer has a build hook — it only affects Power Bills.
+# The old _hook_energy_vault (which absorbed negative PWR from new builds)
+# has been removed. The vault now shields the player from paying power
+# bill debt when they have a negative rate, up to 10 uses.
 
 
 # Patent name → build hook (signature: (state, player, card) -> None).
@@ -1308,7 +1288,6 @@ PATENT_BUILD_HOOKS = {
     "Slant Drilling": _hook_slant_drilling,
     "Perpetual Motion": _hook_perpetual_motion,
     "Carbon Scrubbing": _hook_carbon_scrubbing,
-    "Energy Vault": _hook_energy_vault,
 }
 
 
@@ -1553,55 +1532,50 @@ def do_power_bill(state: GameState) -> None:
 
     Pleasure Dome owners also get a flat per-dome bonus on every power bill.
 
-    Energy Vault folds into the same transaction: the vault contributes
-    its remaining PWR units to the player's effective rate for THIS bill,
-    so the player is billed once on `rate + vault`. After the bill, the
-    vault is exhausted regardless of whether it was fully consumed.
+    Energy Vault: if the player has a NEGATIVE PWR rate and vault > 0,
+    the vault shields them from paying this power bill entirely (they
+    neither earn nor pay). The vault decrements by 1 per shielded bill.
+    If the player has a positive or zero rate, the vault has no effect.
     """
     pwr_price = state.market.price(Resource.PWR)
     _record_event_line(
         state, kind="header", text=f"Power Bill — PWR @ ${pwr_price}"
     )
     for player in state.players:
-        # Combine the player's PWR rate with their Energy Vault remainder
-        # for a single bill. The vault is consumed (set to 0) after the
-        # bill regardless of outcome.
         base_rate = player.rate(Resource.PWR)
         vault = player.patent_state.get("energy_vault", 0)
-        effective_rate = base_rate + vault
-        if vault > 0:
-            player.patent_state["energy_vault"] = 0
 
         # Build the per-player text for the event log row.
         bill_parts: list[str] = []
-        if effective_rate > 0:
-            earning = effective_rate * pwr_price
+
+        # Energy Vault: shields from negative power bills
+        if base_rate < 0 and vault > 0:
+            player.patent_state["energy_vault"] = vault - 1
+            bill_parts.append(
+                f"Energy Vault shields bill ({vault - 1} uses left)"
+            )
+        elif base_rate > 0:
+            earning = base_rate * pwr_price
             player.money += earning
             state.pwr_total_earned += earning
-            state.bills_units_earned[Resource.PWR] += effective_rate
-            # Per-player: power bill earnings count as "sold" PWR
-            player.flow_sold_units[Resource.PWR] += effective_rate
+            state.bills_units_earned[Resource.PWR] += base_rate
+            player.flow_sold_units[Resource.PWR] += base_rate
             player.flow_sell_revenue[Resource.PWR] += earning
-            vault_note = f", incl. {vault} from vault" if vault > 0 else ""
             bill_parts.append(
-                f"+${earning} (sold {effective_rate} PWR{vault_note})"
+                f"+${earning} (sold {base_rate} PWR)"
             )
-        elif effective_rate < 0:
-            shortage = abs(effective_rate)
+        elif base_rate < 0:
+            shortage = abs(base_rate)
             cost = shortage * pwr_price
             _apply_debt(player, cost)
             state.pwr_total_debt += cost
             state.bills_units_owed[Resource.PWR] += shortage
-            player.ledger.record_event_cost(Resource.PWR, cost, effective_rate)
-            # Per-player: power bill debt counts as "bought" PWR
+            player.ledger.record_event_cost(Resource.PWR, cost, base_rate)
             player.flow_bought_units[Resource.PWR] += shortage
             player.flow_buy_cost[Resource.PWR] += cost
             bill_parts.append(
                 f"−${cost} (bought {shortage} PWR)"
             )
-        elif vault > 0:
-            # Vault was non-empty but base rate cancelled it exactly.
-            bill_parts.append(f"vault drained ({vault} PWR), no bill")
         # Pleasure Dome bonus is added on top of normal bill processing.
         bonus = _pleasure_dome_bonus(state, player)
         if bonus > 0:

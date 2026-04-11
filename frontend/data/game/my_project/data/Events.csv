@@ -4,7 +4,7 @@ Count,Event,Condition,Redraw,PWR_Adjust
 1,power_bill,,,
 1,futures_settlement,,,
 3,patent_auction,,,
-1,patent_auction,3+,,
+1,patent_auction,3+,,true
 1,news_bulletin,2,,true
 5,draw_building_card,3+,,true
 5,draw_building_card,2,true,true

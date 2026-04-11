@@ -1,6 +1,6 @@
 Name,Power,AI_Value
 Superconductors,New Power Buildings: +1 PWR,20
-Energy Vault,10 PWR stockpile (consumed during Power Bill),25
+Energy Vault,Shields from negative Power Bills (up to 10 uses),25
 Financial Instruments,Debt Collection: +$1 per +$1 added to others' debt,15
 Water Engine,Free Action: turn +1 H2O into +2 PWR,20
 Nanotechnology,"Free Action: Discard one card and draw one card",10
