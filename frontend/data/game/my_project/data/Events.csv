@@ -6,7 +6,7 @@ Count,Event,Condition,Redraw,PWR_Adjust
 3,patent_auction,,,
 1,patent_auction,3+,,true
 1,news_bulletin,2,,true
-5,draw_building_card,3+,,true
+6,draw_building_card,3+,,true
 5,draw_building_card,2,true,true
 5,draw_building_card,4+,,true
 5,draw_building_card,2-3,true,true

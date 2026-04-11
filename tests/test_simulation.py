@@ -86,8 +86,8 @@ class TestEventDeck:
         assert counts[EventType.FUTURES_SETTLEMENT] == 1
         assert counts[EventType.PATENT_AUCTION] == 4  # 3 base + 1 from row 7
         assert counts[EventType.END_GAME] == 1
-        # Draw building cards: 5 regular + 5 redraw at 3P
-        assert counts[EventType.DRAW_BUILDING_CARD] == 10
+        # Draw building cards: 6 regular + 5 redraw at 3P
+        assert counts[EventType.DRAW_BUILDING_CARD] == 11
         redraw_count = sum(1 for ec in deck if ec.redraws)
         assert redraw_count == 5
 
