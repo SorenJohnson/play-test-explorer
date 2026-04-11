@@ -244,10 +244,18 @@ class PlayableGame:
             return False
         return self.current_player_index() in self._human_indices
 
+    # Terminal event results queued for the frontend to pick up and log.
+    # Each entry is a dict like the event portion of step_ai_turn's return.
+    pending_terminal_results: list[dict] = field(default_factory=list, init=False)
+
     def _consume_terminal_events(self) -> None:
         """Auto-fire any terminal events (END_ROUND / END_GAME) at the current
         deck position. Called before beginning any player's turn so terminals
-        fire as cleanup between rounds, not as a player's turn."""
+        fire as cleanup between rounds, not as a player's turn.
+
+        Results are stashed in `pending_terminal_results` so the frontend
+        can log them (the PB + Futures per-player breakdown).
+        """
         from my_project.simulation import EventType as _ET, execute_event as _exec
         while (
             self.state.event_idx < len(self.state.event_deck)
@@ -256,16 +264,24 @@ class PlayableGame:
         ):
             terminal = self.state.event_deck[self.state.event_idx]
             self.state.event_idx += 1
-            # Use last active player for context (or player 0 if at start)
             active = (
                 self.state.players[self._active_player_idx]
                 if self._active_player_idx >= 0
                 else self.state.players[0]
             )
             self.state.last_event_lines = []
-            _exec(self.state, terminal, active)
-            self.last_event = f"{terminal.type.value}"
+            detail = _exec(self.state, terminal, active)
+            self.last_event = detail
             self._snapshot_market(turn=self.state.turn)
+            self.pending_terminal_results.append({
+                "type": terminal.type.value,
+                "detail": detail,
+                "lines": list(self.state.last_event_lines),
+            })
+
+    def clear_terminal_results(self) -> None:
+        """Clear the pending terminal event results after the frontend has logged them."""
+        self.pending_terminal_results.clear()
 
     def current_player(self) -> Player:
         return self.state.players[self.current_player_index()]
@@ -955,6 +971,9 @@ class PlayableGame:
             "patent_pile_remaining": max(0, len(s.patent_pile) - s.patent_idx),
             # Mid-event prompt (None when no prompt is active)
             "pending_prompt": dict(s.pending_prompt) if s.pending_prompt else None,
+            # Terminal event results (END_ROUND / END_GAME) that fired as
+            # cleanup. The frontend should log these and then clear them.
+            "terminal_events": list(self.pending_terminal_results),
         }
 
     # --- Legal action enumeration (for UI hinting) ---

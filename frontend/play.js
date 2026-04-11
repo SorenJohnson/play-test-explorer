@@ -434,6 +434,25 @@ function refreshState() {
   const legal = game.legal_human_actions().toJs({ dict_converter: Object.fromEntries });
   currentState = s;
   currentLegal = legal;
+
+  // Log any terminal events (END_ROUND / END_GAME) that fired as cleanup.
+  // These contain the Power Bill + Futures Settlement per-player breakdown.
+  const terminalEvents = s.terminal_events || [];
+  for (const te of terminalEvents) {
+    turnLog.push({
+      kind: "event",
+      turn: s.turn_index + 1,
+      triggeredBy: -1,
+      isHuman: false,
+      summary: te.detail || te.type,
+      lines: te.lines || [],
+    });
+  }
+  // Clear them so they aren't logged again on the next refresh.
+  if (terminalEvents.length > 0) {
+    game.clear_terminal_results();
+  }
+
   render();
   // Surface (or hide) the prompt modal whenever state changes.
   maybeShowPromptModal();
