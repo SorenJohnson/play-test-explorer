@@ -86,6 +86,9 @@ let useDiscardForContract = false;
 // Patent Office pick: when building a Patent Office, the index (0 or 1) of
 // the patent the human wants to keep. null = auto-pick (AI default).
 let patentOfficePick = null;
+// Which resource the human wants to sell (when a card has multiple sell options).
+// null = auto-pick best. Set by the sell resource picker.
+let selectedSellResource = null;
 let hackerTarget = "";
 let hackerDirection = 0;
 
@@ -425,6 +428,7 @@ function clearSelection() {
   useLaunchPadThisFulfill = false;
   useDiscardForContract = false;
   patentOfficePick = null;
+  selectedSellResource = null;
   hackerTarget = "";
   hackerDirection = 0;
 }
@@ -1062,7 +1066,9 @@ function renderActionBar() {
   buildBtn.disabled = !canBuild;
 
   // Sell: requires exactly one card selected, sellable, AND ≥ 1 card remaining.
-  const canSellIdxs = new Set(legal.can_sell || []);
+  // can_sell is now a list of {card_idx, resources: [{resource, rate, price, revenue}]}
+  const canSellList = legal.can_sell || [];
+  const canSellIdxs = new Set(canSellList.map((e) => e.card_idx));
   const singleSelected = selectedBuildIdxs.size === 1 ? [...selectedBuildIdxs][0] : null;
   const canSell =
     !useDiscardForContract &&
@@ -1070,6 +1076,38 @@ function renderActionBar() {
     canSellIdxs.has(singleSelected) &&
     cr >= 1;
   sellBtn.disabled = !canSell;
+
+  // Show sell resource picker when a sellable card with multiple options is selected
+  const sellPickerEl = document.getElementById("build-estimate");
+  if (canSell && sellPickerEl) {
+    const sellEntry = canSellList.find((e) => e.card_idx === singleSelected);
+    if (sellEntry && sellEntry.resources.length > 1) {
+      const opts = sellEntry.resources.map((r) =>
+        `<label style="display:inline-block; margin-right:12px; cursor:pointer; color:#c9d1d9;">
+          <input type="radio" name="sell-resource" value="${r.resource}"
+                 ${selectedSellResource === r.resource ? "checked" : ""}>
+          ${r.resource} (${r.rate} × $${r.price} = $${r.revenue})
+        </label>`
+      ).join("");
+      sellPickerEl.innerHTML = `
+        <div style="margin-top:4px;">
+          <span style="color:#8b949e; font-size:0.8rem;">Sell which resource?</span><br>
+          ${opts}
+        </div>`;
+      sellPickerEl.querySelectorAll('input[name="sell-resource"]').forEach((radio) => {
+        radio.addEventListener("change", () => {
+          selectedSellResource = radio.value;
+        });
+      });
+      // Default to the highest revenue if none selected
+      if (!selectedSellResource && sellEntry.resources.length > 0) {
+        const best = sellEntry.resources.reduce((a, b) => a.revenue > b.revenue ? a : b);
+        selectedSellResource = best.resource;
+      }
+    } else if (sellEntry && sellEntry.resources.length === 1) {
+      selectedSellResource = sellEntry.resources[0].resource;
+    }
+  }
 
   // Contract: legal if a contract is selected and EITHER:
   //   (a) a hand-card is selected and the (card,contract) pair is in can_contract
@@ -1850,6 +1888,7 @@ function onSell() {
   const action = {
     type: "sell",
     card_idx: cardIdx,
+    sell_resource: selectedSellResource || "",
     hacker_target: hackerTarget || "",
     hacker_direction: hackerDirection,
   };

@@ -475,6 +475,7 @@ class PlayableGame:
                 self.state,
                 player,
                 idx,
+                sell_resource=action.get("sell_resource") or None,
                 hacker_target=action.get("hacker_target") or None,
                 hacker_direction=int(action.get("hacker_direction", 0) or 0),
             )
@@ -1070,13 +1071,29 @@ class PlayableGame:
                     affordable.append({"card_idx": i, "cost": cost})
 
         # Sellable cards (require ≥ 1 AP to sell anything)
-        can_sell = []
+        # Sellable cards with per-resource revenue estimates so the human
+        # can pick which resource to sell (instead of auto-picking the best).
+        can_sell: list[dict] = []
         if cr >= 1:
             for i, card in enumerate(player.hand):
                 if not card.can_sell:
                     continue
-                if any(player.rate(r) > 0 for r in card.can_sell):
-                    can_sell.append(i)
+                resources = []
+                for r in card.can_sell:
+                    rate = max(0, player.rate(r))
+                    if rate > 0:
+                        price = self.state.market.price(r)
+                        resources.append({
+                            "resource": r.value,
+                            "rate": rate,
+                            "price": price,
+                            "revenue": rate * price,
+                        })
+                if resources:
+                    can_sell.append({
+                        "card_idx": i,
+                        "resources": resources,
+                    })
 
         # Special-building consumable status
         se_owned = _count_buildings(player, "Space Elevator") > 0

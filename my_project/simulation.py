@@ -938,10 +938,16 @@ def execute_sell(
     state: GameState,
     player: Player,
     card_idx: int,
+    sell_resource: str | None = None,
     hacker_target: str | None = None,
     hacker_direction: int = 0,
 ) -> ActionRecord | None:
     """Sell resources using a card's alternate sell types.
+
+    `sell_resource`: when provided (e.g. "FE"), sells that specific resource
+    instead of auto-picking the highest-revenue one. The resource must be
+    in the card's can_sell list and the player must have a positive rate.
+    When None (AI default), auto-picks the best.
 
     `hacker_target` + `hacker_direction` are used by the Hacker Array picker:
     if the player owns a Hacker Array, they can specify a non-sold resource
@@ -957,14 +963,27 @@ def execute_sell(
     best_resource = None
     best_revenue = 0
 
-    for sell_res in card.can_sell:
-        rate = max(0, player.rate(sell_res))
+    if sell_resource is not None:
+        # Human chose a specific resource
+        try:
+            res = Resource(sell_resource)
+        except ValueError:
+            return None
+        if res not in card.can_sell:
+            return None
+        rate = max(0, player.rate(res))
         if rate > 0:
-            # All units sell at current price (then market drops by amount)
-            revenue = state.market.price(sell_res) * rate
-            if revenue > best_revenue:
-                best_revenue = revenue
-                best_resource = sell_res
+            best_resource = res
+            best_revenue = state.market.price(res) * rate
+    else:
+        # AI auto-pick: highest revenue
+        for sell_res in card.can_sell:
+            rate = max(0, player.rate(sell_res))
+            if rate > 0:
+                revenue = state.market.price(sell_res) * rate
+                if revenue > best_revenue:
+                    best_revenue = revenue
+                    best_resource = sell_res
 
     if best_resource is None:
         state.deck.discard.append(player.hand.pop(card_idx))
