@@ -337,6 +337,64 @@ greedy_strategy.pool_swap = _greedy_pool_swap
 
 # --- Scoring helpers ---
 
+def _special_building_value(card: Card, state: GameState, player: Player) -> float:
+    """Estimate the value of a slot-4 special building's effect.
+
+    Returns 0 for non-special buildings. For specials, estimates the
+    total game-impact based on remaining events and current game state.
+    """
+    if not card.effect:
+        return 0.0
+    remaining = state.remaining_events()
+    name = card.building
+
+    if name == "Pleasure Dome":
+        # $20/$15/$10 per power bill depending on global dome count.
+        # Estimate: remaining power bills × tier bonus.
+        from my_project.simulation import EventType, PLEASURE_DOME_TIERS
+        bills_left = remaining.get(EventType.POWER_BILL, 0) + remaining.get(EventType.END_ROUND, 0) + remaining.get(EventType.END_GAME, 0)
+        # Assume we're the first dome (tier 0 = $20). Conservative.
+        dome_bonus = PLEASURE_DOME_TIERS[0] if PLEASURE_DOME_TIERS else 20
+        return dome_bonus * bills_left
+
+    if name == "Optimization Center":
+        # Free +1 to a positive rate every turn. Value ≈ remaining turns × avg price.
+        # The +1 rate fires every turn, earning its value at future settlements/bills.
+        turns_left = sum(remaining.values())
+        avg_price = sum(state.market.price(r) for r in Resource) / len(Resource)
+        return turns_left * avg_price * 0.3  # discounted — not every turn has a settlement
+
+    if name == "Launch Pad":
+        # Free contract fulfillment once per turn. Value ≈ remaining turns × contract_value.
+        # Only valuable if the player has rates to spend on contracts.
+        from my_project.simulation import CONTRACT_REWARD
+        # Estimate: how many contracts could we fulfill? ~1 per 3 turns is realistic.
+        turns_left = sum(remaining.values())
+        return (turns_left / 3) * CONTRACT_REWARD * 0.3  # discounted for feasibility
+
+    if name == "Space Elevator":
+        # -1 to one contract requirement per turn.
+        # Value: saves buying 1 unit of the most expensive resource per contract.
+        avg_price = max(state.market.price(r) for r in Resource if r != Resource.PWR)
+        turns_left = sum(remaining.values())
+        return (turns_left / 4) * avg_price  # ~1 contract per 4 turns
+
+    if name == "Patent Office":
+        # Draw 2 patents, keep 1. Value ≈ average patent value from CSV.
+        from my_project.simulation import _get_patent_base_values
+        values = _get_patent_base_values()
+        avg_patent_val = sum(values.values()) / max(len(values), 1)
+        return avg_patent_val
+
+    if name == "Hacker Array":
+        # Market manipulation: +3 or -3 to a resource on each sell.
+        # Value: ~$3 extra per sell (conservative; actual value depends on usage).
+        turns_left = sum(remaining.values())
+        return turns_left * 1.5  # ~half the turns might involve a sell
+
+    return 0.0
+
+
 def _score_build_value(cards, state: GameState, player: Player) -> float:
     """Value of rates gained from building these cards."""
     value = 0.0
@@ -347,6 +405,8 @@ def _score_build_value(cards, state: GameState, player: Player) -> float:
                 value += _rate_value(ra.resource, price) * ra.amount
             else:
                 value -= _rate_value(ra.resource, price) * abs(ra.amount)
+        # Special buildings: estimate value from their mechanical effect
+        value += _special_building_value(card, state, player)
     return value
 
 
@@ -481,6 +541,7 @@ def _smart_score_build_value(cards, state: GameState, player: Player) -> float:
 
     Positive rates valued by sell/power-bill potential.
     Negative rates valued by settlement/power-bill cost.
+    Special buildings valued by estimating their mechanical effect.
     """
     value = 0.0
     for card in cards:
@@ -489,6 +550,7 @@ def _smart_score_build_value(cards, state: GameState, player: Player) -> float:
                 value += _positive_rate_value(ra.resource, state) * ra.amount
             else:
                 value -= _negative_rate_cost(ra.resource, state) * abs(ra.amount)
+        value += _special_building_value(card, state, player)
     return value
 
 

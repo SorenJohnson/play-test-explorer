@@ -2423,6 +2423,11 @@ def run_game(
                     Each round reshuffles the same composition; the final
                     round ends with END_GAME.
     """
+    # Load patents from CSV if available (same as the play adapter does).
+    from my_project.parsing import parse_patents
+    patents_path = Path(__file__).parent / "data" / "Patents.csv"
+    patent_pile = parse_patents(patents_path) if patents_path.exists() else []
+
     state = GameState.create(
         all_cards=all_cards,
         all_contracts=all_contracts,
@@ -2433,6 +2438,7 @@ def run_game(
         max_turns=max_turns,
         corporation_rates=corporation_rates,
         num_rounds=num_rounds,
+        patent_pile=patent_pile,
     )
 
     # Build per-player strategy list
