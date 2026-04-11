@@ -870,12 +870,6 @@ class PlayableGame:
             # Patent state — patent_pile_remaining is just for stats / debug
             # since the modal handles the bid flow at auction time.
             "patent_pile_remaining": max(0, len(s.patent_pile) - s.patent_idx),
-            # Preview of the next 2 patents (for Patent Office pick UI).
-            # Only shown when a human has a Patent Office card in hand.
-            "patent_office_preview": [
-                {"name": p.building, "effect": p.effect}
-                for p in s.patent_pile[s.patent_idx : s.patent_idx + 2]
-            ],
             # Mid-event prompt (None when no prompt is active)
             "pending_prompt": dict(s.pending_prompt) if s.pending_prompt else None,
         }
@@ -1097,6 +1091,19 @@ class PlayableGame:
             },
             "patent_actions": patent_actions,
         }
+
+    def peek_patent_office_patents(self) -> list[dict]:
+        """Return the top 2 patents from the pile for a Patent Office pick.
+
+        Only call this AFTER the player has committed to building a Patent
+        Office (not before — the patents are hidden information until then).
+        Returns a list of 0-2 dicts with {name, effect}.
+        """
+        s = self.state
+        return [
+            {"name": p.building, "effect": p.effect}
+            for p in s.patent_pile[s.patent_idx : s.patent_idx + 2]
+        ]
 
     def estimate_build_cost(self, build_indices: list[int], discard_indices: list[int]) -> dict:
         """Estimate the market cost of a proposed multi-card build.
