@@ -462,14 +462,39 @@ def _rate_value(resource: Resource, market_price: int) -> float:
 
 
 def _score_sell(state: GameState, player: Player, card) -> float:
-    """Score a sell action: revenue from best sellable resource (all units at current price)."""
-    best = 0.0
+    """Score a sell action: revenue minus opportunity cost of using this card.
+
+    Revenue = rate × price for the best sellable resource.
+    Opportunity cost = what you'd get if you built this card instead
+    (positive rate value minus negative rate cost).
+
+    A card with great build rates should NOT be sold even if the sell
+    revenue is decent — you'd rather build it. A card with mediocre
+    rates but high sell revenue is a good sell candidate.
+    """
+    # Best sell revenue
+    best_revenue = 0.0
     for sell_res in card.can_sell:
         rate = max(0, player.rate(sell_res))
         if rate > 0:
             revenue = state.market.price(sell_res) * rate
-            best = max(best, revenue)
-    return best
+            best_revenue = max(best_revenue, revenue)
+    if best_revenue == 0:
+        return 0.0
+
+    # Opportunity cost: what would building this card be worth?
+    build_value = 0.0
+    for ra in card.rates:
+        price = state.market.price(ra.resource)
+        if ra.amount > 0:
+            build_value += _rate_value(ra.resource, price) * ra.amount
+        else:
+            build_value -= _rate_value(ra.resource, price) * abs(ra.amount)
+
+    # Net sell score = revenue - what you give up by not building
+    # If the card is expensive to build (needs market purchases), selling
+    # is more attractive — but we don't model that here to keep it simple.
+    return best_revenue - max(0, build_value) * 0.5
 
 
 def _score_contract(state: GameState, player: Player, contract) -> float | None:
