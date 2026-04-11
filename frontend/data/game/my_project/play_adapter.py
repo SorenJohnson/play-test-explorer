@@ -279,6 +279,15 @@ class PlayableGame:
                 "lines": list(self.state.last_event_lines),
             })
 
+    def _total_player_turns(self) -> int:
+        """Count events in the deck that are actual player-turns (excluding
+        redraws and terminal sentinels)."""
+        from my_project.simulation import EventType as _ET
+        return sum(
+            1 for e in self.state.event_deck
+            if not e.redraws and e.type not in (_ET.END_ROUND, _ET.END_GAME)
+        )
+
     def clear_terminal_results(self) -> None:
         """Clear the pending terminal event results after the frontend has logged them."""
         self.pending_terminal_results.clear()
@@ -938,11 +947,11 @@ class PlayableGame:
         return {
             "seed": self.seed,
             "round": self.round_number(),
-            "max_rounds": len(s.event_deck) // max(self.num_players, 1),
+            "max_rounds": self._total_player_turns() // max(self.num_players, 1),
             "deck_round": self.deck_round_number(),
             "num_rounds": self.num_rounds,
             "turn_index": turn_index,
-            "total_turns": len(s.event_deck),
+            "total_turns": self._total_player_turns(),
             "is_over": self.is_over(),
             "current_player_index": cur_idx,
             "human_index": self.human_index,
