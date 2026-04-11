@@ -258,6 +258,11 @@ def main() -> None:
     # sync-play (copy Python sources to frontend/data/game for Pyodide)
     sub.add_parser("sync-play", help="Copy Python sources + CSVs to frontend/data/game/ for the playable page")
 
+    # evaluate-cards (empirical card valuation via regression)
+    eval_cards = sub.add_parser("evaluate-cards", help="Run exploration games and learn card values via regression")
+    eval_cards.add_argument("-n", "--games", type=int, default=2000, help="Number of exploration games")
+    eval_cards.add_argument("-p", "--players", type=int, default=3, help="Number of players per game")
+
     args = parser.parse_args()
 
     match args.command:
@@ -273,6 +278,9 @@ def main() -> None:
             cmd_publish(args)
         case "sync-play":
             cmd_sync_play()
+        case "evaluate-cards":
+            from my_project.card_valuation import run_evaluation
+            run_evaluation(n_games=args.games, num_players=args.players)
         case _:
             parser.print_help()
 

@@ -2010,11 +2010,14 @@ def _default_ai_bid(player: Player, patent: Card) -> int:
     available = player.money - player.debt
     if available <= 0:
         return 0
-    # Look up the patent's estimated value; fall back to rate-based heuristic
-    # for unknown patents (forward-compatible with new Patents.csv entries).
-    base_value = _get_patent_base_values().get(patent.building, 0)
+    # Look up the patent's value. Priority: learned CardValues.csv → CSV
+    # AI_Value column → rate-based fallback.
+    from my_project.parsing import parse_card_values
+    learned = parse_card_values(Path(__file__).parent / "data" / "CardValues.csv")
+    base_value = int(learned.get(patent.building, 0))
     if base_value == 0:
-        # Fallback: $8 per positive rate unit
+        base_value = _get_patent_base_values().get(patent.building, 0)
+    if base_value == 0:
         base_value = sum(ra.amount for ra in patent.rates if ra.amount > 0) * 8
     # Randomize ±$5
     jitter = random.choice([-5, 0, 0, 5, 5, 10])
