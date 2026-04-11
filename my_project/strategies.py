@@ -152,9 +152,6 @@ def random_strategy(state: GameState, player: Player) -> Action:
                     break  # found cheapest affordable discard level
 
     # Sell: requires 1 AP per sell.
-    # Hacker Array: AI auto-targets the highest-priced non-sold non-PWR
-    # resource and bumps it +3 (the old auto-pick behavior). Humans get
-    # the picker UI; AI keeps the simple heuristic.
     has_hacker = _count_buildings(player, "Hacker Array") > 0
     if has_cards:
         for i, card in enumerate(player.hand):
@@ -163,14 +160,9 @@ def random_strategy(state: GameState, player: Player) -> Action:
                     if player.rate(sell_res) > 0:
                         action = Action(ActionType.SELL, sell_card=i)
                         if has_hacker:
-                            candidates = [
-                                r for r in state.market.positions
-                                if r != sell_res and r.value != "PWR"
-                            ]
-                            if candidates:
-                                target = max(candidates, key=lambda r: state.market.price(r))
-                                action.hacker_target = target.value
-                                action.hacker_direction = 1
+                            ht, hd = _pick_hacker_target(state, player, sell_res)
+                            action.hacker_target = ht
+                            action.hacker_direction = hd
                         options.append(action)
                         break
 
@@ -351,6 +343,62 @@ def _get_learned_card_values() -> dict[str, float]:
         path = Path(__file__).parent / "data" / "CardValues.csv"
         _learned_card_values = parse_card_values(path)
     return _learned_card_values
+
+
+def _pick_hacker_target(
+    state: GameState, player: Player, sold_resource: Resource,
+) -> tuple[str, int]:
+    """Pick the best Hacker Array target and direction for a sell action.
+
+    Strategy:
+    1. If the player has a positive rate they plan to sell later, raise
+       that resource's price (+3) to increase future sell revenue.
+    2. If the player has a negative non-PWR rate (futures exposure),
+       lower that resource's price (-3) to reduce settlement debt.
+    3. Fallback: raise the resource the player produces most of.
+
+    Returns (target_resource_value, direction) e.g. ("GLS", 1) or ("FE", -1).
+    """
+    candidates = [
+        r for r in Resource
+        if r != Resource.PWR and r != sold_resource
+    ]
+    if not candidates:
+        return ("", 0)
+
+    # Option A: raise a resource we produce a lot of (future sell value)
+    best_raise = None
+    best_raise_score = 0
+    for r in candidates:
+        rate = player.rate(r)
+        if rate > 0:
+            # Score: how much we'd gain from +3 price on this resource
+            score = rate * 3  # rate × price_delta
+            if score > best_raise_score:
+                best_raise_score = score
+                best_raise = r
+
+    # Option B: lower a resource we're negative on (reduce futures debt)
+    best_lower = None
+    best_lower_score = 0
+    for r in candidates:
+        rate = player.rate(r)
+        if rate < 0:
+            # Score: how much debt we'd avoid from -3 price on this resource
+            score = abs(rate) * 3
+            if score > best_lower_score:
+                best_lower_score = score
+                best_lower = r
+
+    # Pick whichever saves/earns more
+    if best_lower_score > best_raise_score and best_lower is not None:
+        return (best_lower.value, -1)
+    elif best_raise is not None:
+        return (best_raise.value, 1)
+    else:
+        # Fallback: raise the most expensive resource we don't sell
+        target = max(candidates, key=lambda r: state.market.price(r))
+        return (target.value, 1)
 
 
 def _special_building_value(card: Card, state: GameState, player: Player) -> float:
@@ -682,9 +730,8 @@ def smart_greedy_strategy(state: GameState, player: Player) -> Action:
                         best_score = score
                         best_action = Action(ActionType.BUILD, build_cards=bl, discard_cards=dl)
 
-    # Score sell options (cost 1 AP each). Hacker Array: AI auto-targets
-    # the highest-priced non-sold non-PWR resource and bumps it +3 (unchanged
-    # from old behavior).
+    # Score sell options (cost 1 AP each). Hacker Array: AI picks the best
+    # target strategically — raise a resource we produce, or lower one we owe.
     has_hacker = _count_buildings(player, "Hacker Array") > 0
     if has_cards:
         for i, card in enumerate(player.hand):
@@ -695,21 +742,15 @@ def smart_greedy_strategy(state: GameState, player: Player) -> Action:
                 best_score = sell_score
                 action = Action(ActionType.SELL, sell_card=i)
                 if has_hacker:
-                    # Pick the sold resource the same way execute_sell does
                     sold = max(
                         (r for r in card.can_sell if player.rate(r) > 0),
                         key=lambda r: state.market.price(r) * player.rate(r),
                         default=None,
                     )
                     if sold is not None:
-                        candidates = [
-                            r for r in state.market.positions
-                            if r != sold and r.value != "PWR"
-                        ]
-                        if candidates:
-                            target = max(candidates, key=lambda r: state.market.price(r))
-                            action.hacker_target = target.value
-                            action.hacker_direction = 1
+                        ht, hd = _pick_hacker_target(state, player, sold)
+                        action.hacker_target = ht
+                        action.hacker_direction = hd
                 best_action = action
 
     # Score contract options. AI uses Space Elevator and Launch Pad whenever
