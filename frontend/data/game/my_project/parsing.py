@@ -226,22 +226,42 @@ def _condition_matches(condition: str, num_players: int) -> bool:
     return num_players == int(condition)
 
 
+def parse_event_rows(
+    path: Path, num_players: int,
+) -> list[dict]:
+    """Parse Events.csv into a list of event specs for the given player count.
+
+    The CSV has columns: Count, Event, Condition, Redraw, PWR_Adjust.
+    Rows whose Condition doesn't match `num_players` are skipped.
+
+    Returns a list of dicts, each:
+        {"event": "news_bulletin", "count": 3, "redraw": False, "pwr_adjust": True}
+    """
+    rows: list[dict] = []
+    with open(path, newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            condition = (row.get("Condition") or "").strip()
+            if not _condition_matches(condition, num_players):
+                continue
+            rows.append({
+                "event": row["Event"].strip(),
+                "count": int(row["Count"].strip()),
+                "redraw": (row.get("Redraw") or "").strip().lower() == "true",
+                "pwr_adjust": (row.get("PWR_Adjust") or "").strip().lower() == "true",
+            })
+    return rows
+
+
 def parse_event_counts(path: Path, num_players: int) -> dict[str, int]:
     """Parse Events.csv into per-event-type counts for the given player count.
 
-    The CSV has columns: Count, Event, Condition, Redraw.
-    - Count: how many copies of this event to include.
-    - Event: the EventType value string (e.g. "news_bulletin").
-    - Condition: player-count filter (empty=always, "2"=2P only, "3+"=3+P,
-      "2-3"=2-3P, "4+"=4+P).
-    - Redraw: "true" if draw_building_card should have the redraw flag.
+    Convenience wrapper around parse_event_rows that returns aggregated
+    counts by event type. Used by default_event_counts() for backward
+    compatibility with the EventDeckConfig override system.
 
-    Returns a dict like:
-        {"news_bulletin": 3, "debt_collection": 2, ...,
-         "draw_building": 5, "draw_building_redraw": 5}
-
-    draw_building_card rows without Redraw count toward "draw_building";
-    rows with Redraw="true" count toward "draw_building_redraw".
+    draw_building_card rows with Redraw count toward "draw_building_redraw";
+    without Redraw → "draw_building".
     """
     counts: dict[str, int] = {
         "news_bulletin": 0,
@@ -251,24 +271,17 @@ def parse_event_counts(path: Path, num_players: int) -> dict[str, int]:
         "patent_auction": 0,
         "draw_building": 0,
         "draw_building_redraw": 0,
-        "pwr_adjust": 0,
     }
-    with open(path, newline="") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            condition = (row.get("Condition") or "").strip()
-            if not _condition_matches(condition, num_players):
-                continue
-            event = row["Event"].strip()
-            count = int(row["Count"].strip())
-            redraw = (row.get("Redraw") or "").strip().lower() == "true"
-            if event == "draw_building_card":
-                if redraw:
-                    counts["draw_building_redraw"] += count
-                else:
-                    counts["draw_building"] += count
+    for spec in parse_event_rows(path, num_players):
+        event = spec["event"]
+        count = spec["count"]
+        if event == "draw_building_card":
+            if spec["redraw"]:
+                counts["draw_building_redraw"] += count
             else:
-                counts[event] = counts.get(event, 0) + count
+                counts["draw_building"] += count
+        else:
+            counts[event] = counts.get(event, 0) + count
     return counts
 
 

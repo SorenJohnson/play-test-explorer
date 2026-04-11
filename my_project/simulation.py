@@ -262,14 +262,15 @@ class EventCard:
     payload: dict | None = None
     label: str = ""
     redraws: bool = False
+    pwr_adjust: bool = False
 
     def display_label(self) -> str:
         return self.label or self.type.value
 
 
-def _ec(t: EventType, redraws: bool = False) -> EventCard:
+def _ec(t: EventType, redraws: bool = False, pwr_adjust: bool = False) -> EventCard:
     """Shorthand for creating a simple (no-payload) EventCard."""
-    return EventCard(type=t, redraws=redraws)
+    return EventCard(type=t, redraws=redraws, pwr_adjust=pwr_adjust)
 
 
 # --- News deck ---
@@ -376,39 +377,48 @@ def _build_single_round(
 ) -> list[EventCard]:
     """Build a shuffled event deck for ONE round of play.
 
-    Composition defaults come from default_event_counts(num_players). The
-    deck is sized to num_turns * num_players PLUS the number of redraw
-    cards, since each redraw consumes an extra event slot during play.
-    The terminal card (END_GAME or END_ROUND) is always at the bottom.
+    Reads Events.csv (via parse_event_rows) to determine the exact
+    composition. Each CSV row maps to N EventCards with the proper
+    redraws and pwr_adjust flags. The terminal card (END_GAME or
+    END_ROUND) is always at the bottom.
+
+    If the EventDeckConfig has count overrides, they take precedence
+    over the CSV for the matching event type.
     """
-    defaults = default_event_counts(num_players)
+    from my_project.parsing import parse_event_rows
+    data_dir = Path(__file__).parent / "data"
+    rows = parse_event_rows(data_dir / "Events.csv", num_players)
 
-    n_news_bulletin = _resolve_or_default(config.news_bulletin_count, defaults["news_bulletin"])
-    n_debt = _resolve_or_default(config.debt_collection_count, defaults["debt_collection"])
-    n_power = _resolve_or_default(config.power_bill_count, defaults["power_bill"])
-    n_futures = _resolve_or_default(config.futures_settlement_count, defaults["futures_settlement"])
-    n_patent = _resolve_or_default(config.patent_auction_count, defaults["patent_auction"])
-    n_draw_reg = _resolve_or_default(config.draw_building_count, defaults["draw_building"])
-    n_draw_redraw = _resolve_or_default(config.draw_building_redraw_count, defaults["draw_building_redraw"])
-
-    n_pwr_adjust = _resolve_or_default(None, defaults.get("pwr_adjust", 0))
+    # Map event type strings to EventType enum values
+    _type_map = {e.value: e for e in EventType}
 
     events: list[EventCard] = []
-    events.extend([_ec(EventType.NEWS_BULLETIN)] * n_news_bulletin)
-    events.extend([_ec(EventType.DEBT_COLLECTION)] * n_debt)
-    events.extend([_ec(EventType.POWER_BILL)] * n_power)
-    events.extend([_ec(EventType.FUTURES_SETTLEMENT)] * n_futures)
-    events.extend([_ec(EventType.PATENT_AUCTION)] * n_patent)
-    events.extend([_ec(EventType.DRAW_BUILDING_CARD)] * n_draw_reg)
-    events.extend([_ec(EventType.DRAW_BUILDING_CARD, redraws=True)] * n_draw_redraw)
-    events.extend([_ec(EventType.PWR_ADJUST)] * n_pwr_adjust)
+    for spec in rows:
+        event_str = spec["event"]
+        et = _type_map.get(event_str)
+        if et is None:
+            continue  # skip unknown event types
+        count = spec["count"]
+        # Check for config overrides (the JSON Advanced section can
+        # override counts for specific event types). draw_building_card
+        # has separate config fields for regular vs redraw.
+        if event_str == "draw_building_card":
+            override_key = "draw_building_redraw_count" if spec["redraw"] else "draw_building_count"
+        else:
+            override_key = f"{event_str}_count"
+        override = getattr(config, override_key, None)
+        if override is not None:
+            count = _resolve_count(override)
+        events.extend([
+            _ec(et, redraws=spec["redraw"], pwr_adjust=spec["pwr_adjust"])
+        ] * count)
 
     # Legacy direct-NEWS pool (JSON Advanced section). Sampled with replacement.
     news_n = _resolve_count(config.news_count)
     if news_n > 0 and config.news_pool:
         events.extend(random.choices(config.news_pool, k=news_n))
 
-    # The deck is exactly what Events.csv defines — no auto-padding.
+    # The deck is exactly what Events.CSV defines — no auto-padding.
     # Shuffle and append the terminal card at the bottom.
     random.shuffle(events)
     events.append(_ec(terminal_type))
@@ -2119,40 +2129,55 @@ def resume_pending_event(state: GameState, active_player: Player) -> str:
 
 
 def execute_event(state: GameState, event: EventCard, active_player: Player) -> str:
-    """Execute an event card and return a description."""
+    """Execute an event card and return a description.
+
+    If the event card has `pwr_adjust=True`, also fires do_pwr_adjust
+    AFTER the primary effect (adjusts PWR market by active player's rate).
+    This is a CSV-configurable modifier — any event type can carry it.
+    """
+    detail: str
     match event.type:
         case EventType.NO_EVENT:
-            return "no event"
+            detail = "no event"
         case EventType.PWR_ADJUST:
+            # Standalone pwr_adjust event (backward compat)
             do_pwr_adjust(state, active_player)
-            return f"PWR adjust (rate={active_player.rate(Resource.PWR)})"
+            detail = f"PWR adjust (rate={active_player.rate(Resource.PWR)})"
         case EventType.POWER_BILL:
             do_power_bill(state)
-            return "power bill"
+            detail = "power bill"
         case EventType.DEBT_COLLECTION:
             do_debt_collection(state)
-            return "debt collection"
+            detail = "debt collection"
         case EventType.FUTURES_SETTLEMENT:
             do_futures_settlement(state)
-            return "futures settlement"
+            detail = "futures settlement"
         case EventType.NEWS:
-            return do_news(state, event)
+            detail = do_news(state, event)
         case EventType.NEWS_BULLETIN:
-            return do_news_bulletin(state, active_player)
+            detail = do_news_bulletin(state, active_player)
         case EventType.DRAW_BUILDING_CARD:
-            return do_draw_building_card(state)
+            detail = do_draw_building_card(state)
         case EventType.PATENT_AUCTION:
-            return do_patent_auction(state)
+            detail = do_patent_auction(state)
         case EventType.END_ROUND:
             _record_event_line(state, kind="header", text="END OF ROUND")
             do_power_bill(state)
             do_futures_settlement(state)
-            return "END OF ROUND (power bill + futures settlement)"
+            detail = "END OF ROUND (power bill + futures settlement)"
         case EventType.END_GAME:
             _record_event_line(state, kind="header", text="END GAME")
             do_power_bill(state)
             do_futures_settlement(state)
-            return "END GAME (final power bill + futures settlement)"
+            detail = "END GAME (final power bill + futures settlement)"
+        case _:
+            detail = f"unknown event: {event.type}"
+    # PWR_Adjust modifier: fire after the primary effect if the card flag is set.
+    # Skip if the primary effect was already a standalone PWR_ADJUST (avoid double-fire).
+    if event.pwr_adjust and event.type != EventType.PWR_ADJUST:
+        do_pwr_adjust(state, active_player)
+        detail += f" + PWR adjust ({active_player.rate(Resource.PWR):+d})"
+    return detail
 
 
 # --- Pool Swapping ---
