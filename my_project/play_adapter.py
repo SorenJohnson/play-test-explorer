@@ -280,13 +280,10 @@ class PlayableGame:
             })
 
     def _total_player_turns(self) -> int:
-        """Count events in the deck that are actual player-turns (excluding
-        redraws and terminal sentinels)."""
-        from my_project.simulation import EventType as _ET
-        return sum(
-            1 for e in self.state.event_deck
-            if not e.redraws and e.type not in (_ET.END_ROUND, _ET.END_GAME)
-        )
+        """Count events in the deck that are actual player-turns.
+        Every non-redraw event is a player turn, including END_ROUND
+        and END_GAME (the player takes actions, then the event fires)."""
+        return sum(1 for e in self.state.event_deck if not e.redraws)
 
     def clear_terminal_results(self) -> None:
         """Clear the pending terminal event results after the frontend has logged them."""
@@ -340,12 +337,6 @@ class PlayableGame:
         active.has_used_nanotechnology_this_turn = False
         active.has_used_teleportation_this_turn = False
         active.cards_spent_this_turn = 0
-        # Skip any terminal events (END_ROUND / END_GAME) — cleanup, not turns
-        self._consume_terminal_events()
-        if self.state.event_idx >= len(self.state.event_deck):
-            self.human_turn_in_progress = False
-            self._active_player_idx = -1
-            return
 
         # Pre-advance event_idx and stash the current turn's event so that
         # state.remaining_events() does NOT reveal it to the UI or any helper
@@ -766,16 +757,6 @@ class PlayableGame:
             return {"ok": False, "reason": "Game is over"}
         if self.is_human_turn():
             return {"ok": False, "reason": "It's the human's turn"}
-
-        # Record active player via _turn_count, BEFORE incrementing it.
-        # event_idx pre-advances independently so the strategy's
-        # remaining_events() call does not include the current turn's event
-        # (matching simulation.run_game).
-        # Skip any terminal events before starting the AI turn
-        self._consume_terminal_events()
-        if self.state.event_idx >= len(self.state.event_deck):
-            self._active_player_idx = -1
-            return {"ok": False, "reason": "Game is over"}
 
         acting_player_idx = self._turn_count % self.num_players
         if acting_player_idx in self._human_indices:

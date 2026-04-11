@@ -2449,22 +2449,15 @@ def run_game(
     else:
         raise ValueError("Must provide either `strategy` or `strategies`")
 
-    # Play until the event deck is exhausted. Terminal cards (END_ROUND,
-    # END_GAME) fire their effects as cleanup but do NOT count as a
-    # player-turn — the player cycle skips them. Redraw events are
-    # consumed inside execute_event_with_redraws (called by run_turn),
-    # so the main loop only advances event_idx for the primary event.
+    # Play until the event deck is exhausted. Every event — including
+    # END_ROUND and END_GAME — is a player's turn. The player takes their
+    # normal actions, then the event fires. This gives exactly 30 player
+    # turns at 3P with 2 rounds (17 round 1 + 13 round 2).
     safety = len(state.event_deck) + 100
     player_turn = 0
     while state.event_idx < len(state.event_deck) and player_turn < safety:
         event = state.event_deck[state.event_idx]
         state.event_idx += 1
-
-        # Terminal events fire as cleanup — not a player-turn
-        if event.type in (EventType.END_ROUND, EventType.END_GAME):
-            active = state.players[(player_turn - 1) % num_players] if player_turn > 0 else state.players[0]
-            execute_event(state, event, active)
-            continue
 
         player_idx = player_turn % num_players
         player = state.players[player_idx]

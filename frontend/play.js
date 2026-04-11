@@ -439,24 +439,6 @@ function refreshState() {
   currentState = s;
   currentLegal = legal;
 
-  // Log any terminal events (END_ROUND / END_GAME) that fired as cleanup.
-  // These contain the Power Bill + Futures Settlement per-player breakdown.
-  const terminalEvents = s.terminal_events || [];
-  for (const te of terminalEvents) {
-    turnLog.push({
-      kind: "event",
-      turn: s.turn_index + 1,
-      triggeredBy: -1,
-      isHuman: false,
-      summary: te.detail || te.type,
-      lines: te.lines || [],
-    });
-  }
-  // Clear them so they aren't logged again on the next refresh.
-  if (terminalEvents.length > 0) {
-    game.clear_terminal_results();
-  }
-
   render();
   // Surface (or hide) the prompt modal whenever state changes.
   maybeShowPromptModal();
@@ -483,14 +465,7 @@ function advanceUntilHuman() {
   }
   // begin_human_turn resets has_built_this_turn. Must call BEFORE refreshState
   // so the rendered state reflects the fresh turn, not stale flags from prior.
-  // It may also consume terminal events (END_ROUND / END_GAME) which can
-  // end the game — check is_over afterward.
   game.begin_human_turn();
-  if (game.is_over()) {
-    refreshState();
-    showEndgame();
-    return;
-  }
   refreshState();
 }
 
