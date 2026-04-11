@@ -418,7 +418,16 @@ def _build_single_round(
     if news_n > 0 and config.news_pool:
         events.extend(random.choices(config.news_pool, k=news_n))
 
-    # The deck is exactly what Events.CSV defines — no auto-padding.
+    # Pad so that (non-redraw events + 1 terminal) is divisible by num_players.
+    # This ensures every player gets the same number of turns per round.
+    # Redraws don't count as player-turns (they chain into the preceding turn).
+    non_redraw = sum(1 for e in events if not e.redraws)
+    player_turns_with_terminal = non_redraw + 1  # +1 for END_ROUND / END_GAME
+    remainder = player_turns_with_terminal % num_players
+    if remainder != 0:
+        pad = num_players - remainder
+        events.extend([_ec(EventType.NO_EVENT)] * pad)
+
     # Shuffle and append the terminal card at the bottom.
     random.shuffle(events)
     events.append(_ec(terminal_type))
