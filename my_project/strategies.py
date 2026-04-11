@@ -366,10 +366,37 @@ def _special_building_value(card: Card, state: GameState, player: Player) -> flo
     return values.get(card.building, 0.0)
 
 
-def _score_build_value(cards, state: GameState, player: Player) -> float:
-    """Value of rates gained from building these cards."""
-    value = 0.0
+def _apply_hooks_to_copy(cards: list[Card], player: Player, state: GameState) -> list[Card]:
+    """Apply patent build hooks to deep copies of cards, returning the
+    modified versions. This lets the AI score cards as they would ACTUALLY
+    be after hooks fire (e.g. Perpetual Motion strips -PWR, Superconductors
+    adds +1 PWR)."""
+    from my_project.simulation import PATENT_BUILD_HOOKS, _player_patent_names
+    patent_names = _player_patent_names(player)
+    if not any(name in PATENT_BUILD_HOOKS for name in patent_names):
+        return cards  # no hooks — skip the copy
+    import copy
+    result = []
     for card in cards:
+        c = copy.deepcopy(card)
+        for name in patent_names:
+            hook = PATENT_BUILD_HOOKS.get(name)
+            if hook:
+                hook(state, player, c)
+        result.append(c)
+    return result
+
+
+def _score_build_value(cards, state: GameState, player: Player) -> float:
+    """Value of rates gained from building these cards.
+
+    Applies patent build hooks to copies of the cards so the score
+    reflects the ACTUAL rates after hooks fire (e.g. Perpetual Motion
+    strips -PWR, Superconductors adds +1 PWR).
+    """
+    hooked_cards = _apply_hooks_to_copy(cards, player, state)
+    value = 0.0
+    for card in hooked_cards:
         for ra in card.rates:
             price = state.market.price(ra.resource)
             if ra.amount > 0:
@@ -510,12 +537,15 @@ def _negative_rate_cost(resource: Resource, state: GameState) -> float:
 def _smart_score_build_value(cards, state: GameState, player: Player) -> float:
     """Value of rates gained from building these cards.
 
+    Applies patent build hooks to copies so the score reflects actual
+    rates after hooks (e.g. Perpetual Motion strips -PWR).
     Positive rates valued by sell/power-bill potential.
     Negative rates valued by settlement/power-bill cost.
-    Special buildings valued by estimating their mechanical effect.
+    Special buildings valued by empirical CardValues.csv data.
     """
+    hooked_cards = _apply_hooks_to_copy(cards, player, state)
     value = 0.0
-    for card in cards:
+    for card in hooked_cards:
         for ra in card.rates:
             if ra.amount > 0:
                 value += _positive_rate_value(ra.resource, state) * ra.amount
