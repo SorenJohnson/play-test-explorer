@@ -2332,13 +2332,12 @@ def _execute_free_actions(state: GameState, player: Player) -> list[str]:
     return fired
 
 
-def run_turn(state: GameState, player: Player, strategy, event: EventCard) -> None:
-    """Run one turn: pool swaps, then actions until hand empty or pass, draw, event."""
-    state.turn += 1
-    money_before = player.money
-    action_records: list[ActionRecord] = []
+def reset_per_turn_flags(player: Player) -> None:
+    """Reset all per-turn flags to their start-of-turn defaults.
 
-    # Reset per-turn state
+    Called at the start of every player turn — shared by run_turn (MC),
+    begin_human_turn, and step_ai_turn (play adapter).
+    """
     player.has_built_this_turn = False
     player.has_used_space_elevator_this_turn = False
     player.has_used_launch_pad_this_turn = False
@@ -2347,6 +2346,15 @@ def run_turn(state: GameState, player: Player, strategy, event: EventCard) -> No
     player.has_used_nanotechnology_this_turn = False
     player.has_used_teleportation_this_turn = False
     player.cards_spent_this_turn = 0
+
+
+def run_turn(state: GameState, player: Player, strategy, event: EventCard) -> None:
+    """Run one turn: pool swaps, then actions until hand empty or pass, draw, event."""
+    state.turn += 1
+    money_before = player.money
+    action_records: list[ActionRecord] = []
+
+    reset_per_turn_flags(player)
 
     # Free actions phase (before pool swaps and the action loop).
     # Auto-fires Optimization Center, Water Engine, Teleportation,

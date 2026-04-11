@@ -48,8 +48,8 @@ from my_project.simulation import (
     execute_build,
     execute_contract,
     execute_event,
-    execute_event_with_redraws,
     execute_sell,
+    reset_per_turn_flags,
     settle_silent_auction,
     swap_pool_card,
 )
@@ -327,16 +327,8 @@ class PlayableGame:
         # Record which player is acting via _turn_count, BEFORE incrementing it.
         self._active_player_idx = self._turn_count % self.num_players
         self._turn_count += 1
-        # Reset per-turn state
         active = self.state.players[self._active_player_idx]
-        active.has_built_this_turn = False
-        active.has_used_space_elevator_this_turn = False
-        active.has_used_launch_pad_this_turn = False
-        active.has_used_optimization_center_this_turn = False
-        active.has_used_water_engine_this_turn = False
-        active.has_used_nanotechnology_this_turn = False
-        active.has_used_teleportation_this_turn = False
-        active.cards_spent_this_turn = 0
+        reset_per_turn_flags(active)
 
         # Pre-advance event_idx and stash the current turn's event so that
         # state.remaining_events() does NOT reveal it to the UI or any helper
@@ -767,15 +759,7 @@ class PlayableGame:
         event = self.state.event_deck[self.state.event_idx]
         self.state.event_idx += 1
 
-        # Reset per-turn state
-        player.has_built_this_turn = False
-        player.has_used_space_elevator_this_turn = False
-        player.has_used_launch_pad_this_turn = False
-        player.has_used_optimization_center_this_turn = False
-        player.has_used_water_engine_this_turn = False
-        player.has_used_nanotechnology_this_turn = False
-        player.has_used_teleportation_this_turn = False
-        player.cards_spent_this_turn = 0
+        reset_per_turn_flags(player)
 
         # Free actions phase (same as run_turn in simulation.py).
         from my_project.simulation import _execute_free_actions
@@ -907,24 +891,11 @@ class PlayableGame:
         }
 
     def _execute_ai_action(self, player: Player, action: Action):
-        if action.action_type == ActionType.BUILD and action.build_cards:
-            return execute_build(self.state, player, action.build_cards, action.discard_cards)
-        if action.action_type == ActionType.SELL and action.sell_card >= 0:
-            return execute_sell(
-                self.state, player, action.sell_card,
-                hacker_target=action.hacker_target or None,
-                hacker_direction=action.hacker_direction,
-            )
-        if action.action_type == ActionType.CONTRACT:
-            if not action.use_launch_pad and action.contract_card < 0:
-                return None
-            return execute_contract(
-                self.state, player, action.contract_card, action.contract_idx,
-                use_elevator=action.use_elevator,
-                use_launch_pad=action.use_launch_pad,
-                elevator_target=action.elevator_target or None,
-            )
-        return None
+        """Execute an AI action. Delegates to the shared _execute_action in
+        simulation.py so the AI in play mode uses the exact same code path
+        as the Monte Carlo simulation."""
+        from my_project.simulation import _execute_action
+        return _execute_action(self.state, player, action)
 
     # --- Serialization ---
 
