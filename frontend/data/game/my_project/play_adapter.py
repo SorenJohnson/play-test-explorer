@@ -47,6 +47,7 @@ from my_project.simulation import (
     effective_contract_requirements,
     execute_build,
     execute_contract,
+    execute_event,
     execute_event_with_redraws,
     execute_sell,
     settle_silent_auction,
@@ -239,7 +240,32 @@ class PlayableGame:
         return self._turn_count % self.num_players
 
     def is_human_turn(self) -> bool:
-        return self.current_player_index() in self._human_indices and not self.is_over()
+        if self.is_over():
+            return False
+        return self.current_player_index() in self._human_indices
+
+    def _consume_terminal_events(self) -> None:
+        """Auto-fire any terminal events (END_ROUND / END_GAME) at the current
+        deck position. Called before beginning any player's turn so terminals
+        fire as cleanup between rounds, not as a player's turn."""
+        from my_project.simulation import EventType as _ET, execute_event as _exec
+        while (
+            self.state.event_idx < len(self.state.event_deck)
+            and self.state.event_deck[self.state.event_idx].type
+            in (_ET.END_ROUND, _ET.END_GAME)
+        ):
+            terminal = self.state.event_deck[self.state.event_idx]
+            self.state.event_idx += 1
+            # Use last active player for context (or player 0 if at start)
+            active = (
+                self.state.players[self._active_player_idx]
+                if self._active_player_idx >= 0
+                else self.state.players[0]
+            )
+            self.state.last_event_lines = []
+            _exec(self.state, terminal, active)
+            self.last_event = f"{terminal.type.value}"
+            self._snapshot_market(turn=self.state.turn)
 
     def current_player(self) -> Player:
         return self.state.players[self.current_player_index()]
@@ -289,6 +315,13 @@ class PlayableGame:
         active.has_used_nanotechnology_this_turn = False
         active.has_used_teleportation_this_turn = False
         active.cards_spent_this_turn = 0
+        # Skip any terminal events (END_ROUND / END_GAME) — cleanup, not turns
+        self._consume_terminal_events()
+        if self.state.event_idx >= len(self.state.event_deck):
+            self.human_turn_in_progress = False
+            self._active_player_idx = -1
+            return
+
         # Pre-advance event_idx and stash the current turn's event so that
         # state.remaining_events() does NOT reveal it to the UI or any helper
         # that inspects remaining events during the action phase.
@@ -316,10 +349,26 @@ class PlayableGame:
         # Fire the pre-stashed event. event_idx was already advanced in
         # begin_human_turn; do NOT advance it again here.
         event = self._pending_event
-        event_detail = execute_event_with_redraws(self.state, event, player)
-        # If the event paused for a human prompt, do NOT finalize the turn.
-        # The play UI will collect the input and call resolve_pending_prompt,
-        # which then re-enters _finalize_human_turn.
+        self.state.last_event_lines = []
+
+        # Check if this event needs human input (patent auction bid) before firing.
+        from my_project.simulation import _event_needs_prompt, _has_human_player
+        prompt = _event_needs_prompt(self.state, event)
+        if prompt is not None and _has_human_player(self.state):
+            self.state.pending_prompt = prompt
+            self.state._suspended_event = event
+            self.state._suspended_chain_active = False
+            self.last_event = f"awaiting prompt: {prompt['kind']}"
+            return {
+                "type": event.type.value,
+                "detail": self.last_event,
+                "lines": [],
+                "awaiting_prompt": True,
+            }
+
+        # Execute the event (no redraw chaining — bonus draws are handled
+        # by the redraws flag inside execute_event).
+        event_detail = execute_event(self.state, event, player)
         if self.state.pending_prompt is not None:
             self.last_event = event_detail
             return {
@@ -696,7 +745,15 @@ class PlayableGame:
         # event_idx pre-advances independently so the strategy's
         # remaining_events() call does not include the current turn's event
         # (matching simulation.run_game).
+        # Skip any terminal events before starting the AI turn
+        self._consume_terminal_events()
+        if self.state.event_idx >= len(self.state.event_deck):
+            self._active_player_idx = -1
+            return {"ok": False, "reason": "Game is over"}
+
         acting_player_idx = self._turn_count % self.num_players
+        if acting_player_idx in self._human_indices:
+            return {"ok": False, "reason": "It's the human's turn"}
         self._active_player_idx = acting_player_idx
         self._turn_count += 1
         player = self.state.players[acting_player_idx]
@@ -749,8 +806,34 @@ class PlayableGame:
         if needed > 0:
             player.hand.extend(self.state.deck.draw(needed))
 
-        # Event. event_idx was already advanced above; do NOT advance it again.
-        event_detail = execute_event_with_redraws(self.state, event, player)
+        # Event. Check for prompt before firing (e.g. patent auction).
+        self.state.last_event_lines = []
+        from my_project.simulation import _event_needs_prompt, _has_human_player
+        prompt = _event_needs_prompt(self.state, event)
+        if prompt is not None and _has_human_player(self.state):
+            self.state.pending_prompt = prompt
+            self.state._suspended_event = event
+            self.state._suspended_chain_active = False
+            self.last_event = f"awaiting prompt: {prompt['kind']}"
+            self.last_ai_actions = actions_log
+            self._suspended_ai_turn = {
+                "acting_player_idx": acting_player_idx,
+                "actions_log": actions_log,
+                "event": event,
+            }
+            return {
+                "ok": True,
+                "player_index": acting_player_idx,
+                "actions": actions_log,
+                "event": {
+                    "type": event.type.value,
+                    "detail": self.last_event,
+                    "lines": [],
+                },
+                "awaiting_prompt": True,
+            }
+
+        event_detail = execute_event(self.state, event, player)
         self.last_event = event_detail
         self.last_ai_actions = actions_log
 

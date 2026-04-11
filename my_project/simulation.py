@@ -369,27 +369,22 @@ def _resolve_or_default(spec, default):
     return _resolve_count(spec)
 
 
-def _build_single_round(
-    num_turns: int,
+def _build_event_pool(
     num_players: int,
     config: EventDeckConfig,
-    terminal_type: EventType,
 ) -> list[EventCard]:
-    """Build a shuffled event deck for ONE round of play.
+    """Build the initial event pool from Events.csv.
 
-    Reads Events.csv (via parse_event_rows) to determine the exact
-    composition. Each CSV row maps to N EventCards with the proper
-    redraws and pwr_adjust flags. The terminal card (END_GAME or
-    END_ROUND) is always at the bottom.
+    Returns an unshuffled list of EventCards. No terminal cards — the
+    engine handles END_ROUND / END_GAME when the pool is exhausted.
 
-    If the EventDeckConfig has count overrides, they take precedence
-    over the CSV for the matching event type.
+    Patent auction cards are included in the initial pool but are removed
+    (not reshuffled back) after they fire during the game.
     """
     from my_project.parsing import parse_event_rows
     data_dir = Path(__file__).parent / "data"
     rows = parse_event_rows(data_dir / "Events.csv", num_players)
 
-    # Map event type strings to EventType enum values
     _type_map = {e.value: e for e in EventType}
 
     events: list[EventCard] = []
@@ -397,11 +392,8 @@ def _build_single_round(
         event_str = spec["event"]
         et = _type_map.get(event_str)
         if et is None:
-            continue  # skip unknown event types
+            continue
         count = spec["count"]
-        # Check for config overrides (the JSON Advanced section can
-        # override counts for specific event types). draw_building_card
-        # has separate config fields for regular vs redraw.
         if event_str == "draw_building_card":
             override_key = "draw_building_redraw_count" if spec["redraw"] else "draw_building_count"
         else:
@@ -413,50 +405,79 @@ def _build_single_round(
             _ec(et, redraws=spec["redraw"], pwr_adjust=spec["pwr_adjust"])
         ] * count)
 
-    # Legacy direct-NEWS pool (JSON Advanced section). Sampled with replacement.
+    # Legacy direct-NEWS pool (JSON Advanced section).
     news_n = _resolve_count(config.news_count)
     if news_n > 0 and config.news_pool:
         events.extend(random.choices(config.news_pool, k=news_n))
 
-    # Pad so that (non-redraw events + 1 terminal) is divisible by num_players.
-    # This ensures every player gets the same number of turns per round.
-    # Redraws don't count as player-turns (they chain into the preceding turn).
-    non_redraw = sum(1 for e in events if not e.redraws)
-    player_turns_with_terminal = non_redraw + 1  # +1 for END_ROUND / END_GAME
-    remainder = player_turns_with_terminal % num_players
-    if remainder != 0:
-        pad = num_players - remainder
-        events.extend([_ec(EventType.NO_EVENT)] * pad)
+    # Separate "bonus draw" markers from actual player-turn events.
+    # Redraw-flagged events aren't standalone player-turns — they indicate
+    # "this many events in the round also draw a building card into the pool."
+    # We shuffle the real events, then randomly tag N of them with redraws=True
+    # so execute_event fires a bonus draw_building_card after the primary event.
+    real_events = [e for e in events if not e.redraws]
+    bonus_draw_count = sum(1 for e in events if e.redraws)
 
-    # Shuffle and append the terminal card at the bottom.
-    random.shuffle(events)
-    events.append(_ec(terminal_type))
-    return events
+    random.shuffle(real_events)
+
+    # Tag random events to carry a bonus building-card draw
+    if bonus_draw_count > 0 and real_events:
+        tag_indices = random.sample(
+            range(len(real_events)),
+            min(bonus_draw_count, len(real_events)),
+        )
+        for idx in tag_indices:
+            e = real_events[idx]
+            real_events[idx] = EventCard(
+                type=e.type, payload=e.payload, label=e.label,
+                redraws=True, pwr_adjust=e.pwr_adjust,
+            )
+
+    return real_events
 
 
 def build_event_deck(
     num_turns: int,
     num_players: int,
     config: EventDeckConfig | None = None,
-    num_rounds: int = 1,
+    num_rounds: int = 2,
 ) -> list[EventCard]:
-    """Build a shuffled event deck for a full game of one or more rounds.
+    """Build a shuffled event deck for a multi-round game.
 
-    Each round is a separate shuffled pass through the event composition.
-    Rounds 1..N-1 end with END_ROUND (Power Bill + Futures Settlement, then
-    the game continues). Round N ends with END_GAME.
+    The deck is built from Events.csv. Patent auction cards are consumed
+    (removed) after firing. When the deck runs out:
+      - Rounds 1..N-1: fire END_ROUND (PB + Futures), reshuffle the
+        remaining events (minus consumed patent auctions), continue.
+      - Round N: fire END_GAME (PB + Futures), game over.
 
-    Composition defaults come from default_event_counts(num_players). Any
-    user-supplied EventDeckConfig fields override the defaults; fields left
-    as None use default_event_counts.
+    The deck returned here is the FULL pre-built deck for all rounds.
+    Patent auctions appear only in round 1; subsequent rounds have
+    them removed. No terminal cards are in the deck — the engine
+    handles end-of-round/game transitions when the deck pointer passes
+    a round boundary.
+
+    Round boundaries are marked by inserting a sentinel END_ROUND /
+    END_GAME card at the end of each round's shuffled segment.
     """
     cfg = config or EventDeckConfig()
+    pool = _build_event_pool(num_players, cfg)
+
     all_events: list[EventCard] = []
     for round_idx in range(num_rounds):
         is_last = round_idx == num_rounds - 1
+
+        if round_idx > 0:
+            # Remove patent auction cards for subsequent rounds
+            pool = [e for e in pool if e.type != EventType.PATENT_AUCTION]
+
+        round_events = list(pool)
+        random.shuffle(round_events)
+
+        # Append the terminal sentinel (not a player-turn — fires as cleanup)
         terminal = EventType.END_GAME if is_last else EventType.END_ROUND
-        round_events = _build_single_round(num_turns, num_players, cfg, terminal)
+        round_events.append(_ec(terminal))
         all_events.extend(round_events)
+
     return all_events
 
 
@@ -2160,6 +2181,11 @@ def execute_event(state: GameState, event: EventCard, active_player: Player) -> 
     if event.pwr_adjust and event.type != EventType.PWR_ADJUST:
         do_pwr_adjust(state, active_player)
         detail += f" + PWR adjust ({active_player.rate(Resource.PWR):+d})"
+    # Bonus building-card draw: if the event carries the redraws flag,
+    # also draw a building card into the pool (like draw_building_card).
+    if event.redraws and event.type != EventType.DRAW_BUILDING_CARD:
+        bonus_detail = do_draw_building_card(state)
+        detail += f" + {bonus_detail}"
     return detail
 
 
@@ -2326,8 +2352,10 @@ def run_turn(state: GameState, player: Player, strategy, event: EventCard) -> No
     if needed > 0:
         player.hand.extend(state.deck.draw(needed))
 
-    # Execute event (with cascading redraws if applicable)
-    event_detail = execute_event_with_redraws(state, event, player)
+    # Execute the event. Each event is one player-turn — no redraw chaining
+    # in the main game loop. The deck is pre-built with the right number of
+    # events so each player gets exactly N turns.
+    event_detail = execute_event(state, event, player)
 
     detail_strs = [r.detail for r in action_records]
     state.history.append(TurnRecord(
@@ -2389,18 +2417,26 @@ def run_game(
     else:
         raise ValueError("Must provide either `strategy` or `strategies`")
 
-    # Play until the event deck is exhausted. The deck defines the game
-    # length — each player-turn consumes one event (plus redraws). The
-    # loop cycles through players in seat order. A safety cap prevents
-    # infinite loops if the deck is somehow malformed.
+    # Play until the event deck is exhausted. Terminal cards (END_ROUND,
+    # END_GAME) fire their effects as cleanup but do NOT count as a
+    # player-turn — the player cycle skips them. Redraw events are
+    # consumed inside execute_event_with_redraws (called by run_turn),
+    # so the main loop only advances event_idx for the primary event.
     safety = len(state.event_deck) + 100
-    turn = 0
-    while state.event_idx < len(state.event_deck) and turn < safety:
-        player_idx = turn % num_players
-        player = state.players[player_idx]
+    player_turn = 0
+    while state.event_idx < len(state.event_deck) and player_turn < safety:
         event = state.event_deck[state.event_idx]
         state.event_idx += 1
+
+        # Terminal events fire as cleanup — not a player-turn
+        if event.type in (EventType.END_ROUND, EventType.END_GAME):
+            active = state.players[(player_turn - 1) % num_players] if player_turn > 0 else state.players[0]
+            execute_event(state, event, active)
+            continue
+
+        player_idx = player_turn % num_players
+        player = state.players[player_idx]
         run_turn(state, player, player_strategies[player_idx], event)
-        turn += 1
+        player_turn += 1
 
     return state

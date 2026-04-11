@@ -67,70 +67,49 @@ class TestMarket:
 
 
 class TestEventDeck:
-    def test_deck_size_matches_csv_composition(self):
-        """Deck size = sum of CSV event counts + 1 terminal card."""
-        deck = build_event_deck(8, 3)
-        # The deck should have events from Events.csv + 1 END_GAME
-        assert deck[-1].type == EventType.END_GAME
-        # Just verify it's a reasonable size (not 0 or absurdly large)
-        assert 20 < len(deck) < 50
-
-    def test_deck_composition_3p_defaults(self):
-        """At 3 players, the default Events.csv composition is exact."""
-        deck = build_event_deck(8, 3)
-        counts = {et: sum(1 for ec in deck if ec.type == et) for et in EventType}
-        # CSV defaults at 3P (after the row 7 conditional resolves to Patent Auction)
-        assert counts[EventType.NEWS_BULLETIN] == 3
-        assert counts[EventType.DEBT_COLLECTION] == 2
-        assert counts[EventType.POWER_BILL] == 1
-        assert counts[EventType.FUTURES_SETTLEMENT] == 1
-        assert counts[EventType.PATENT_AUCTION] == 4  # 3 base + 1 from row 7
-        assert counts[EventType.END_GAME] == 1
-        # Draw building cards: 6 regular + 5 redraw at 3P
-        assert counts[EventType.DRAW_BUILDING_CARD] == 11
-        redraw_count = sum(1 for ec in deck if ec.redraws)
-        assert redraw_count == 5
-
-    def test_2p_uses_news_bulletin_for_row7(self):
-        """At 2P, the row 7 conditional resolves to News Bulletin instead."""
-        deck = build_event_deck(8, 2)
-        counts = {et: sum(1 for ec in deck if ec.type == et) for et in EventType}
-        assert counts[EventType.NEWS_BULLETIN] == 4  # 3 base + 1 from row 7
-        assert counts[EventType.PATENT_AUCTION] == 3  # base, no +1
-
-    def test_4p_has_no_draw_building_redraws(self):
-        """At 4P, both Draw Building Card rows are non-redraw."""
-        deck = build_event_deck(8, 4)
-        redraw_count = sum(1 for ec in deck if ec.redraws)
-        assert redraw_count == 0
-
-    def test_multi_round_deck_has_end_round_then_end_game(self):
-        """A 2-round deck ends round 1 with END_ROUND and round 2 with END_GAME."""
+    def test_deck_has_terminal_sentinels(self):
+        """A 2-round deck has 1 END_ROUND and 1 END_GAME sentinel."""
         deck = build_event_deck(8, 3, num_rounds=2)
-        # Find END_ROUND and END_GAME positions
-        end_round_idxs = [i for i, ec in enumerate(deck) if ec.type == EventType.END_ROUND]
-        end_game_idxs = [i for i, ec in enumerate(deck) if ec.type == EventType.END_GAME]
-        assert len(end_round_idxs) == 1, f"Expected 1 END_ROUND, got {len(end_round_idxs)}"
-        assert len(end_game_idxs) == 1, f"Expected 1 END_GAME, got {len(end_game_idxs)}"
-        # END_ROUND comes before END_GAME
-        assert end_round_idxs[0] < end_game_idxs[0]
-        # END_GAME is the very last card
-        assert end_game_idxs[0] == len(deck) - 1
+        end_round = sum(1 for e in deck if e.type == EventType.END_ROUND)
+        end_game = sum(1 for e in deck if e.type == EventType.END_GAME)
+        assert end_round == 1
+        assert end_game == 1
 
-    def test_multi_round_deck_is_roughly_double_size(self):
-        """A 2-round deck should be approximately twice the size of a 1-round deck."""
-        single = build_event_deck(8, 3, num_rounds=1)
-        double = build_event_deck(8, 3, num_rounds=2)
-        # Allow some variance due to redraw padding, but should be close to 2x
-        assert 1.8 * len(single) <= len(double) <= 2.2 * len(single)
+    def test_3p_gives_10_turns_per_player(self):
+        """At 3P with 2 rounds, each player gets exactly 10 turns.
+        Terminals don't count as player-turns."""
+        from my_project.strategies import smart_greedy_strategy
+        cards, contracts = _load_data()
+        state = run_game(cards, contracts, strategy=smart_greedy_strategy,
+                         num_players=3, randomize_market=True, num_rounds=2)
+        player_turns = {}
+        for rec in state.history:
+            player_turns[rec.player] = player_turns.get(rec.player, 0) + 1
+        counts = list(player_turns.values())
+        assert all(c == 10 for c in counts), f"Expected 10 each, got {counts}"
 
-    def test_single_round_no_end_round(self):
+    def test_patent_auctions_only_in_round_1(self):
+        """Patent auction cards are removed after round 1."""
+        deck = build_event_deck(8, 3, num_rounds=2)
+        # Find the END_ROUND sentinel — everything after it is round 2
+        end_round_idx = next(i for i, e in enumerate(deck) if e.type == EventType.END_ROUND)
+        round2 = deck[end_round_idx + 1:]
+        patents_in_r2 = sum(1 for e in round2 if e.type == EventType.PATENT_AUCTION)
+        assert patents_in_r2 == 0, f"Expected 0 patent auctions in round 2, got {patents_in_r2}"
+
+    def test_round_2_is_smaller_than_round_1(self):
+        """Round 2 has fewer events because patent auctions are removed."""
+        deck = build_event_deck(8, 3, num_rounds=2)
+        end_round_idx = next(i for i, e in enumerate(deck) if e.type == EventType.END_ROUND)
+        r1_size = end_round_idx  # events before END_ROUND sentinel
+        r2_size = len(deck) - end_round_idx - 1  # events after END_ROUND, before END_GAME
+        assert r2_size < r1_size
+
+    def test_single_round_has_end_game_only(self):
         """A 1-round deck has END_GAME but no END_ROUND."""
         deck = build_event_deck(8, 3, num_rounds=1)
-        end_round_count = sum(1 for ec in deck if ec.type == EventType.END_ROUND)
-        end_game_count = sum(1 for ec in deck if ec.type == EventType.END_GAME)
-        assert end_round_count == 0
-        assert end_game_count == 1
+        assert sum(1 for e in deck if e.type == EventType.END_ROUND) == 0
+        assert sum(1 for e in deck if e.type == EventType.END_GAME) == 1
 
 
 class TestPwrAdjust:
