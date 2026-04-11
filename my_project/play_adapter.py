@@ -633,10 +633,9 @@ class PlayableGame:
         }
 
     def use_teleportation(self, seat_idx: int, resource: str) -> dict:
-        """Teleportation: free sell action. Player picks any positive
-        resource, gains its current market price as cash. Cost: -1 PWR
-        rate (permanent). Does NOT decrement the sold rate.
-        Once per turn.
+        """Teleportation: free sell action. Sells your full rate of the
+        chosen resource at market price (rate × price). Cost: -1 PWR rate
+        (permanent). Does NOT decrement the sold rate. Once per turn.
         """
         if seat_idx not in self._human_indices:
             return {"ok": False, "reason": "Not a human seat"}
@@ -651,16 +650,17 @@ class PlayableGame:
             return {"ok": False, "reason": f"Invalid resource: {resource}"}
         if player.rate(res) < 1:
             return {"ok": False, "reason": f"Need at least +1 {resource} rate"}
-        # Pay the PWR cost (the patent's "minus -1 PWR" — we permit the
-        # rate to go negative; the next power bill will collect the debt).
+        # Full sell: rate × price (same as a normal sell card, but free)
+        rate = player.rate(res)
         price = self.state.market.price(res)
-        player.money += price
+        revenue = rate * price
+        player.money += revenue
         player.rates[Resource.PWR] = player.rate(Resource.PWR) - 1
         player.has_used_teleportation_this_turn = True
         return {
             "ok": True,
             "type": "patent",
-            "detail": f"Teleportation: sold {resource} for ${price}, -1 PWR",
+            "detail": f"Teleportation: sold {rate} {resource} for ${revenue}, -1 PWR",
             **_nw_snapshot(player),
         }
 

@@ -2292,8 +2292,9 @@ def _execute_free_actions(state: GameState, player: Player) -> list[str]:
         player.has_used_water_engine_this_turn = True
         fired.append("Water Engine: -1 H2O, +2 PWR")
 
-    # Teleportation: sell highest-priced positive non-PWR resource for cash,
-    # -1 PWR. Only fire when the price is worth the permanent PWR loss.
+    # Teleportation: free sell — sells full rate of the highest-revenue
+    # positive non-PWR resource (rate × price). Cost: -1 PWR permanent.
+    # Fire when the revenue justifies the PWR loss.
     if (
         _player_owns_patent(player, "Teleportation")
         and not player.has_used_teleportation_this_turn
@@ -2303,13 +2304,15 @@ def _execute_free_actions(state: GameState, player: Player) -> list[str]:
             if r != Resource.PWR and player.rate(r) > 0
         ]
         if candidates:
-            best = max(candidates, key=lambda r: state.market.price(r))
+            best = max(candidates, key=lambda r: state.market.price(r) * player.rate(r))
+            rate = player.rate(best)
             price = state.market.price(best)
-            if price >= 5:  # conservative threshold
-                player.money += price
+            revenue = rate * price
+            if revenue >= 10:  # worth more than the PWR loss
+                player.money += revenue
                 player.rates[Resource.PWR] = player.rate(Resource.PWR) - 1
                 player.has_used_teleportation_this_turn = True
-                fired.append(f"Teleportation: sold {best.value} for ${price}, -1 PWR")
+                fired.append(f"Teleportation: sold {rate} {best.value} for ${revenue}, -1 PWR")
 
     # Nanotechnology: discard the weakest hand card, draw 1.
     if (

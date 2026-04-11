@@ -780,9 +780,9 @@ class TestTeleportation:
         pwr_rate_before = p.rate(Resource.PWR)
         result = game.use_teleportation(0, "FE")
         assert result["ok"]
-        # Player got cash equal to FE market price
+        # Player got cash equal to rate × market price (full sell)
         fe_price = game.state.market.price(Resource.FE)
-        assert p.money == money_before + fe_price
+        assert p.money == money_before + fe_rate_before * fe_price
         # FE rate UNCHANGED (the patent says "does not effect rates" for the sold resource)
         assert p.rate(Resource.FE) == fe_rate_before
         # PWR rate decreased by 1 (the patent's cost)
