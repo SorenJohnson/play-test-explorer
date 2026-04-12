@@ -2249,6 +2249,21 @@ def _execute_action(state: GameState, player: Player, action: Action) -> ActionR
     return None
 
 
+def _rate_ongoing_value(resource: Resource, state: GameState) -> float:
+    """Estimate the ongoing value of +1 rate of a resource for the rest
+    of the game. PWR earns/costs at power bills; non-PWR costs at
+    futures settlements. Uses remaining event counts × current price."""
+    remaining = state.remaining_events()
+    price = state.market.price(resource)
+    end_events = remaining.get(EventType.END_ROUND, 0) + remaining.get(EventType.END_GAME, 0)
+    if resource == Resource.PWR:
+        bills = remaining.get(EventType.POWER_BILL, 0) + end_events
+        return price * bills
+    else:
+        settlements = remaining.get(EventType.FUTURES_SETTLEMENT, 0) + end_events
+        return price * settlements
+
+
 def _execute_free_actions(state: GameState, player: Player) -> list[str]:
     """Auto-fire free actions for AI players at the start of their turn.
 
@@ -2262,66 +2277,44 @@ def _execute_free_actions(state: GameState, player: Player) -> list[str]:
     """
     fired: list[str] = []
 
+    # --- Rate conversion free actions ---
+    # Each conversion permanently changes rates. Only fire when the
+    # ongoing value of what you GAIN exceeds what you LOSE.
+    pwr_cost = _rate_ongoing_value(Resource.PWR, state)
+
     # Optimization Center: -1 PWR, +1 any positive non-PWR rate.
-    # Only use when the benefit outweighs the permanent PWR loss:
-    #   - Player has a specific resource need (contract or build deficit)
-    #   - OR the PWR rate is positive enough to absorb the -1
-    # Don't blindly fire every turn — the cumulative -PWR is devastating.
     if (
         _count_buildings(player, "Optimization Center") > 0
         and not player.has_used_optimization_center_this_turn
     ):
-        pwr_rate = player.rate(Resource.PWR)
+        candidates = [
+            r for r in Resource
+            if r != Resource.PWR and player.rate(r) > 0
+        ]
+        if candidates:
+            best = max(candidates, key=lambda r: _rate_ongoing_value(r, state))
+            gain = _rate_ongoing_value(best, state)
+            if gain > pwr_cost:
+                player.rates[Resource.PWR] = player.rate(Resource.PWR) - 1
+                player.rates[best] = player.rate(best) + 1
+                player.has_used_optimization_center_this_turn = True
+                fired.append(f"Optimization Center: -1 PWR, +1 {best.value} (gain ${gain:.0f} > cost ${pwr_cost:.0f})")
 
-        # Find the best target: a resource we need for a contract/build,
-        # or failing that, the highest-priced resource we produce.
-        best_target = None
-        best_reason = ""
-
-        # Priority 1: boost a resource we're short on for a contract
-        for contract in state.available_contracts:
-            for req in contract.requirements:
-                if req.resource == Resource.PWR:
-                    continue
-                shortfall = req.amount - player.rate(req.resource)
-                if shortfall == 1 and player.rate(req.resource) > 0:
-                    # One more unit would let us fulfill this contract
-                    best_target = req.resource
-                    best_reason = f"for contract ({req.amount} {req.resource.value})"
-                    break
-            if best_target:
-                break
-
-        # Priority 2: boost a resource we produce IF we can afford the PWR loss
-        if best_target is None and pwr_rate >= 0:
-            candidates = [
-                r for r in Resource
-                if r != Resource.PWR and player.rate(r) > 0
-            ]
-            if candidates:
-                best_target = max(candidates, key=lambda r: state.market.price(r))
-                best_reason = "boost production"
-
-        if best_target is not None:
-            player.rates[Resource.PWR] = pwr_rate - 1
-            player.rates[best_target] = player.rate(best_target) + 1
-            player.has_used_optimization_center_this_turn = True
-            fired.append(f"Optimization Center: -1 PWR, +1 {best_target.value} ({best_reason})")
-
-    # Water Engine: -1 H2O, +2 PWR. Always beneficial when H2O ≥ 1.
+    # Water Engine: -1 H2O, +2 PWR.
     if (
         _player_owns_patent(player, "Water Engine")
         and not player.has_used_water_engine_this_turn
         and player.rate(Resource.H2O) >= 1
     ):
-        player.rates[Resource.H2O] = player.rate(Resource.H2O) - 1
-        player.rates[Resource.PWR] = player.rate(Resource.PWR) + 2
-        player.has_used_water_engine_this_turn = True
-        fired.append("Water Engine: -1 H2O, +2 PWR")
+        h2o_cost = _rate_ongoing_value(Resource.H2O, state)
+        pwr_gain = 2 * _rate_ongoing_value(Resource.PWR, state)
+        if pwr_gain > h2o_cost:
+            player.rates[Resource.H2O] = player.rate(Resource.H2O) - 1
+            player.rates[Resource.PWR] = player.rate(Resource.PWR) + 2
+            player.has_used_water_engine_this_turn = True
+            fired.append(f"Water Engine: -1 H2O, +2 PWR (gain ${pwr_gain:.0f} > cost ${h2o_cost:.0f})")
 
-    # Teleportation: free sell — sells full rate of the highest-revenue
-    # positive non-PWR resource (rate × price). Cost: -1 PWR permanent.
-    # Fire when the revenue justifies the PWR loss.
+    # Teleportation: free sell (rate × price cash), -1 PWR permanent.
     if (
         _player_owns_patent(player, "Teleportation")
         and not player.has_used_teleportation_this_turn
@@ -2333,13 +2326,12 @@ def _execute_free_actions(state: GameState, player: Player) -> list[str]:
         if candidates:
             best = max(candidates, key=lambda r: state.market.price(r) * player.rate(r))
             rate = player.rate(best)
-            price = state.market.price(best)
-            revenue = rate * price
-            if revenue >= 10:  # worth more than the PWR loss
+            revenue = rate * state.market.price(best)
+            if revenue > pwr_cost:
                 player.money += revenue
                 player.rates[Resource.PWR] = player.rate(Resource.PWR) - 1
                 player.has_used_teleportation_this_turn = True
-                fired.append(f"Teleportation: sold {rate} {best.value} for ${revenue}, -1 PWR")
+                fired.append(f"Teleportation: sold {rate} {best.value} for ${revenue}, -1 PWR (cost ${pwr_cost:.0f})")
 
     # Nanotechnology: discard the least useful hand card if it's below
     # the average value of cards remaining in the deck. The expected value
