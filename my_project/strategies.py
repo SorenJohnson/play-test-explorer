@@ -853,3 +853,334 @@ def smart_greedy_strategy(state: GameState, player: Player) -> Action:
 
 
 smart_greedy_strategy.pool_swap = _smart_pool_swap
+
+
+# ==========================================================================
+# optimal_strategy: unified card scoring + 2-action lookahead
+# ==========================================================================
+
+
+def _card_value(card, player: Player, state: GameState) -> float:
+    """Unified value of a card across ALL its possible uses.
+
+    Returns the max of: build value, sell value, contract value, and
+    special effect value. This is the card's worth to the player —
+    used for pool swaps, Nanotechnology discard decisions, and action
+    planning.
+    """
+    # Apply patent hooks to get the ACTUAL rates post-hooks
+    hooked = _apply_hooks_to_copy([card], player, state)
+    hcard = hooked[0]
+
+    # Build value: net rate value minus estimated market cost
+    build_val = 0.0
+    for ra in hcard.rates:
+        if ra.amount > 0:
+            build_val += _positive_rate_value(ra.resource, state) * ra.amount
+        else:
+            build_val -= _negative_rate_cost(ra.resource, state) * abs(ra.amount)
+    # Subtract estimated build cost (what we'd need to buy from market)
+    for ra in hcard.costs:
+        have = max(0, player.rate(ra.resource))
+        deficit = max(0, ra.amount - have)
+        if deficit > 0:
+            build_val -= state.market.estimate_buy_cost(ra.resource, deficit)
+    # Add special building / patent effect value
+    build_val += _special_building_value(card, state, player)
+
+    # Sell value: immediate cash from best sellable resource
+    sell_val = 0.0
+    if card.can_sell:
+        for r in card.can_sell:
+            rate = max(0, player.rate(r))
+            if rate > 0:
+                sell_val = max(sell_val, state.market.price(r) * rate)
+
+    # Contract value: best contract this card can fulfill
+    contract_val = 0.0
+    if card.can_fulfill_contract:
+        se_avail = (
+            _count_buildings(player, "Space Elevator") > 0
+            and not player.has_used_space_elevator_this_turn
+        )
+        for contract in state.available_contracts:
+            eff = effective_contract_requirements(
+                player, contract, apply_elevator=se_avail
+            )
+            if all(player.rate(req.resource) >= req.amount for req in eff):
+                sc = _smart_score_contract(state, player, contract)
+                if sc is not None:
+                    contract_val = max(contract_val, sc)
+
+    return max(build_val, sell_val, contract_val)
+
+
+def _enumerate_actions(
+    state: GameState, player: Player,
+) -> list[tuple[float, Action]]:
+    """Enumerate all legal actions with their scores.
+
+    Returns a list of (score, Action) tuples, sorted by score descending.
+    Includes PASS as a 0-score option.
+    """
+    actions: list[tuple[float, Action]] = [(0.0, Action(ActionType.PASS))]
+    hand_indices = list(range(len(player.hand)))
+    cr = player.cards_remaining()
+
+    # --- Builds (1-2 cards) ---
+    if not player.has_built_this_turn and cr >= 1:
+        max_build = min(cr, len(player.hand))
+        for size in range(1, max_build + 1):
+            max_disc = cr - size
+            for combo in combinations(hand_indices, size):
+                build_list = list(combo)
+                remaining = [i for i in hand_indices if i not in combo]
+                cards = [player.hand[i] for i in build_list]
+                # One-of-each special check
+                dominated = False
+                for c in cards:
+                    if c.effect and _count_buildings(player, c.building) > 0:
+                        dominated = True
+                if dominated:
+                    continue
+
+                best_for_combo = None
+                for nd in range(min(len(remaining), max_disc) + 1):
+                    disc_list = remaining[:nd]
+                    result = compute_build_deficit(cards, player, nd, state.market)
+                    if result is None:
+                        continue
+                    _, cost = result
+                    value = _smart_score_build_value(cards, state, player)
+                    score = value - cost
+                    if best_for_combo is None or score > best_for_combo[0]:
+                        best_for_combo = (score, build_list, disc_list)
+
+                if best_for_combo is not None:
+                    sc, bl, dl = best_for_combo
+                    actions.append((
+                        sc,
+                        Action(ActionType.BUILD, build_cards=bl, discard_cards=dl),
+                    ))
+
+    # --- Sells ---
+    if cr >= 1:
+        has_hacker = _count_buildings(player, "Hacker Array") > 0
+        for i, card in enumerate(player.hand):
+            if not card.can_sell:
+                continue
+            sell_sc = _score_sell(state, player, card)
+            if sell_sc > 0:
+                action = Action(ActionType.SELL, sell_card=i)
+                if has_hacker:
+                    sold = max(
+                        (r for r in card.can_sell if player.rate(r) > 0),
+                        key=lambda r: state.market.price(r) * player.rate(r),
+                        default=None,
+                    )
+                    if sold is not None:
+                        ht, hd = _pick_hacker_target(state, player, sold)
+                        action.hacker_target = ht
+                        action.hacker_direction = hd
+                actions.append((sell_sc, action))
+
+    # --- Contracts ---
+    se_avail = (
+        _count_buildings(player, "Space Elevator") > 0
+        and not player.has_used_space_elevator_this_turn
+    )
+    lp_avail = (
+        _count_buildings(player, "Launch Pad") > 0
+        and not player.has_used_launch_pad_this_turn
+    )
+    for ci, contract in enumerate(state.available_contracts):
+        # Check affordability
+        if se_avail:
+            disc_reqs = effective_contract_requirements(player, contract, apply_elevator=True)
+            disc_ok = all(player.rate(r.resource) >= r.amount for r in disc_reqs)
+        else:
+            disc_ok = False
+        plain_ok = all(
+            player.rate(r.resource) >= r.amount for r in contract.requirements
+        )
+        if not plain_ok and not disc_ok:
+            continue
+
+        c_score = _smart_score_contract(state, player, contract)
+        if c_score is None:
+            if disc_ok:
+                opp = sum(
+                    state.market.price(r.resource) * SELL_VALUE_MULTIPLIER * r.amount
+                    for r in disc_reqs
+                )
+                c_score = contract.reward - opp
+            else:
+                continue
+        if c_score <= 0:
+            continue
+
+        use_elev = disc_ok and se_avail
+
+        # Path A: hand card (1 card spent)
+        if cr >= 1:
+            for i, card in enumerate(player.hand):
+                if card.can_fulfill_contract:
+                    actions.append((
+                        c_score,
+                        Action(ActionType.CONTRACT, contract_card=i,
+                               contract_idx=ci, use_elevator=use_elev),
+                    ))
+                    break  # one card is enough
+
+        # Path B: Launch Pad (free)
+        if lp_avail:
+            actions.append((
+                c_score,
+                Action(ActionType.CONTRACT, contract_card=-1,
+                       contract_idx=ci, use_launch_pad=True,
+                       use_elevator=use_elev),
+            ))
+
+        # Path C: discard 2 (2 cards spent)
+        if cr >= 2 and len(player.hand) >= 2:
+            # Pick 2 lowest-value cards
+            indexed = sorted(
+                range(len(player.hand)),
+                key=lambda i: _card_value(player.hand[i], player, state),
+            )
+            discard_idxs = indexed[:2]
+            discard_cost = sum(
+                _card_value(player.hand[i], player, state)
+                for i in discard_idxs
+            )
+            if c_score > discard_cost:
+                actions.append((
+                    c_score - discard_cost,
+                    Action(ActionType.CONTRACT, contract_card=-1,
+                           contract_idx=ci, use_elevator=use_elev,
+                           discard_card_indices=sorted(discard_idxs)),
+                ))
+
+    actions.sort(key=lambda x: -x[0])
+    return actions
+
+
+def _actions_compatible(a1: Action, a2: Action) -> bool:
+    """Check if two actions can legally happen in the same turn."""
+    # Can't build twice
+    if a1.action_type == ActionType.BUILD and a2.action_type == ActionType.BUILD:
+        return False
+    # Can't use Launch Pad twice
+    if (a1.action_type == ActionType.CONTRACT and a1.use_launch_pad and
+            a2.action_type == ActionType.CONTRACT and a2.use_launch_pad):
+        return False
+    # PASS is compatible with nothing (it ends the turn)
+    if a1.action_type == ActionType.PASS or a2.action_type == ActionType.PASS:
+        return False
+    return True
+
+
+def optimal_strategy(state: GameState, player: Player) -> Action:
+    """2-action lookahead strategy with unified card scoring.
+
+    Enumerates all legal actions, then for the top candidates, simulates
+    executing them and scores the best follow-up action. Returns the
+    first action of the best (action1, action2) pair.
+
+    Called repeatedly by the game loop — returns PASS when done.
+    """
+    if player.cards_remaining() <= 0 and not (
+        _count_buildings(player, "Launch Pad") > 0
+        and not player.has_used_launch_pad_this_turn
+    ):
+        return Action(ActionType.PASS)
+
+    actions = _enumerate_actions(state, player)
+    if not actions or actions[0][0] <= 0:
+        return Action(ActionType.PASS)
+
+    # If only 1 card remaining or already used build, just take the best
+    if player.cards_remaining() <= 1 or player.has_built_this_turn:
+        return actions[0][1]
+
+    # 2-action lookahead: try top actions as action1, simulate, score action2
+    import copy
+    best_total = actions[0][0]  # baseline: just take the best single action
+    best_action = actions[0][1]
+
+    # Only consider top N candidates for action1 to limit combinatorial cost
+    top_n = min(8, len(actions))
+    for score1, action1 in actions[:top_n]:
+        if action1.action_type == ActionType.PASS:
+            continue
+        # Simulate action1 on a copy
+        try:
+            state_copy = copy.deepcopy(state)
+            player_idx = state.players.index(player)
+            player_copy = state_copy.players[player_idx]
+
+            # Apply action1 flags
+            from my_project.simulation import _execute_action
+            result = _execute_action(state_copy, player_copy, action1)
+            if result is None:
+                continue
+            if action1.action_type == ActionType.BUILD:
+                player_copy.has_built_this_turn = True
+
+            # Now enumerate action2 on the modified state
+            actions2 = _enumerate_actions(state_copy, player_copy)
+            # Filter for compatible actions
+            for score2, action2 in actions2:
+                if action2.action_type == ActionType.PASS:
+                    # Total = just action1
+                    if score1 > best_total:
+                        best_total = score1
+                        best_action = action1
+                    break
+                if not _actions_compatible(action1, action2):
+                    continue
+                total = score1 + score2
+                if total > best_total:
+                    best_total = total
+                    best_action = action1
+                break  # only consider the best compatible action2
+
+        except Exception:
+            # If simulation fails, fall back to single-action score
+            if score1 > best_total:
+                best_total = score1
+                best_action = action1
+
+    return best_action
+
+
+def _optimal_pool_swap(state: GameState, player: Player) -> None:
+    """Swap hand cards with pool cards to maximize total hand value.
+
+    Uses _card_value to score every card, then greedily swaps the worst
+    hand card for the best pool card until no improvement is possible.
+    """
+    if not state.pool or not player.hand:
+        return
+
+    for _ in range(len(player.hand) + len(state.pool)):
+        best_swap = None
+        best_gain = 0.0
+
+        # Find worst hand card and best pool card
+        for hi, hcard in enumerate(player.hand):
+            h_val = _card_value(hcard, player, state)
+            for pi, pcard in enumerate(state.pool):
+                p_val = _card_value(pcard, player, state)
+                gain = p_val - h_val
+                if gain > best_gain:
+                    best_gain = gain
+                    best_swap = (hi, pi)
+
+        if best_swap:
+            swap_pool_card(state, player, best_swap[0], best_swap[1])
+        else:
+            break
+
+
+optimal_strategy.pool_swap = _optimal_pool_swap

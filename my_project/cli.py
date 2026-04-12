@@ -238,9 +238,9 @@ def main() -> None:
     sim.add_argument("--randomize-market", action="store_true", help="Randomize starting prices")
     sim.add_argument("-t", "--turns", type=int, default=DEFAULT_MAX_TURNS, help="Turns per round per player")
     sim.add_argument("-r", "--rounds", type=int, default=2, help="Deck rounds (passes through event deck)")
-    sim.add_argument("-s", "--strategy", choices=["greedy", "random", "smart"], default="greedy",
+    sim.add_argument("-s", "--strategy", choices=["greedy", "random", "smart", "optimal"], default="greedy",
                      help="Default strategy for all players")
-    sim.add_argument("--player-strategies", nargs="+", choices=["greedy", "random", "smart"],
+    sim.add_argument("--player-strategies", nargs="+", choices=["greedy", "random", "smart", "optimal"],
                      help="Per-player strategies, e.g. --player-strategies greedy random random")
     sim.add_argument("-o", "--output", default="frontend/data/simulation.json")
 

@@ -15,12 +15,13 @@ from my_project.simulation import (
     GameState,
     run_game,
 )
-from my_project.strategies import greedy_strategy, random_strategy, smart_greedy_strategy
+from my_project.strategies import greedy_strategy, optimal_strategy, random_strategy, smart_greedy_strategy
 
 STRATEGIES = {
     "greedy": greedy_strategy,
     "random": random_strategy,
     "smart": smart_greedy_strategy,
+    "optimal": optimal_strategy,
 }
 
 

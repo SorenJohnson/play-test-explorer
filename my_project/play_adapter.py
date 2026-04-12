@@ -55,6 +55,7 @@ from my_project.simulation import (
 )
 from my_project.strategies import (
     greedy_strategy,
+    optimal_strategy,
     random_strategy,
     smart_greedy_strategy,
 )
@@ -71,6 +72,7 @@ STRATEGY_NAMES = {
     "smart": "smart_greedy_strategy",
     "greedy": "greedy_strategy",
     "random": "random_strategy",
+    "optimal": "optimal_strategy",
 }
 
 
