@@ -69,7 +69,7 @@ class TestMarket:
 class TestEventDeck:
     def test_deck_has_terminal_sentinels(self):
         """A 2-round deck has 1 END_ROUND and 1 END_GAME sentinel."""
-        deck = build_event_deck(8, 3, num_rounds=2)
+        deck = build_event_deck(3, num_rounds=2)
         end_round = sum(1 for e in deck if e.type == EventType.END_ROUND)
         end_game = sum(1 for e in deck if e.type == EventType.END_GAME)
         assert end_round == 1
@@ -91,7 +91,7 @@ class TestEventDeck:
 
     def test_patent_auctions_only_in_round_1(self):
         """Patent auction cards are removed after round 1."""
-        deck = build_event_deck(8, 3, num_rounds=2)
+        deck = build_event_deck(3, num_rounds=2)
         # Find the END_ROUND sentinel — everything after it is round 2
         end_round_idx = next(i for i, e in enumerate(deck) if e.type == EventType.END_ROUND)
         round2 = deck[end_round_idx + 1:]
@@ -100,7 +100,7 @@ class TestEventDeck:
 
     def test_round_2_is_smaller_than_round_1(self):
         """Round 2 has fewer events because patent auctions are removed."""
-        deck = build_event_deck(8, 3, num_rounds=2)
+        deck = build_event_deck(3, num_rounds=2)
         end_round_idx = next(i for i, e in enumerate(deck) if e.type == EventType.END_ROUND)
         r1_size = end_round_idx  # events before END_ROUND sentinel
         r2_size = len(deck) - end_round_idx - 1  # events after END_ROUND, before END_GAME
@@ -108,7 +108,7 @@ class TestEventDeck:
 
     def test_single_round_has_end_game_only(self):
         """A 1-round deck has END_GAME but no END_ROUND."""
-        deck = build_event_deck(8, 3, num_rounds=1)
+        deck = build_event_deck(3, num_rounds=1)
         assert sum(1 for e in deck if e.type == EventType.END_ROUND) == 0
         assert sum(1 for e in deck if e.type == EventType.END_GAME) == 1
 

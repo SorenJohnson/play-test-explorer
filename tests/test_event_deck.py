@@ -35,7 +35,7 @@ def _count(deck, et):
 class TestEventDeckConfig:
     def test_default_config_uses_csv_defaults(self):
         """Default EventDeckConfig draws counts from default_event_counts(num_players)."""
-        deck = build_event_deck(8, 3, EventDeckConfig(), num_rounds=1)
+        deck = build_event_deck(3, EventDeckConfig(), num_rounds=1)
         # 3P CSV defaults: 3 news, 2 debt, 1 power, 1 futures, 4 patent (3+1 conditional)
         assert _count(deck, EventType.NEWS_BULLETIN) == 3
         assert _count(deck, EventType.DEBT_COLLECTION) == 2
@@ -51,7 +51,7 @@ class TestEventDeckConfig:
             debt_collection_count=0,
             futures_settlement_count=3,
         )
-        deck = build_event_deck(8, 3, cfg, num_rounds=1)
+        deck = build_event_deck(3, cfg, num_rounds=1)
         assert _count(deck, EventType.POWER_BILL) == 5
         assert _count(deck, EventType.DEBT_COLLECTION) == 0
         assert _count(deck, EventType.FUTURES_SETTLEMENT) == 3
@@ -63,19 +63,19 @@ class TestEventDeckConfig:
             news_pool=[news],
             news_count=2,
         )
-        deck = build_event_deck(8, 3, cfg, num_rounds=1)
+        deck = build_event_deck(3, cfg, num_rounds=1)
         assert _count(deck, EventType.NEWS) == 2
 
     def test_news_count_zero_by_default(self):
         """Default config produces no direct-NEWS events even with a non-empty pool."""
         news = EventCard(type=EventType.NEWS, label="test", payload={"market_deltas": {"FE": 1}})
         cfg = EventDeckConfig(news_pool=[news])  # news_count defaults to 0
-        deck = build_event_deck(8, 3, cfg, num_rounds=1)
+        deck = build_event_deck(3, cfg, num_rounds=1)
         assert _count(deck, EventType.NEWS) == 0
 
     def test_no_config_uses_defaults(self):
         """Passing config=None is equivalent to passing EventDeckConfig()."""
-        deck = build_event_deck(8, 3, None, num_rounds=1)
+        deck = build_event_deck(3, None, num_rounds=1)
         assert _count(deck, EventType.NEWS_BULLETIN) == 3
         assert _count(deck, EventType.PATENT_AUCTION) == 4
 
@@ -87,7 +87,7 @@ class TestEventDeckConfig:
             draw_building_count=0,
             draw_building_redraw_count=0,
         )
-        deck = build_event_deck(8, 3, cfg, num_rounds=1)
+        deck = build_event_deck(3, cfg, num_rounds=1)
         assert _count(deck, EventType.NEWS_BULLETIN) == 0
         assert _count(deck, EventType.PATENT_AUCTION) == 0
         assert _count(deck, EventType.DRAW_BUILDING_CARD) == 0

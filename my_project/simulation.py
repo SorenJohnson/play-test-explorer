@@ -437,10 +437,10 @@ def _build_event_pool(
 
 
 def build_event_deck(
-    num_turns: int,
     num_players: int,
     config: EventDeckConfig | None = None,
     num_rounds: int = 2,
+    num_turns: int = 0,  # deprecated, ignored — kept for backward compat
 ) -> list[EventCard]:
     """Build a shuffled event deck for a multi-round game.
 
@@ -661,7 +661,7 @@ class GameState:
         # Build event deck (use explicit deck if provided, else build from config)
         if event_deck is None:
             event_deck = build_event_deck(
-                max_turns, num_players, event_deck_config, num_rounds=num_rounds,
+                num_players, event_deck_config, num_rounds=num_rounds,
             )
 
         # Build news deck (defaults to one card per NEWS_EFFECTS entry,

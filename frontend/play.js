@@ -253,7 +253,7 @@ _event_deck_config = _EDC(**_kw)
 
   const deckRounds = cfg.deckRounds || 2;
   pyodide.runPython(
-    `game = PlayableGame(seed=${seed}, seats=${seatsLiteral}, names=${namesLiteral}, max_turns=${cfg.rounds}, num_rounds=${deckRounds}${extraKwargs})`
+    `game = PlayableGame(seed=${seed}, seats=${seatsLiteral}, names=${namesLiteral}, num_rounds=${deckRounds}${extraKwargs})`
   );
   game = pyodide.globals.get("game");
   turnLog.length = 0;
@@ -297,7 +297,6 @@ function hideNewGameModal() {
 function populateNewGameForm(cfg) {
   const numSeatsSelect = document.getElementById("ng-num-seats");
   numSeatsSelect.value = String(cfg.seats.length);
-  document.getElementById("ng-rounds").value = String(cfg.rounds);
   document.getElementById("ng-deck-rounds").value = String(cfg.deckRounds || 2);
   document.getElementById("ng-seed").value = cfg.seed === null ? "" : String(cfg.seed);
   document.getElementById("ng-event-config").value =
@@ -360,7 +359,6 @@ function readNewGameConfig() {
   const { seats, names } = readSeatRows();
   // Fill any blank names with the seat default so the backend always gets a real string.
   const filledNames = names.map((n, i) => n || defaultSeatName(i));
-  const rounds = parseInt(document.getElementById("ng-rounds").value, 10) || 8;
   const deckRounds = parseInt(document.getElementById("ng-deck-rounds").value, 10) || 2;
   const seedRaw = document.getElementById("ng-seed").value.trim();
   const seed = seedRaw === "" ? null : parseInt(seedRaw, 10);
@@ -368,7 +366,6 @@ function readNewGameConfig() {
   return {
     seats,
     names: filledNames,
-    rounds,
     deckRounds,
     seed: Number.isNaN(seed) ? null : seed,
     eventConfigText,
