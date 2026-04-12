@@ -2314,45 +2314,32 @@ def _execute_free_actions(state: GameState, player: Player) -> list[str]:
                 player.has_used_teleportation_this_turn = True
                 fired.append(f"Teleportation: sold {rate} {best.value} for ${revenue}, -1 PWR")
 
-    # Nanotechnology: discard the least useful hand card, draw 1.
-    # Only fire if the worst card is truly low-value — don't cycle good hands.
+    # Nanotechnology: discard the least useful hand card if it's below
+    # the average value of cards remaining in the deck. The expected value
+    # of a random draw is the deck average — discard if worst < average.
     if (
         _player_owns_patent(player, "Nanotechnology")
         and not player.has_used_nanotechnology_this_turn
         and player.hand
     ):
-        def _card_usefulness(card: Card) -> float:
-            """Score how useful a card is to the player right now.
-            Considers: build rate value, sell revenue, contract icon,
-            special building bonus, and negative rate costs."""
-            score = 0.0
-            for ra in card.rates:
-                price = state.market.price(ra.resource)
-                if ra.amount > 0:
-                    score += price * ra.amount * 3  # future earning potential
-                else:
-                    score -= price * abs(ra.amount) * 2  # future cost
-            # Sell value: best sell revenue from this card
-            if card.can_sell:
-                for r in card.can_sell:
-                    rate = max(0, player.rate(r))
-                    if rate > 0:
-                        score += state.market.price(r) * rate * 0.5
-            # Contract icon is valuable if contracts are available
-            if card.can_fulfill_contract and state.available_contracts:
-                score += CONTRACT_REWARD * 0.3
-            # Special building effect bonus
-            if card.effect:
-                from my_project.strategies import _get_learned_card_values
-                score += _get_learned_card_values().get(card.building, 0)
-            return score
+        from my_project.strategies import _card_value
 
-        worst_idx = min(range(len(player.hand)), key=lambda i: _card_usefulness(player.hand[i]))
-        worst_score = _card_usefulness(player.hand[worst_idx])
+        worst_idx = min(
+            range(len(player.hand)),
+            key=lambda i: _card_value(player.hand[i], player, state),
+        )
+        worst_val = _card_value(player.hand[worst_idx], player, state)
 
-        # Only discard if the worst card is genuinely bad (score < $10).
-        # A random replacement has unknown value — don't throw away decent cards.
-        if worst_score < 10:
+        # Compute average value of cards in the deck (what we'd expect to draw)
+        deck_cards = state.deck.cards
+        if deck_cards:
+            avg_deck_val = sum(
+                _card_value(c, player, state) for c in deck_cards
+            ) / len(deck_cards)
+        else:
+            avg_deck_val = 0.0
+
+        if worst_val < avg_deck_val:
             discarded = player.hand.pop(worst_idx)
             state.deck.discard.append(discarded)
             drawn = state.deck.draw(1)
