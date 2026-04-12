@@ -26,12 +26,11 @@ PUBLISH_DIR = Path("frontend/data")
 
 SCENARIOS = [
     {"name": "sim_3random", "strategies": ["random", "random", "random"]},
-    {"name": "sim_1smart", "strategies": ["smart", "random", "random"]},
-    {"name": "sim_smart_greedy_random", "strategies": ["smart", "greedy", "random"]},
-    {"name": "sim_3greedy", "strategies": ["greedy", "greedy", "greedy"]},
     {"name": "sim_3smart", "strategies": ["smart", "smart", "smart"]},
     {"name": "sim_3optimal", "strategies": ["optimal", "optimal", "optimal"]},
     {"name": "sim_optimal_smart_random", "strategies": ["optimal", "smart", "random"]},
+    {"name": "sim_optimal_vs_smart", "strategies": ["optimal", "smart", "smart"]},
+    {"name": "sim_1optimal_2random", "strategies": ["optimal", "random", "random"]},
 ]
 
 

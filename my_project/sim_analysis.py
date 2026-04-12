@@ -725,7 +725,7 @@ def compute_rate_value_curves(
     market_start_pos: int = DEFAULT_MARKET_POS,
 ) -> dict:
     """Compute the theoretical value of +1 rate for each resource at each turn."""
-    deck = build_event_deck(num_turns, num_players)
+    deck = build_event_deck(num_players)
     # END_GAME is always at the bottom; it fires both a power bill and a settlement
     def _count(et: EventType) -> int:
         return sum(1 for ec in deck if ec.type == et)
