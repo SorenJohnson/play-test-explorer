@@ -1,19 +1,19 @@
-Card,Type,Learned_Value,Std_Error
-Pleasure Dome,special,36.2,4.0
-Optimization Center,special,-80.8,5.0
-Space Elevator,special,-66.5,5.3
-Hacker Array,special,-26.0,4.9
-Launch Pad,special,-17.7,4.2
-Patent Office,special,-49.6,6.0
-Superconductors,patent,13.1,5.7
-Energy Vault,patent,72.7,5.6
-Financial Instruments,patent,19.2,5.8
-Water Engine,patent,5.7,5.5
-Nanotechnology,patent,15.9,5.8
-Cold Fusion,patent,2.3,5.7
-Virtual Reality,patent,10.6,5.7
-Perpetual Motion,patent,13.8,5.5
-Carbon Scrubbing,patent,3.8,5.7
-Slant Drilling,patent,-15.6,5.6
-Thinking Machines,patent,-9.9,5.7
-Teleportation,patent,35.2,5.8
+Card,Type,Learned_Value,Std_Error,Early_Bonus,Mid_Bonus,Late_Bonus
+Pleasure Dome,special,34.6,0.0,41.5,19.4,-26.2
+Optimization Center,special,-49.7,0.0,-33.1,-31.8,15.2
+Space Elevator,special,-55.2,0.0,0.7,-26.5,-29.4
+Hacker Array,special,-13.4,0.0,12.2,-11.5,-14.1
+Launch Pad,special,-3.2,0.0,-4.4,-3.8,5.0
+Patent Office,special,-45.1,0.0,7.1,-40.7,-11.6
+Superconductors,patent,12.7,0.0,-21.4,-23.9,0.0
+Energy Vault,patent,72.0,0.0,9.1,31.1,0.0
+Financial Instruments,patent,13.8,0.0,-11.4,55.1,0.0
+Water Engine,patent,10.9,0.0,-8.5,8.2,0.0
+Nanotechnology,patent,-4.4,0.0,6.4,22.1,0.0
+Cold Fusion,patent,2.9,0.0,2.0,24.9,0.0
+Virtual Reality,patent,-4.6,0.0,-1.1,36.2,0.0
+Perpetual Motion,patent,32.9,0.0,-16.9,-17.1,0.0
+Carbon Scrubbing,patent,-11.2,0.0,4.8,-8.2,0.0
+Slant Drilling,patent,4.1,0.0,-23.2,7.4,0.0
+Thinking Machines,patent,-5.8,0.0,5.8,21.3,0.0
+Teleportation,patent,21.7,0.0,-29.1,50.9,0.0

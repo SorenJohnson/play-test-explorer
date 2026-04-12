@@ -58,23 +58,38 @@ def collect_valuation_data(
 ) -> dict[str, list]:
     """Run exploration games and collect per-player feature/outcome data.
 
-    Uses random_strategy for broad coverage of building/patent choices.
+    Forces all special buildings and patents to the same base value
+    ($20) during exploration so the AI builds them all equally. This
+    prevents the regression from being biased by the AI's prior
+    avoidance of "low-value" cards.
+
+    Includes timing interaction terms: each card gets early/mid/late
+    features based on when it was acquired relative to total turns.
+
     Returns a dict-of-lists dataset suitable for regression.
     """
-    from my_project.strategies import random_strategy, smart_greedy_strategy
+    from my_project.strategies import (
+        _get_learned_card_values,
+        _learned_card_values,
+        optimal_strategy,
+        random_strategy,
+    )
+    import my_project.strategies as strat_mod
 
-    # Use a mix of strategies for broad coverage: smart plays well but
-    # builds specials when valuable; random explores more card combinations.
+    # Force flat base values so the AI explores all buildings equally
+    flat_values = {name: 20.0 for name in ALL_CARD_NAMES}
+    strat_mod._learned_card_values = flat_values
+
     strategies_pool = [
-        [smart_greedy_strategy] * num_players,
+        [optimal_strategy] * num_players,
         [random_strategy] * num_players,
-        [smart_greedy_strategy, random_strategy, random_strategy],
+        [optimal_strategy, random_strategy, random_strategy],
     ]
 
     cards = parse_cards(DATA_DIR / "Cards.csv")
     contracts = parse_contracts(DATA_DIR / "Contracts.csv")
 
-    # Feature columns: one binary flag per card + control variables
+    # Feature columns: binary flags + timing interactions + controls
     data: dict[str, list] = {
         "net_worth": [],
         "num_buildings": [],
@@ -83,11 +98,13 @@ def collect_valuation_data(
         "money": [],
     }
     for name in ALL_CARD_NAMES:
-        data[name] = []
+        data[name] = []               # binary: 1 if owned
+        data[f"{name}_early"] = []    # 1 if acquired in first third of game
+        data[f"{name}_mid"] = []      # 1 if acquired in middle third
+        data[f"{name}_late"] = []     # 1 if acquired in last third
 
-    for _ in range(n_games):
-        # Rotate through strategy mixes for diverse data
-        strats = strategies_pool[_ % len(strategies_pool)]
+    for game_idx in range(n_games):
+        strats = strategies_pool[game_idx % len(strategies_pool)]
         state = run_game(
             all_cards=cards,
             all_contracts=contracts,
@@ -96,11 +113,48 @@ def collect_valuation_data(
             randomize_market=True,
             num_rounds=num_rounds,
         )
+
+        # Figure out total turns for timing buckets
+        total_turns = len(state.history)
+        third = max(total_turns // 3, 1)
+
+        # Build a map: player_name → {building_name: turn_acquired}
+        build_turns: dict[str, dict[str, int]] = {
+            p.name: {} for p in state.players
+        }
+        for turn_idx, rec in enumerate(state.history):
+            for action_rec in rec.actions:
+                for bname in action_rec.buildings:
+                    if bname not in build_turns[rec.player]:
+                        build_turns[rec.player][bname] = turn_idx
+            # Patent auctions show in the event detail
+            if "patent auction:" in rec.event.lower() and "won" in rec.event.lower():
+                # Parse "patent auction: Player_2 won Superconductors for $15 debt"
+                parts = rec.event.split("won")
+                if len(parts) >= 2:
+                    patent_part = parts[1].strip().split(" for")[0].strip()
+                    if patent_part and rec.player in build_turns:
+                        build_turns[rec.player][patent_part] = turn_idx
+
         for player in state.players:
             owned = set(player.building_names())
-            # Binary features for each tracked card
+            p_turns = build_turns.get(player.name, {})
+
             for name in ALL_CARD_NAMES:
-                data[name].append(1 if name in owned else 0)
+                has_it = 1 if name in owned else 0
+                data[name].append(has_it)
+
+                # Timing: when was it acquired?
+                acq_turn = p_turns.get(name, -1)
+                if has_it and acq_turn >= 0:
+                    data[f"{name}_early"].append(1 if acq_turn < third else 0)
+                    data[f"{name}_mid"].append(1 if third <= acq_turn < 2 * third else 0)
+                    data[f"{name}_late"].append(1 if acq_turn >= 2 * third else 0)
+                else:
+                    data[f"{name}_early"].append(0)
+                    data[f"{name}_mid"].append(0)
+                    data[f"{name}_late"].append(0)
+
             # Control variables
             data["num_buildings"].append(len(player.buildings_played))
             data["total_positive_rates"].append(
@@ -111,24 +165,45 @@ def collect_valuation_data(
             # Target
             data["net_worth"].append(player.net_worth())
 
+    # Restore the real learned values (we forced flat values for exploration)
+    strat_mod._learned_card_values = None  # force reload from CSV on next access
+
     return data
 
 
 def fit_card_values(data: dict[str, list]) -> dict[str, dict]:
     """Fit OLS linear regression and return per-card value estimates.
 
-    Model: NW ~ β₀ + Σ βᵢ·card_i + γ₁·num_buildings + γ₂·positive_rates + γ₃·contracts
+    Model includes:
+    - Binary flags for each card (owned or not)
+    - Timing interactions: early/mid/late acquisition for each card
+    - Control variables: num_buildings, total_positive_rates, contracts
 
-    Returns a dict mapping card name → {"value": float, "std_err": float}.
-    Also includes R² and intercept in the "_meta" key.
+    The "value" for each card is the base coefficient. The timing
+    coefficients show how much MORE the card is worth when acquired
+    early vs late.
+
+    Returns a dict mapping card name → {"value", "std_err", "early", "mid", "late"}.
     """
     n = len(data["net_worth"])
     y = np.array(data["net_worth"], dtype=float)
 
-    # Build feature matrix: card flags + control variables
-    feature_names = list(ALL_CARD_NAMES) + [
+    # Build feature matrix: card flags + timing + controls
+    # Base card flags
+    feature_names = list(ALL_CARD_NAMES)
+    # Timing interaction terms
+    timing_features = []
+    for name in ALL_CARD_NAMES:
+        for period in ("early", "mid", "late"):
+            key = f"{name}_{period}"
+            if key in data:
+                timing_features.append(key)
+    feature_names += timing_features
+    # Control variables
+    feature_names += [
         "num_buildings", "total_positive_rates", "contracts_fulfilled",
     ]
+
     X = np.ones((n, len(feature_names) + 1), dtype=float)  # +1 for intercept
     for i, name in enumerate(feature_names):
         X[:, i + 1] = np.array(data[name], dtype=float)
@@ -164,11 +239,33 @@ def fit_card_values(data: dict[str, list]) -> dict[str, dict]:
             "n_observations": n,
         }
     }
-    for i, name in enumerate(feature_names):
-        results[name] = {
-            "value": round(float(beta[i + 1]), 1),
-            "std_err": round(float(std_errs[i + 1]), 1),
+    # Build a name→index map for easy lookup
+    name_to_idx = {name: i + 1 for i, name in enumerate(feature_names)}
+
+    for name in ALL_CARD_NAMES:
+        idx = name_to_idx.get(name)
+        if idx is None:
+            continue
+        entry: dict = {
+            "value": round(float(beta[idx]), 1),
+            "std_err": round(float(std_errs[idx]), 1),
         }
+        # Timing coefficients
+        for period in ("early", "mid", "late"):
+            key = f"{name}_{period}"
+            tidx = name_to_idx.get(key)
+            if tidx is not None:
+                entry[period] = round(float(beta[tidx]), 1)
+        results[name] = entry
+
+    # Also include control variable coefficients
+    for ctrl in ("num_buildings", "total_positive_rates", "contracts_fulfilled"):
+        idx = name_to_idx.get(ctrl)
+        if idx is not None:
+            results[ctrl] = {
+                "value": round(float(beta[idx]), 1),
+                "std_err": round(float(std_errs[idx]), 1),
+            }
 
     return results
 
@@ -177,20 +274,20 @@ def export_card_values(results: dict[str, dict], path: Path) -> None:
     """Write learned card values to CardValues.csv."""
     with open(path, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["Card", "Type", "Learned_Value", "Std_Error"])
+        writer.writerow(["Card", "Type", "Learned_Value", "Std_Error", "Early_Bonus", "Mid_Bonus", "Late_Bonus"])
         for name in SPECIAL_BUILDINGS:
             if name in results:
+                r = results[name]
                 writer.writerow([
-                    name, "special",
-                    results[name]["value"],
-                    results[name]["std_err"],
+                    name, "special", r["value"], r["std_err"],
+                    r.get("early", ""), r.get("mid", ""), r.get("late", ""),
                 ])
         for name in PATENTS:
             if name in results:
+                r = results[name]
                 writer.writerow([
-                    name, "patent",
-                    results[name]["value"],
-                    results[name]["std_err"],
+                    name, "patent", r["value"], r["std_err"],
+                    r.get("early", ""), r.get("mid", ""), r.get("late", ""),
                 ])
 
 
@@ -211,8 +308,8 @@ def run_evaluation(
     print(f"R² = {meta['r_squared']:.3f}, intercept = ${meta['intercept']:.0f}")
 
     print(f"\nCard Values (learned from {n_games} games):")
-    print(f"{'Card':<25} {'Value':>8} {'± Std Err':>10}")
-    print("-" * 45)
+    print(f"{'Card':<25} {'Base':>7} {'Early':>7} {'Mid':>7} {'Late':>7} {'± SE':>7}")
+    print("-" * 65)
 
     # Sort by value descending
     card_results = [
@@ -220,7 +317,10 @@ def run_evaluation(
     ]
     card_results.sort(key=lambda x: -x[1]["value"])
     for name, r in card_results:
-        print(f"  {name:<23} ${r['value']:>6.1f}   ± ${r['std_err']:.1f}")
+        early = f"${r['early']:+.0f}" if "early" in r else "—"
+        mid = f"${r['mid']:+.0f}" if "mid" in r else "—"
+        late = f"${r['late']:+.0f}" if "late" in r else "—"
+        print(f"  {name:<23} ${r['value']:>5.0f}  {early:>6} {mid:>6} {late:>6}  ±${r['std_err']:.0f}")
 
     # Export
     out_path = DATA_DIR / "CardValues.csv"
