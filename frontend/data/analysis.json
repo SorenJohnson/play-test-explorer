@@ -21625,99 +21625,88 @@
           "contract_value": 60950
         }
       },
-      "smart": {
+      "optimal": {
         "player_count": 3000,
         "resources": {
-          "FE": {
-            "bought_units": 11430,
-            "sold_units": 8070,
-            "buy_cost": 59770.0,
-            "sell_revenue": 59116.0,
-            "futures_units": 531,
-            "futures_cost": 3695.0
-          },
-          "GLS": {
-            "bought_units": 4800,
-            "sold_units": 3437,
-            "buy_cost": 27656.0,
-            "sell_revenue": 24537.0,
-            "futures_units": 2281,
-            "futures_cost": 18588.0
-          },
           "PWR": {
-            "bought_units": 25688,
-            "sold_units": 33486,
-            "buy_cost": 99752.0,
-            "sell_revenue": 104991.0,
+            "bought_units": 17073,
+            "sold_units": 48215,
+            "buy_cost": 65513.0,
+            "sell_revenue": 156395.0,
             "futures_units": 0,
             "futures_cost": 0.0
           },
-          "H2O": {
-            "bought_units": 0,
-            "sold_units": 3860,
-            "buy_cost": 0.0,
-            "sell_revenue": 28698.0,
-            "futures_units": 7935,
-            "futures_cost": 49720.0
+          "C": {
+            "bought_units": 3206,
+            "sold_units": 7917,
+            "buy_cost": 14905.0,
+            "sell_revenue": 49184.0,
+            "futures_units": 715,
+            "futures_cost": 3071.0
           },
-          "SI": {
-            "bought_units": 1656,
-            "sold_units": 2718,
-            "buy_cost": 8614.0,
-            "sell_revenue": 20875.0,
-            "futures_units": 6599,
-            "futures_cost": 41871.0
+          "GLS": {
+            "bought_units": 6017,
+            "sold_units": 5174,
+            "buy_cost": 33615.0,
+            "sell_revenue": 35776.0,
+            "futures_units": 2225,
+            "futures_cost": 17694.0
+          },
+          "ELX": {
+            "bought_units": 2023,
+            "sold_units": 2912,
+            "buy_cost": 11302.0,
+            "sell_revenue": 18890.0,
+            "futures_units": 2619,
+            "futures_cost": 18684.0
+          },
+          "FE": {
+            "bought_units": 12757,
+            "sold_units": 13709,
+            "buy_cost": 62301.0,
+            "sell_revenue": 91102.0,
+            "futures_units": 551,
+            "futures_cost": 3764.0
           },
           "O2": {
             "bought_units": 0,
-            "sold_units": 2107,
+            "sold_units": 3482,
             "buy_cost": 0.0,
-            "sell_revenue": 14027.0,
-            "futures_units": 3049,
-            "futures_cost": 17074.0
+            "sell_revenue": 22367.0,
+            "futures_units": 2936,
+            "futures_cost": 15845.0
+          },
+          "H2O": {
+            "bought_units": 0,
+            "sold_units": 4115,
+            "buy_cost": 0.0,
+            "sell_revenue": 28823.0,
+            "futures_units": 10552,
+            "futures_cost": 65969.0
+          },
+          "SI": {
+            "bought_units": 2337,
+            "sold_units": 4887,
+            "buy_cost": 12301.0,
+            "sell_revenue": 35413.0,
+            "futures_units": 6659,
+            "futures_cost": 41837.0
           },
           "FOOD": {
             "bought_units": 0,
-            "sold_units": 6033,
+            "sold_units": 8033,
             "buy_cost": 0.0,
-            "sell_revenue": 34259.0,
-            "futures_units": 2105,
-            "futures_cost": 10760.0
-          },
-          "ELX": {
-            "bought_units": 1122,
-            "sold_units": 1966,
-            "buy_cost": 6181.0,
-            "sell_revenue": 13688.0,
-            "futures_units": 2525,
-            "futures_cost": 17878.0
-          },
-          "C": {
-            "bought_units": 2596,
-            "sold_units": 5048,
-            "buy_cost": 11896.0,
-            "sell_revenue": 32414.0,
-            "futures_units": 822,
-            "futures_cost": 3689.0
+            "sell_revenue": 43860.0,
+            "futures_units": 2114,
+            "futures_cost": 11091.0
           }
         },
         "totals": {
-          "net_worth": 127256,
-          "money": 368919,
-          "debt": 249462,
-          "contracts_fulfilled": 1570,
-          "contract_value": 78500
-        }
-      },
-      "greedy": {
-        "player_count": 0,
-        "resources": {},
-        "totals": {
-          "net_worth": 0,
-          "money": 0,
-          "debt": 0,
-          "contracts_fulfilled": 0,
-          "contract_value": 0
+          "net_worth": 343110,
+          "money": 566653,
+          "debt": 232201,
+          "contracts_fulfilled": 1965,
+          "contract_value": 98250
         }
       },
       "random": {
@@ -21802,6 +21791,90 @@
           "debt": 518455,
           "contracts_fulfilled": 816,
           "contract_value": 40800
+        }
+      },
+      "smart": {
+        "player_count": 3000,
+        "resources": {
+          "FE": {
+            "bought_units": 11430,
+            "sold_units": 8070,
+            "buy_cost": 59770.0,
+            "sell_revenue": 59116.0,
+            "futures_units": 531,
+            "futures_cost": 3695.0
+          },
+          "GLS": {
+            "bought_units": 4800,
+            "sold_units": 3437,
+            "buy_cost": 27656.0,
+            "sell_revenue": 24537.0,
+            "futures_units": 2281,
+            "futures_cost": 18588.0
+          },
+          "PWR": {
+            "bought_units": 25688,
+            "sold_units": 33486,
+            "buy_cost": 99752.0,
+            "sell_revenue": 104991.0,
+            "futures_units": 0,
+            "futures_cost": 0.0
+          },
+          "H2O": {
+            "bought_units": 0,
+            "sold_units": 3860,
+            "buy_cost": 0.0,
+            "sell_revenue": 28698.0,
+            "futures_units": 7935,
+            "futures_cost": 49720.0
+          },
+          "SI": {
+            "bought_units": 1656,
+            "sold_units": 2718,
+            "buy_cost": 8614.0,
+            "sell_revenue": 20875.0,
+            "futures_units": 6599,
+            "futures_cost": 41871.0
+          },
+          "O2": {
+            "bought_units": 0,
+            "sold_units": 2107,
+            "buy_cost": 0.0,
+            "sell_revenue": 14027.0,
+            "futures_units": 3049,
+            "futures_cost": 17074.0
+          },
+          "FOOD": {
+            "bought_units": 0,
+            "sold_units": 6033,
+            "buy_cost": 0.0,
+            "sell_revenue": 34259.0,
+            "futures_units": 2105,
+            "futures_cost": 10760.0
+          },
+          "ELX": {
+            "bought_units": 1122,
+            "sold_units": 1966,
+            "buy_cost": 6181.0,
+            "sell_revenue": 13688.0,
+            "futures_units": 2525,
+            "futures_cost": 17878.0
+          },
+          "C": {
+            "bought_units": 2596,
+            "sold_units": 5048,
+            "buy_cost": 11896.0,
+            "sell_revenue": 32414.0,
+            "futures_units": 822,
+            "futures_cost": 3689.0
+          }
+        },
+        "totals": {
+          "net_worth": 127256,
+          "money": 368919,
+          "debt": 249462,
+          "contracts_fulfilled": 1570,
+          "contract_value": 78500
         }
       }
     }
@@ -60485,99 +60558,88 @@
             "contract_value": 7450
           }
         },
-        "smart": {
+        "optimal": {
           "player_count": 500,
           "resources": {
-            "FE": {
-              "bought_units": 2136,
-              "sold_units": 1149,
-              "buy_cost": 10126.0,
-              "sell_revenue": 8501.0,
-              "futures_units": 94,
-              "futures_cost": 531.0
-            },
-            "GLS": {
-              "bought_units": 835,
-              "sold_units": 613,
-              "buy_cost": 4774.0,
-              "sell_revenue": 4397.0,
-              "futures_units": 338,
-              "futures_cost": 2762.0
-            },
             "PWR": {
-              "bought_units": 4129,
-              "sold_units": 5076,
-              "buy_cost": 17838.0,
-              "sell_revenue": 14376.0,
+              "bought_units": 2007,
+              "sold_units": 10317,
+              "buy_cost": 7013.0,
+              "sell_revenue": 34199.0,
               "futures_units": 0,
               "futures_cost": 0.0
             },
-            "H2O": {
-              "bought_units": 0,
-              "sold_units": 666,
-              "buy_cost": 0.0,
-              "sell_revenue": 5067.0,
-              "futures_units": 1222,
-              "futures_cost": 7823.0
+            "C": {
+              "bought_units": 568,
+              "sold_units": 1440,
+              "buy_cost": 2843.0,
+              "sell_revenue": 9486.0,
+              "futures_units": 55,
+              "futures_cost": 301.0
             },
-            "SI": {
-              "bought_units": 275,
-              "sold_units": 475,
-              "buy_cost": 1487.0,
-              "sell_revenue": 3690.0,
-              "futures_units": 1170,
-              "futures_cost": 7123.0
+            "GLS": {
+              "bought_units": 1079,
+              "sold_units": 750,
+              "buy_cost": 6114.0,
+              "sell_revenue": 5369.0,
+              "futures_units": 365,
+              "futures_cost": 2981.0
+            },
+            "ELX": {
+              "bought_units": 349,
+              "sold_units": 258,
+              "buy_cost": 1866.0,
+              "sell_revenue": 1772.0,
+              "futures_units": 466,
+              "futures_cost": 3271.0
+            },
+            "FE": {
+              "bought_units": 2034,
+              "sold_units": 2517,
+              "buy_cost": 10478.0,
+              "sell_revenue": 17514.0,
+              "futures_units": 80,
+              "futures_cost": 609.0
             },
             "O2": {
               "bought_units": 0,
-              "sold_units": 313,
+              "sold_units": 562,
               "buy_cost": 0.0,
-              "sell_revenue": 2167.0,
-              "futures_units": 499,
-              "futures_cost": 2626.0
+              "sell_revenue": 3819.0,
+              "futures_units": 396,
+              "futures_cost": 2223.0
+            },
+            "H2O": {
+              "bought_units": 0,
+              "sold_units": 607,
+              "buy_cost": 0.0,
+              "sell_revenue": 4392.0,
+              "futures_units": 1933,
+              "futures_cost": 12592.0
+            },
+            "SI": {
+              "bought_units": 485,
+              "sold_units": 869,
+              "buy_cost": 2480.0,
+              "sell_revenue": 6605.0,
+              "futures_units": 975,
+              "futures_cost": 6336.0
             },
             "FOOD": {
               "bought_units": 0,
-              "sold_units": 1198,
+              "sold_units": 1531,
               "buy_cost": 0.0,
-              "sell_revenue": 7011.0,
-              "futures_units": 324,
-              "futures_cost": 1797.0
-            },
-            "ELX": {
-              "bought_units": 166,
-              "sold_units": 394,
-              "buy_cost": 944.0,
-              "sell_revenue": 2777.0,
-              "futures_units": 370,
-              "futures_cost": 2593.0
-            },
-            "C": {
-              "bought_units": 415,
-              "sold_units": 901,
-              "buy_cost": 1929.0,
-              "sell_revenue": 6097.0,
-              "futures_units": 174,
-              "futures_cost": 748.0
+              "sell_revenue": 9064.0,
+              "futures_units": 352,
+              "futures_cost": 1961.0
             }
           },
           "totals": {
-            "net_worth": 19023,
-            "money": 58775,
-            "debt": 41265,
-            "contracts_fulfilled": 269,
-            "contract_value": 13450
-          }
-        },
-        "greedy": {
-          "player_count": 0,
-          "resources": {},
-          "totals": {
-            "net_worth": 0,
-            "money": 0,
-            "debt": 0,
-            "contracts_fulfilled": 0,
-            "contract_value": 0
+            "net_worth": 70979,
+            "money": 109645,
+            "debt": 39796,
+            "contracts_fulfilled": 273,
+            "contract_value": 13650
           }
         },
         "random": {
@@ -60662,6 +60724,90 @@
             "debt": 60799,
             "contracts_fulfilled": 135,
             "contract_value": 6750
+          }
+        },
+        "smart": {
+          "player_count": 500,
+          "resources": {
+            "FE": {
+              "bought_units": 2136,
+              "sold_units": 1149,
+              "buy_cost": 10126.0,
+              "sell_revenue": 8501.0,
+              "futures_units": 94,
+              "futures_cost": 531.0
+            },
+            "GLS": {
+              "bought_units": 835,
+              "sold_units": 613,
+              "buy_cost": 4774.0,
+              "sell_revenue": 4397.0,
+              "futures_units": 338,
+              "futures_cost": 2762.0
+            },
+            "PWR": {
+              "bought_units": 4129,
+              "sold_units": 5076,
+              "buy_cost": 17838.0,
+              "sell_revenue": 14376.0,
+              "futures_units": 0,
+              "futures_cost": 0.0
+            },
+            "H2O": {
+              "bought_units": 0,
+              "sold_units": 666,
+              "buy_cost": 0.0,
+              "sell_revenue": 5067.0,
+              "futures_units": 1222,
+              "futures_cost": 7823.0
+            },
+            "SI": {
+              "bought_units": 275,
+              "sold_units": 475,
+              "buy_cost": 1487.0,
+              "sell_revenue": 3690.0,
+              "futures_units": 1170,
+              "futures_cost": 7123.0
+            },
+            "O2": {
+              "bought_units": 0,
+              "sold_units": 313,
+              "buy_cost": 0.0,
+              "sell_revenue": 2167.0,
+              "futures_units": 499,
+              "futures_cost": 2626.0
+            },
+            "FOOD": {
+              "bought_units": 0,
+              "sold_units": 1198,
+              "buy_cost": 0.0,
+              "sell_revenue": 7011.0,
+              "futures_units": 324,
+              "futures_cost": 1797.0
+            },
+            "ELX": {
+              "bought_units": 166,
+              "sold_units": 394,
+              "buy_cost": 944.0,
+              "sell_revenue": 2777.0,
+              "futures_units": 370,
+              "futures_cost": 2593.0
+            },
+            "C": {
+              "bought_units": 415,
+              "sold_units": 901,
+              "buy_cost": 1929.0,
+              "sell_revenue": 6097.0,
+              "futures_units": 174,
+              "futures_cost": 748.0
+            }
+          },
+          "totals": {
+            "net_worth": 19023,
+            "money": 58775,
+            "debt": 41265,
+            "contracts_fulfilled": 269,
+            "contract_value": 13450
           }
         }
       }
@@ -61356,26 +61502,88 @@
             "contract_value": 6400
           }
         },
-        "smart": {
-          "player_count": 0,
-          "resources": {},
+        "optimal": {
+          "player_count": 500,
+          "resources": {
+            "PWR": {
+              "bought_units": 922,
+              "sold_units": 13847,
+              "buy_cost": 4649.0,
+              "sell_revenue": 51443.0,
+              "futures_units": 0,
+              "futures_cost": 0.0
+            },
+            "FE": {
+              "bought_units": 2576,
+              "sold_units": 1747,
+              "buy_cost": 12452.0,
+              "sell_revenue": 12637.0,
+              "futures_units": 120,
+              "futures_cost": 808.0
+            },
+            "C": {
+              "bought_units": 636,
+              "sold_units": 1745,
+              "buy_cost": 3223.0,
+              "sell_revenue": 12291.0,
+              "futures_units": 48,
+              "futures_cost": 155.0
+            },
+            "SI": {
+              "bought_units": 573,
+              "sold_units": 702,
+              "buy_cost": 3235.0,
+              "sell_revenue": 5652.0,
+              "futures_units": 996,
+              "futures_cost": 5792.0
+            },
+            "GLS": {
+              "bought_units": 1079,
+              "sold_units": 762,
+              "buy_cost": 6212.0,
+              "sell_revenue": 5730.0,
+              "futures_units": 427,
+              "futures_cost": 3477.0
+            },
+            "ELX": {
+              "bought_units": 294,
+              "sold_units": 319,
+              "buy_cost": 1747.0,
+              "sell_revenue": 2337.0,
+              "futures_units": 522,
+              "futures_cost": 3879.0
+            },
+            "FOOD": {
+              "bought_units": 0,
+              "sold_units": 1685,
+              "buy_cost": 0.0,
+              "sell_revenue": 10022.0,
+              "futures_units": 322,
+              "futures_cost": 2028.0
+            },
+            "H2O": {
+              "bought_units": 0,
+              "sold_units": 343,
+              "buy_cost": 0.0,
+              "sell_revenue": 2562.0,
+              "futures_units": 2148,
+              "futures_cost": 14514.0
+            },
+            "O2": {
+              "bought_units": 0,
+              "sold_units": 697,
+              "buy_cost": 0.0,
+              "sell_revenue": 4994.0,
+              "futures_units": 340,
+              "futures_cost": 1915.0
+            }
+          },
           "totals": {
-            "net_worth": 0,
-            "money": 0,
-            "debt": 0,
-            "contracts_fulfilled": 0,
-            "contract_value": 0
-          }
-        },
-        "greedy": {
-          "player_count": 0,
-          "resources": {},
-          "totals": {
-            "net_worth": 0,
-            "money": 0,
-            "debt": 0,
-            "contracts_fulfilled": 0,
-            "contract_value": 0
+            "net_worth": 80266,
+            "money": 117987,
+            "debt": 38692,
+            "contracts_fulfilled": 287,
+            "contract_value": 14350
           }
         },
         "random": {
@@ -62154,37 +62362,88 @@
             "contract_value": 16650
           }
         },
-        "smart": {
-          "player_count": 0,
-          "resources": {},
+        "optimal": {
+          "player_count": 1500,
+          "resources": {
+            "FE": {
+              "bought_units": 6429,
+              "sold_units": 6670,
+              "buy_cost": 30179.0,
+              "sell_revenue": 42471.0,
+              "futures_units": 290,
+              "futures_cost": 1883.0
+            },
+            "C": {
+              "bought_units": 1422,
+              "sold_units": 3593,
+              "buy_cost": 6043.0,
+              "sell_revenue": 20353.0,
+              "futures_units": 524,
+              "futures_cost": 2205.0
+            },
+            "SI": {
+              "bought_units": 889,
+              "sold_units": 2190,
+              "buy_cost": 4504.0,
+              "sell_revenue": 15690.0,
+              "futures_units": 3645,
+              "futures_cost": 22599.0
+            },
+            "GLS": {
+              "bought_units": 2878,
+              "sold_units": 2836,
+              "buy_cost": 15747.0,
+              "sell_revenue": 18857.0,
+              "futures_units": 1041,
+              "futures_cost": 7988.0
+            },
+            "ELX": {
+              "bought_units": 994,
+              "sold_units": 1861,
+              "buy_cost": 5598.0,
+              "sell_revenue": 11643.0,
+              "futures_units": 1191,
+              "futures_cost": 8366.0
+            },
+            "PWR": {
+              "bought_units": 10797,
+              "sold_units": 16761,
+              "buy_cost": 40193.0,
+              "sell_revenue": 49102.0,
+              "futures_units": 0,
+              "futures_cost": 0.0
+            },
+            "H2O": {
+              "bought_units": 0,
+              "sold_units": 2560,
+              "buy_cost": 0.0,
+              "sell_revenue": 17523.0,
+              "futures_units": 4729,
+              "futures_cost": 28256.0
+            },
+            "O2": {
+              "bought_units": 0,
+              "sold_units": 1715,
+              "buy_cost": 0.0,
+              "sell_revenue": 10352.0,
+              "futures_units": 1690,
+              "futures_cost": 8844.0
+            },
+            "FOOD": {
+              "bought_units": 0,
+              "sold_units": 3670,
+              "buy_cost": 0.0,
+              "sell_revenue": 18688.0,
+              "futures_units": 1056,
+              "futures_cost": 5026.0
+            }
+          },
           "totals": {
-            "net_worth": 0,
-            "money": 0,
-            "debt": 0,
-            "contracts_fulfilled": 0,
-            "contract_value": 0
-          }
-        },
-        "greedy": {
-          "player_count": 0,
-          "resources": {},
-          "totals": {
-            "net_worth": 0,
-            "money": 0,
-            "debt": 0,
-            "contracts_fulfilled": 0,
-            "contract_value": 0
-          }
-        },
-        "random": {
-          "player_count": 0,
-          "resources": {},
-          "totals": {
-            "net_worth": 0,
-            "money": 0,
-            "debt": 0,
-            "contracts_fulfilled": 0,
-            "contract_value": 0
+            "net_worth": 131175,
+            "money": 234671,
+            "debt": 109292,
+            "contracts_fulfilled": 1093,
+            "contract_value": 54650
           }
         }
       }
@@ -62879,6 +63138,90 @@
             "contract_value": 11700
           }
         },
+        "optimal": {
+          "player_count": 500,
+          "resources": {
+            "PWR": {
+              "bought_units": 3347,
+              "sold_units": 7290,
+              "buy_cost": 13658.0,
+              "sell_revenue": 21651.0,
+              "futures_units": 0,
+              "futures_cost": 0.0
+            },
+            "FE": {
+              "bought_units": 1718,
+              "sold_units": 2775,
+              "buy_cost": 9192.0,
+              "sell_revenue": 18480.0,
+              "futures_units": 61,
+              "futures_cost": 464.0
+            },
+            "C": {
+              "bought_units": 580,
+              "sold_units": 1139,
+              "buy_cost": 2796.0,
+              "sell_revenue": 7054.0,
+              "futures_units": 88,
+              "futures_cost": 410.0
+            },
+            "GLS": {
+              "bought_units": 981,
+              "sold_units": 826,
+              "buy_cost": 5542.0,
+              "sell_revenue": 5820.0,
+              "futures_units": 392,
+              "futures_cost": 3248.0
+            },
+            "ELX": {
+              "bought_units": 386,
+              "sold_units": 474,
+              "buy_cost": 2091.0,
+              "sell_revenue": 3138.0,
+              "futures_units": 440,
+              "futures_cost": 3168.0
+            },
+            "H2O": {
+              "bought_units": 0,
+              "sold_units": 605,
+              "buy_cost": 0.0,
+              "sell_revenue": 4346.0,
+              "futures_units": 1742,
+              "futures_cost": 10607.0
+            },
+            "FOOD": {
+              "bought_units": 0,
+              "sold_units": 1147,
+              "buy_cost": 0.0,
+              "sell_revenue": 6086.0,
+              "futures_units": 384,
+              "futures_cost": 2076.0
+            },
+            "SI": {
+              "bought_units": 390,
+              "sold_units": 1126,
+              "buy_cost": 2082.0,
+              "sell_revenue": 7466.0,
+              "futures_units": 1043,
+              "futures_cost": 7110.0
+            },
+            "O2": {
+              "bought_units": 0,
+              "sold_units": 508,
+              "buy_cost": 0.0,
+              "sell_revenue": 3202.0,
+              "futures_units": 510,
+              "futures_cost": 2863.0
+            }
+          },
+          "totals": {
+            "net_worth": 60690,
+            "money": 104350,
+            "debt": 44421,
+            "contracts_fulfilled": 312,
+            "contract_value": 15600
+          }
+        },
         "smart": {
           "player_count": 1000,
           "resources": {
@@ -62961,28 +63304,6 @@
             "debt": 79542,
             "contracts_fulfilled": 536,
             "contract_value": 26800
-          }
-        },
-        "greedy": {
-          "player_count": 0,
-          "resources": {},
-          "totals": {
-            "net_worth": 0,
-            "money": 0,
-            "debt": 0,
-            "contracts_fulfilled": 0,
-            "contract_value": 0
-          }
-        },
-        "random": {
-          "player_count": 0,
-          "resources": {},
-          "totals": {
-            "net_worth": 0,
-            "money": 0,
-            "debt": 0,
-            "contracts_fulfilled": 0,
-            "contract_value": 0
           }
         }
       }
@@ -63760,28 +64081,6 @@
             "contracts_fulfilled": 765,
             "contract_value": 38250
           }
-        },
-        "greedy": {
-          "player_count": 0,
-          "resources": {},
-          "totals": {
-            "net_worth": 0,
-            "money": 0,
-            "debt": 0,
-            "contracts_fulfilled": 0,
-            "contract_value": 0
-          }
-        },
-        "random": {
-          "player_count": 0,
-          "resources": {},
-          "totals": {
-            "net_worth": 0,
-            "money": 0,
-            "debt": 0,
-            "contracts_fulfilled": 0,
-            "contract_value": 0
-          }
         }
       }
     },
@@ -64473,28 +64772,6 @@
             "debt": 160991,
             "contracts_fulfilled": 138,
             "contract_value": 6900
-          }
-        },
-        "smart": {
-          "player_count": 0,
-          "resources": {},
-          "totals": {
-            "net_worth": 0,
-            "money": 0,
-            "debt": 0,
-            "contracts_fulfilled": 0,
-            "contract_value": 0
-          }
-        },
-        "greedy": {
-          "player_count": 0,
-          "resources": {},
-          "totals": {
-            "net_worth": 0,
-            "money": 0,
-            "debt": 0,
-            "contracts_fulfilled": 0,
-            "contract_value": 0
           }
         },
         "random": {

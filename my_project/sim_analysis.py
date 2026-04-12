@@ -370,9 +370,21 @@ def _segment_player_flows(sim_files: list[Path]) -> dict:
     - winners / losers (top / bottom NW per game)
     - by strategy (smart / greedy / random)
     """
-    segment_keys = ["all", "winners", "losers", "smart", "greedy", "random"]
-    out: dict[str, dict] = {
-        seg: {
+    # Discover all strategies from the data instead of hardcoding
+    all_strategies: set[str] = set()
+    for f in sim_files:
+        with open(f) as fh:
+            data = json.load(fh)
+        for game in data["games"]:
+            for p in game.get("players", []):
+                s = p.get("strategy", "")
+                if s:
+                    all_strategies.add(s)
+
+    segment_keys = ["all", "winners", "losers"] + sorted(all_strategies)
+
+    def _empty_segment():
+        return {
             "player_count": 0,
             "resources": defaultdict(lambda: {
                 "bought_units": 0,
@@ -382,17 +394,15 @@ def _segment_player_flows(sim_files: list[Path]) -> dict:
                 "futures_units": 0,
                 "futures_cost": 0.0,
             }),
-            # Per-player totals aggregated across resources + contracts
             "totals": {
                 "net_worth": 0,
                 "money": 0,
                 "debt": 0,
                 "contracts_fulfilled": 0,
-                "contract_value": 0,  # contracts × $50 (before debt payoff)
+                "contract_value": 0,
             },
         }
-        for seg in segment_keys
-    }
+    out: dict[str, dict] = {seg: _empty_segment() for seg in segment_keys}
 
     for f in sim_files:
         with open(f) as fh:
@@ -419,7 +429,10 @@ def _segment_player_flows(sim_files: list[Path]) -> dict:
                     segments.append("winners")
                 if nw == bottom_nw and top_nw != bottom_nw:
                     segments.append("losers")
-                if strat in segment_keys:
+                if strat in all_strategies:
+                    # Ensure segment exists (might be new strategy)
+                    if strat not in out:
+                        out[strat] = _empty_segment()
                     segments.append(strat)
 
                 contracts = p.get("contracts_fulfilled", 0)
