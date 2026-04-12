@@ -322,9 +322,37 @@ def run_evaluation(
         late = f"${r['late']:+.0f}" if "late" in r else "—"
         print(f"  {name:<23} ${r['value']:>5.0f}  {early:>6} {mid:>6} {late:>6}  ±${r['std_err']:.0f}")
 
-    # Export
+    # Export research JSON (for frontend display — doesn't change AI behavior)
+    import json
+    research_path = Path("frontend/data/card_valuation.json")
+    research_data = {
+        "meta": meta,
+        "cards": [
+            {
+                "name": name,
+                "type": "special" if name in SPECIAL_BUILDINGS else "patent",
+                "base_value": r["value"],
+                "early_bonus": r.get("early", 0),
+                "mid_bonus": r.get("mid", 0),
+                "late_bonus": r.get("late", 0),
+                "early_total": r["value"] + r.get("early", 0),
+                "mid_total": r["value"] + r.get("mid", 0),
+                "late_total": r["value"] + r.get("late", 0),
+                "std_err": r["std_err"],
+            }
+            for name, r in card_results
+        ],
+    }
+    research_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(research_path, "w") as f:
+        json.dump(research_data, f, indent=2)
+    print(f"\nResearch data → {research_path}")
+
+    # Export CSV (updates AI behavior only when explicitly run)
     out_path = DATA_DIR / "CardValues.csv"
     export_card_values(results, out_path)
-    print(f"\nExported to {out_path}")
+    print(f"AI values   → {out_path}")
+    print("\n💡 To use these values in the AI, commit CardValues.csv.")
+    print("   To just view results, check the Research tab in the analytics dashboard.")
 
     return results

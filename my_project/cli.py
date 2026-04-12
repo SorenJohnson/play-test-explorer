@@ -264,6 +264,10 @@ def main() -> None:
     eval_cards.add_argument("-n", "--games", type=int, default=2000, help="Number of exploration games")
     eval_cards.add_argument("-p", "--players", type=int, default=3, help="Number of players per game")
 
+    # refresh-all (pipeline: simulate → analyze → publish → sync)
+    refresh = sub.add_parser("refresh-all", help="Simulate all, analyze, publish, sync (no card re-evaluation)")
+    refresh.add_argument("--sim-games", type=int, default=500, help="Games per scenario")
+
     args = parser.parse_args()
 
     match args.command:
@@ -282,6 +286,27 @@ def main() -> None:
         case "evaluate-cards":
             from my_project.card_valuation import run_evaluation
             run_evaluation(n_games=args.games, num_players=args.players)
+        case "refresh-all":
+            import argparse as _ap
+            print("=" * 60)
+            print("STEP 1: Simulate all scenarios")
+            print("=" * 60)
+            sim_args = _ap.Namespace(runs=args.sim_games)
+            cmd_simulate_all(sim_args)
+            print("\n" + "=" * 60)
+            print("STEP 2: Analyze")
+            print("=" * 60)
+            cmd_analyze()
+            print("\n" + "=" * 60)
+            print("STEP 3: Publish")
+            print("=" * 60)
+            pub_args = _ap.Namespace(games=50)
+            cmd_publish(pub_args)
+            print("\n" + "=" * 60)
+            print("STEP 4: Sync play assets")
+            print("=" * 60)
+            cmd_sync_play()
+            print("\n✅ Full refresh complete!")
         case _:
             parser.print_help()
 

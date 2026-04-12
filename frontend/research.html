@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Card Valuation Research</title>
+  <link rel="stylesheet" href="report.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <div id="app">
+    <nav class="site-nav">
+      <a href="index.html">Home</a>
+      <a href="play.html">Play</a>
+      <a href="compare.html">Analytics</a>
+      <a href="research.html" class="active">Research</a>
+    </nav>
+    <header>
+      <h1>Card Valuation Research</h1>
+      <p class="subtitle">
+        Empirical values learned via OLS regression on Monte Carlo exploration games.
+        Run <code>uv run python -m my_project evaluate-cards</code> to regenerate.
+      </p>
+    </header>
+
+    <div id="loading" style="color:#8b949e; padding:20px;">Loading card_valuation.json…</div>
+
+    <div id="content" style="display:none;">
+      <section>
+        <h2>Model Summary</h2>
+        <div id="model-meta" style="display:flex; gap:24px; margin-bottom:16px;">
+          <div class="stat-card"><span class="stat-label">R²</span><span class="stat-value" id="r-squared">—</span></div>
+          <div class="stat-card"><span class="stat-label">Intercept</span><span class="stat-value" id="intercept">—</span></div>
+          <div class="stat-card"><span class="stat-label">Observations</span><span class="stat-value" id="n-obs">—</span></div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Card Values by Game Phase</h2>
+        <p class="subtitle">
+          Base value + timing bonus. Green = positive (card helps NW), red = negative.
+          Taller bars = more valuable at that game phase.
+        </p>
+        <div class="chart-container" style="min-height:400px;">
+          <canvas id="timing-chart"></canvas>
+        </div>
+      </section>
+
+      <section>
+        <h2>Value Table</h2>
+        <div class="table-scroll">
+          <table id="value-table">
+            <thead>
+              <tr>
+                <th>Card</th>
+                <th>Type</th>
+                <th>Base</th>
+                <th>Early</th>
+                <th>Mid</th>
+                <th>Late</th>
+                <th>Best Phase</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    async function init() {
+      try {
+        const resp = await fetch("data/card_valuation.json");
+        if (!resp.ok) throw new Error("No data — run evaluate-cards first");
+        const data = await resp.json();
+        document.getElementById("loading").style.display = "none";
+        document.getElementById("content").style.display = "block";
+        render(data);
+      } catch (e) {
+        document.getElementById("loading").textContent =
+          "No card valuation data found. Run: uv run python -m my_project evaluate-cards";
+      }
+    }
+
+    function render(data) {
+      // Model meta
+      document.getElementById("r-squared").textContent = data.meta.r_squared.toFixed(3);
+      document.getElementById("intercept").textContent = `$${data.meta.intercept}`;
+      document.getElementById("n-obs").textContent = data.meta.n_observations.toLocaleString();
+
+      // Timing chart: grouped bar chart (early/mid/late per card)
+      const cards = data.cards;
+      const labels = cards.map((c) => c.name);
+
+      new Chart(document.getElementById("timing-chart"), {
+        type: "bar",
+        data: {
+          labels,
+          datasets: [
+            {
+              label: "Early",
+              data: cards.map((c) => c.early_total),
+              backgroundColor: cards.map((c) => c.early_total >= 0 ? "#3fb95088" : "#f8514988"),
+              borderColor: cards.map((c) => c.early_total >= 0 ? "#3fb950" : "#f85149"),
+              borderWidth: 1,
+            },
+            {
+              label: "Mid",
+              data: cards.map((c) => c.mid_total),
+              backgroundColor: cards.map((c) => c.mid_total >= 0 ? "#58a6ff88" : "#f0883e88"),
+              borderColor: cards.map((c) => c.mid_total >= 0 ? "#58a6ff" : "#f0883e"),
+              borderWidth: 1,
+            },
+            {
+              label: "Late",
+              data: cards.map((c) => c.late_total),
+              backgroundColor: cards.map((c) => c.late_total >= 0 ? "#d2a8ff88" : "#8b949e88"),
+              borderColor: cards.map((c) => c.late_total >= 0 ? "#d2a8ff" : "#8b949e"),
+              borderWidth: 1,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: { labels: { color: "#8b949e" } },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => `${ctx.dataset.label}: $${ctx.parsed.y.toFixed(0)}`,
+              },
+            },
+          },
+          scales: {
+            x: {
+              ticks: { color: "#8b949e", maxRotation: 45, minRotation: 45 },
+              grid: { color: "#21262d" },
+            },
+            y: {
+              title: { display: true, text: "Net Worth Impact ($)", color: "#8b949e" },
+              ticks: { color: "#8b949e" },
+              grid: { color: "#21262d" },
+            },
+          },
+        },
+      });
+
+      // Value table
+      const tbody = document.querySelector("#value-table tbody");
+      tbody.innerHTML = cards.map((c) => {
+        const phases = [
+          { name: "Early", val: c.early_total },
+          { name: "Mid", val: c.mid_total },
+          { name: "Late", val: c.late_total },
+        ];
+        const best = phases.reduce((a, b) => a.val > b.val ? a : b);
+        const cls = (v) => v >= 0 ? "positive" : "negative";
+        const fmt = (v) => `$${v.toFixed(0)}`;
+        return `<tr>
+          <td><strong>${c.name}</strong></td>
+          <td style="color:#8b949e">${c.type}</td>
+          <td class="${cls(c.base_value)}">${fmt(c.base_value)}</td>
+          <td class="${cls(c.early_total)}">${fmt(c.early_total)}</td>
+          <td class="${cls(c.mid_total)}">${fmt(c.mid_total)}</td>
+          <td class="${cls(c.late_total)}">${fmt(c.late_total)}</td>
+          <td><strong>${best.name}</strong> (${fmt(best.val)})</td>
+        </tr>`;
+      }).join("");
+    }
+
+    init();
+  </script>
+
+  <style>
+    .stat-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 12px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .stat-label { color: #8b949e; font-size: 0.75rem; text-transform: uppercase; }
+    .stat-value { color: #c9d1d9; font-size: 1.2rem; font-weight: 600; }
+    .positive { color: #3fb950; }
+    .negative { color: #f85149; }
+  </style>
+</body>
+</html>
