@@ -2262,21 +2262,51 @@ def _execute_free_actions(state: GameState, player: Player) -> list[str]:
     """
     fired: list[str] = []
 
-    # Optimization Center: -1 PWR, +1 highest-priced positive non-PWR rate.
+    # Optimization Center: -1 PWR, +1 any positive non-PWR rate.
+    # Only use when the benefit outweighs the permanent PWR loss:
+    #   - Player has a specific resource need (contract or build deficit)
+    #   - OR the PWR rate is positive enough to absorb the -1
+    # Don't blindly fire every turn — the cumulative -PWR is devastating.
     if (
         _count_buildings(player, "Optimization Center") > 0
         and not player.has_used_optimization_center_this_turn
     ):
-        candidates = [
-            r for r in Resource
-            if r != Resource.PWR and player.rate(r) > 0
-        ]
-        if candidates:
-            target = max(candidates, key=lambda r: state.market.price(r))
-            player.rates[Resource.PWR] = player.rate(Resource.PWR) - 1
-            player.rates[target] = player.rate(target) + 1
+        pwr_rate = player.rate(Resource.PWR)
+
+        # Find the best target: a resource we need for a contract/build,
+        # or failing that, the highest-priced resource we produce.
+        best_target = None
+        best_reason = ""
+
+        # Priority 1: boost a resource we're short on for a contract
+        for contract in state.available_contracts:
+            for req in contract.requirements:
+                if req.resource == Resource.PWR:
+                    continue
+                shortfall = req.amount - player.rate(req.resource)
+                if shortfall == 1 and player.rate(req.resource) > 0:
+                    # One more unit would let us fulfill this contract
+                    best_target = req.resource
+                    best_reason = f"for contract ({req.amount} {req.resource.value})"
+                    break
+            if best_target:
+                break
+
+        # Priority 2: boost a resource we produce IF we can afford the PWR loss
+        if best_target is None and pwr_rate >= 0:
+            candidates = [
+                r for r in Resource
+                if r != Resource.PWR and player.rate(r) > 0
+            ]
+            if candidates:
+                best_target = max(candidates, key=lambda r: state.market.price(r))
+                best_reason = "boost production"
+
+        if best_target is not None:
+            player.rates[Resource.PWR] = pwr_rate - 1
+            player.rates[best_target] = player.rate(best_target) + 1
             player.has_used_optimization_center_this_turn = True
-            fired.append(f"Optimization Center: -1 PWR, +1 {target.value}")
+            fired.append(f"Optimization Center: -1 PWR, +1 {best_target.value} ({best_reason})")
 
     # Water Engine: -1 H2O, +2 PWR. Always beneficial when H2O ≥ 1.
     if (
