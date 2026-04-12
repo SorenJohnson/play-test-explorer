@@ -70,9 +70,7 @@
         <button class="segment-toggle active" data-segment="all">All Players</button>
         <button class="segment-toggle" data-segment="winners">Winners</button>
         <button class="segment-toggle" data-segment="losers">Losers</button>
-        <button class="segment-toggle" data-segment="smart">Smart</button>
-        <button class="segment-toggle" data-segment="greedy">Greedy</button>
-        <button class="segment-toggle" data-segment="random">Random</button>
+        <span id="strategy-segment-buttons"></span>
       </div>
       <div id="segment-summary" style="margin-bottom:16px"></div>
       <div class="table-scroll">
@@ -158,17 +156,7 @@
       <p class="subtitle">Click any row to see the build path players took to fulfill it, plus cost distribution details.</p>
       <div class="table-scroll">
         <table id="strategy-contract-table">
-          <thead>
-            <tr>
-              <th>Contract</th>
-              <th>Fulfilled</th>
-              <th>Gross Cost</th>
-              <th>Net Cost</th>
-              <th>Smart</th>
-              <th>Greedy</th>
-              <th>Random</th>
-            </tr>
-          </thead>
+          <thead></thead>
           <tbody></tbody>
         </table>
       </div>

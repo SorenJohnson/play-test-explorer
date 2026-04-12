@@ -113,27 +113,57 @@ function renderScenarioDependent() {
 // --- Strategy Performance ---
 
 function renderStrategyChart() {
+  const STRATEGY_COLORS = {
+    optimal: { bg: "#d2a8ff44", border: "#d2a8ff" },
+    smart:   { bg: "#3fb95044", border: "#3fb950" },
+    greedy:  { bg: "#58a6ff44", border: "#58a6ff" },
+    random:  { bg: "#f8514944", border: "#f85149" },
+  };
+
+  // Discover all strategies present in the data
+  const stratNames = new Set();
+  for (const s of allData) {
+    for (const g of s.data.games) {
+      for (const p of g.players) {
+        if (p.strategy) stratNames.add(p.strategy);
+      }
+    }
+  }
+
   const labels = [];
-  const greedyData = [], smartData = [], randomData = [];
+  const stratData = {};
+  for (const name of stratNames) stratData[name] = [];
 
   for (const s of allData) {
     labels.push(s.label);
-    const byStrat = { greedy: [], random: [], smart: [] };
+    const byStrat = {};
+    for (const name of stratNames) byStrat[name] = [];
     for (const g of s.data.games) {
       for (const p of g.players) {
         if (byStrat[p.strategy]) byStrat[p.strategy].push(p.net_worth);
       }
     }
-    smartData.push(byStrat.smart.length > 0 ? byStrat.smart : null);
-    greedyData.push(byStrat.greedy.length > 0 ? byStrat.greedy : null);
-    randomData.push(byStrat.random.length > 0 ? byStrat.random : null);
+    for (const name of stratNames) {
+      stratData[name].push(byStrat[name].length > 0 ? byStrat[name] : null);
+    }
   }
 
-  const datasets = [
-    { label: "Smart", backgroundColor: "#3fb95044", borderColor: "#3fb950", data: smartData },
-    { label: "Greedy", backgroundColor: "#58a6ff44", borderColor: "#58a6ff", data: greedyData },
-    { label: "Random", backgroundColor: "#f8514944", borderColor: "#f85149", data: randomData },
-  ].filter((ds) => ds.data.some((d) => d !== null));
+  // Build datasets in a consistent order: optimal first, then smart, greedy, random, others
+  const order = ["optimal", "smart", "greedy", "random"];
+  const sortedNames = [...stratNames].sort((a, b) => {
+    const ai = order.indexOf(a), bi = order.indexOf(b);
+    return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
+  });
+
+  const datasets = sortedNames.map((name) => {
+    const colors = STRATEGY_COLORS[name] || { bg: "#8b949e44", border: "#8b949e" };
+    return {
+      label: name.charAt(0).toUpperCase() + name.slice(1),
+      backgroundColor: colors.bg,
+      borderColor: colors.border,
+      data: stratData[name],
+    };
+  }).filter((ds) => ds.data.some((d) => d !== null));
 
   new Chart(document.getElementById("strategy-nw-chart"), {
     type: "boxplot",
@@ -162,20 +192,38 @@ function renderStrategyContractTable() {
   let currentSort = { col: 2, asc: true }; // default: gross cost ascending
   const expandedRows = new Set();
 
-  function getSortValue(label, stats, colIdx) {
-    const smart = stats.by_strategy?.smart;
-    const greedy = stats.by_strategy?.greedy;
-    const random = stats.by_strategy?.random;
-    switch (colIdx) {
-      case 0: return label;
-      case 1: return stats.count;
-      case 2: return stats.gross_cost.mean;
-      case 3: return stats.true_cost.mean;
-      case 4: return smart?.mean ?? 999;
-      case 5: return greedy?.mean ?? 999;
-      case 6: return random?.mean ?? 999;
-      default: return 0;
+  // Discover all strategies from the contract data
+  const allStrats = new Set();
+  for (const [, stats] of entries) {
+    if (stats.by_strategy) {
+      for (const s of Object.keys(stats.by_strategy)) allStrats.add(s);
     }
+  }
+  const stratOrder = ["optimal", "smart", "greedy", "random"];
+  const sortedStrats = [...allStrats].sort((a, b) => {
+    const ai = stratOrder.indexOf(a), bi = stratOrder.indexOf(b);
+    return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
+  });
+
+  // Build dynamic headers
+  const thead = table.querySelector("thead");
+  thead.innerHTML = `<tr>
+    <th>Contract</th><th>Fulfilled</th><th>Gross Cost</th><th>Net Cost</th>
+    ${sortedStrats.map((s) => `<th>${s.charAt(0).toUpperCase() + s.slice(1)}</th>`).join("")}
+  </tr>`;
+
+  function getSortValue(label, stats, colIdx) {
+    if (colIdx === 0) return label;
+    if (colIdx === 1) return stats.count;
+    if (colIdx === 2) return stats.gross_cost.mean;
+    if (colIdx === 3) return stats.true_cost.mean;
+    // Strategy columns start at index 4
+    const stratIdx = colIdx - 4;
+    if (stratIdx >= 0 && stratIdx < sortedStrats.length) {
+      const s = stats.by_strategy?.[sortedStrats[stratIdx]];
+      return s?.mean ?? 999;
+    }
+    return 0;
   }
 
   function buildExpandedRow(label, stats) {
@@ -245,20 +293,19 @@ function renderStrategyContractTable() {
 
     const rows = [];
     sorted.forEach(([label, stats]) => {
-      const smart = stats.by_strategy?.smart;
-      const greedy = stats.by_strategy?.greedy;
-      const random = stats.by_strategy?.random;
       const expanded = expandedRows.has(label);
       const arrow = expanded ? "▼" : "▶";
+      const stratCells = sortedStrats.map((s) => {
+        const d = stats.by_strategy?.[s];
+        return `<td>${d ? `$${d.mean} (n=${d.count})` : "-"}</td>`;
+      }).join("");
       rows.push(
         `<tr class="contract-row" data-label="${label}" style="cursor:pointer;">
           <td>${arrow} ${label}</td>
           <td>${stats.count}</td>
           <td>$${stats.gross_cost.mean}</td>
           <td>$${stats.true_cost.mean}</td>
-          <td>${smart ? `$${smart.mean} (n=${smart.count})` : "-"}</td>
-          <td>${greedy ? `$${greedy.mean} (n=${greedy.count})` : "-"}</td>
-          <td>${random ? `$${random.mean} (n=${random.count})` : "-"}</td>
+          ${stratCells}
         </tr>`
       );
       if (expanded) {
@@ -673,6 +720,22 @@ function renderMarketDynamics() {
   if (!md) return;
   const allResourcesData = md.resources || md;  // fallback for old format
   const segments = md.segments || {};
+
+  // Populate strategy segment buttons dynamically from the data
+  const stratBtnHost = document.getElementById("strategy-segment-buttons");
+  if (stratBtnHost) {
+    const stratNames = Object.keys(segments).filter(
+      (s) => !["all", "winners", "losers"].includes(s)
+    );
+    const order = ["optimal", "smart", "greedy", "random"];
+    stratNames.sort((a, b) => {
+      const ai = order.indexOf(a), bi = order.indexOf(b);
+      return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
+    });
+    stratBtnHost.innerHTML = stratNames.map((s) =>
+      `<button class="segment-toggle" data-segment="${s}">${s.charAt(0).toUpperCase() + s.slice(1)}</button>`
+    ).join("");
+  }
 
   // Build a normalized data structure for a segment.
   // Segment data uses different keys than the resource-level data,
