@@ -443,8 +443,19 @@ def _mechanical_building_value(card: Card, state: GameState, player: Player) -> 
         return (turns_left / 4) * avg_price
 
     if name == "Patent Office":
-        values = _get_patent_base_values()
-        return sum(values.values()) / max(len(values), 1)
+        # Draw 2, keep better one. Expected value ≈ avg of top half of
+        # patent values (since you pick the better of 2 random draws).
+        learned = _get_learned_card_values()
+        patent_names = [
+            "Superconductors", "Energy Vault", "Financial Instruments",
+            "Water Engine", "Nanotechnology", "Cold Fusion", "Virtual Reality",
+            "Perpetual Motion", "Carbon Scrubbing", "Slant Drilling",
+            "Thinking Machines", "Teleportation",
+        ]
+        patent_vals = sorted([max(0, learned.get(n, 0)) for n in patent_names], reverse=True)
+        # Expected value of keeping the better of 2 random draws ≈ top-third average
+        top_third = patent_vals[: max(len(patent_vals) // 3, 1)]
+        return sum(top_third) / max(len(top_third), 1)
 
     if name == "Hacker Array":
         turns_left = sum(remaining.values())
