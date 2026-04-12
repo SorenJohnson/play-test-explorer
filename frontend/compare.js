@@ -4,6 +4,8 @@ const SCENARIOS = [
   { file: "data/sim_smart_greedy_random.json", label: "Smart+Greedy+R", color: "#58a6ff" },
   { file: "data/sim_3greedy.json", label: "3 Greedy", color: "#a371f7" },
   { file: "data/sim_3smart.json", label: "3 Smart", color: "#3fb950" },
+  { file: "data/sim_3optimal.json", label: "3 Optimal", color: "#d2a8ff" },
+  { file: "data/sim_optimal_smart_random.json", label: "Optimal+S+R", color: "#f0883e" },
 ];
 
 const RESOURCE_COLORS = {
