@@ -303,6 +303,28 @@ def parse_card_values(path: Path) -> dict[str, float]:
     return values
 
 
+def parse_card_values_full(path: Path) -> dict[str, dict]:
+    """Parse CardValues.csv into a full lookup table with timing bonuses.
+
+    Returns {card_name: {"base": float, "early": float, "mid": float, "late": float}}.
+    Empty dict if the file doesn't exist.
+    """
+    if not path.exists():
+        return {}
+    values: dict[str, dict] = {}
+    with open(path, newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            name = row["Card"].strip()
+            values[name] = {
+                "base": float(row.get("Learned_Value") or "0"),
+                "early": float(row.get("Early_Bonus") or "0"),
+                "mid": float(row.get("Mid_Bonus") or "0"),
+                "late": float(row.get("Late_Bonus") or "0"),
+            }
+    return values
+
+
 def parse_game_config(path: Path) -> dict[str, str]:
     """Parse GameConfig.csv into a {parameter: value} dict.
 

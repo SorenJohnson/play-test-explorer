@@ -345,6 +345,54 @@ def _get_learned_card_values() -> dict[str, float]:
     return _learned_card_values
 
 
+# Full lookup table with timing bonuses (cached separately)
+_card_values_full: dict[str, dict] | None = None
+
+
+def _get_card_values_full() -> dict[str, dict]:
+    """Load the full card value table with timing bonuses (cached)."""
+    global _card_values_full
+    if _card_values_full is None:
+        from my_project.parsing import parse_card_values_full
+        from pathlib import Path
+        path = Path(__file__).parent / "data" / "CardValues.csv"
+        _card_values_full = parse_card_values_full(path)
+    return _card_values_full
+
+
+def card_value_now(card_name: str, state: GameState) -> float:
+    """Look up the time-adjusted value of a card at the current game state.
+
+    Combines the base regression value with the early/mid/late bonus
+    based on how far through the event deck we are.
+
+    Returns: base + timing_bonus for the current game phase.
+    """
+    table = _get_card_values_full()
+    entry = table.get(card_name)
+    if entry is None:
+        return 0.0
+
+    base = entry["base"]
+
+    # Determine game phase from event deck progress
+    total = len(state.event_deck)
+    consumed = state.event_idx
+    if total <= 0:
+        progress = 1.0
+    else:
+        progress = consumed / total  # 0.0 = start, 1.0 = end
+
+    if progress < 0.33:
+        bonus = entry["early"]
+    elif progress < 0.67:
+        bonus = entry["mid"]
+    else:
+        bonus = entry["late"]
+
+    return base + bonus
+
+
 def _pick_hacker_target(
     state: GameState, player: Player, sold_resource: Resource,
 ) -> tuple[str, int]:
@@ -469,16 +517,17 @@ def _special_building_value(card: Card, state: GameState, player: Player) -> flo
 
     Uses the MAX of:
     - Mechanical floor: what the effect is guaranteed to be worth
-    - Learned value: empirical regression from CardValues.csv
+    - Time-adjusted learned value: base + early/mid/late bonus from
+      CardValues.csv based on current game progress
 
     This prevents the regression from suppressing buildings the AI
-    hasn't learned to use yet, while still allowing the regression
-    to boost values above the mechanical floor.
+    hasn't learned to use yet, while allowing the regression (with
+    timing) to boost values when the data says they're worth more.
     """
     if not card.effect:
         return 0.0
     mechanical = _mechanical_building_value(card, state, player)
-    learned = _get_learned_card_values().get(card.building, 0.0)
+    learned = card_value_now(card.building, state)
     return max(mechanical, learned)
 
 

@@ -174,7 +174,7 @@ class TestDefaultAiBid:
         state = GameState.create(cards, contracts, num_players=3)
         state.players[0].money = 0
         state.players[0].debt = 0
-        bid = _default_ai_bid(state.players[0], _patent("X"))
+        bid = _default_ai_bid(state, state.players[0], _patent("X"))
         assert bid == 0
 
     def test_negative_net_no_bid(self):
@@ -182,7 +182,7 @@ class TestDefaultAiBid:
         state = GameState.create(cards, contracts, num_players=3)
         state.players[0].money = 5
         state.players[0].debt = 20
-        bid = _default_ai_bid(state.players[0], _patent("X"))
+        bid = _default_ai_bid(state, state.players[0], _patent("X"))
         assert bid == 0
 
     def test_bid_in_5_increments(self):
@@ -190,7 +190,7 @@ class TestDefaultAiBid:
         state = GameState.create(cards, contracts, num_players=3)
         state.players[0].money = 100
         state.players[0].debt = 0
-        bid = _default_ai_bid(state.players[0], _patent("X", rates=[(Resource.PWR, 2)]))
+        bid = _default_ai_bid(state, state.players[0], _patent("X", rates=[(Resource.PWR, 2)]))
         assert bid % 5 == 0
 
     def test_bid_capped_at_50(self):
@@ -198,7 +198,7 @@ class TestDefaultAiBid:
         state = GameState.create(cards, contracts, num_players=3)
         state.players[0].money = 1000
         state.players[0].debt = 0
-        bid = _default_ai_bid(state.players[0], _patent("X", rates=[(Resource.PWR, 10)]))
+        bid = _default_ai_bid(state, state.players[0], _patent("X", rates=[(Resource.PWR, 10)]))
         assert bid <= 50
 
     def test_bid_scales_with_patent_value(self):
@@ -207,8 +207,8 @@ class TestDefaultAiBid:
         state = GameState.create(cards, contracts, num_players=3)
         state.players[0].money = 100
         state.players[0].debt = 0
-        weak = _default_ai_bid(state.players[0], _patent("Weak", rates=[(Resource.PWR, 1)]))
-        strong = _default_ai_bid(state.players[0], _patent("Strong", rates=[(Resource.PWR, 4)]))
+        weak = _default_ai_bid(state, state.players[0], _patent("Weak", rates=[(Resource.PWR, 1)]))
+        strong = _default_ai_bid(state, state.players[0], _patent("Strong", rates=[(Resource.PWR, 4)]))
         assert strong > weak
 
     def test_minimum_bid_floor(self):
@@ -217,7 +217,7 @@ class TestDefaultAiBid:
         state = GameState.create(cards, contracts, num_players=3)
         state.players[0].money = 50
         state.players[0].debt = 0
-        bid = _default_ai_bid(state.players[0], _patent("Tiny", rates=[(Resource.PWR, 1)]))
+        bid = _default_ai_bid(state, state.players[0], _patent("Tiny", rates=[(Resource.PWR, 1)]))
         assert bid >= 5
 
 

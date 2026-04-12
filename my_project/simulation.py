@@ -1924,7 +1924,7 @@ def do_patent_auction(state: GameState) -> str:
         if idx in state.pending_bids:
             bids[idx] = state.pending_bids[idx]
         else:
-            bids[idx] = _default_ai_bid(player, patent)
+            bids[idx] = _default_ai_bid(state, player, patent)
     # Clear the bid overrides; they're consumed by this single auction.
     state.pending_bids = {}
 
@@ -1997,27 +1997,24 @@ def _get_patent_base_values() -> dict[str, int]:
     return _patent_base_values
 
 
-def _default_ai_bid(player: Player, patent: Card) -> int:
-    """Heuristic bid for a patent auction.
+def _default_ai_bid(state: "GameState", player: Player, patent: Card) -> int:
+    """Time-aware bid for a patent auction.
 
-    Uses the PATENT_BASE_VALUES table for an approximate $ value of the
-    patent, then randomizes ±$5 so different AI players don't always tie.
-    The bid is clamped to half the player's available cash (so the AI
-    doesn't go broke on a patent) and rounded to the nearest $5.
+    Uses the time-adjusted learned value from CardValues.csv (base +
+    early/mid/late bonus based on current game progress). Falls back
+    to Patents.csv AI_Value, then rate-based heuristic.
 
     Players with non-positive net cash pass (bid $0).
     """
     available = player.money - player.debt
     if available <= 0:
         return 0
-    # Look up the patent's value. Priority: learned CardValues.csv → CSV
-    # AI_Value column → rate-based fallback.
-    from my_project.parsing import parse_card_values
-    learned = parse_card_values(Path(__file__).parent / "data" / "CardValues.csv")
-    base_value = int(learned.get(patent.building, 0))
-    if base_value == 0:
+    # Time-adjusted value from regression
+    from my_project.strategies import card_value_now
+    base_value = int(card_value_now(patent.building, state))
+    if base_value <= 0:
         base_value = _get_patent_base_values().get(patent.building, 0)
-    if base_value == 0:
+    if base_value <= 0:
         base_value = sum(ra.amount for ra in patent.rates if ra.amount > 0) * 8
     # Randomize ±$5
     jitter = random.choice([-5, 0, 0, 5, 5, 10])
