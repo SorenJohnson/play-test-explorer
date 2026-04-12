@@ -61,7 +61,12 @@ def analyze_sim_contracts(sim_files: list[Path]) -> dict:
                             ps["buildings_since_last"].append(bname)
 
                     elif action["type"] == "contract":
-                        label = action.get("label", "")
+                        # Strip Space Elevator / Launch Pad modifiers to
+                        # aggregate to the base contract requirements.
+                        raw_label = action.get("label", "")
+                        import re
+                        label = re.sub(r"\s*\[SE[^\]]*\]", "", raw_label)
+                        label = re.sub(r"\s*\[LP\]", "", label).strip()
                         rates_at_fulfillment = dict(turn.get("rates", {}))
                         true_cost = action.get("true_cost", 0)
                         gross_cost = action.get("gross_cost", true_cost)
