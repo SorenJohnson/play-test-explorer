@@ -476,48 +476,59 @@ function broadcastState() {
   }
 }
 
+const AI_TURN_DELAY = 800;   // ms between AI actions and event
+const AI_EVENT_DELAY = 1200; // ms to show event banner before next turn
+
 function hostAdvanceGame() {
-  // Run AI turns and advance until a human's turn or game over
-  while (!game.is_over()) {
-    const s = game.state_dict().toJs({dict_converter: Object.fromEntries});
-    const curIdx = s.current_player_index;
+  hostAdvanceStep();
+}
 
-    // Check if current player is human
-    if (s.human_indices.includes(curIdx)) {
-      game.begin_human_turn();
-      hostRefreshState();
+function hostAdvanceStep() {
+  if (game.is_over()) {
+    hostRefreshState();
+    showEndgame();
+    return;
+  }
 
-      // Check for prompt (pre-turn event like patent auction)
-      if (currentState.pending_prompt) {
-        handleHostPrompt(currentState.pending_prompt);
-      }
-      return; // Wait for human input
+  const s = game.state_dict().toJs({dict_converter: Object.fromEntries});
+  const curIdx = s.current_player_index;
+
+  // Human's turn — stop and wait for input
+  if (s.human_indices.includes(curIdx)) {
+    game.begin_human_turn();
+    hostRefreshState();
+    if (currentState.pending_prompt) {
+      handleHostPrompt(currentState.pending_prompt);
     }
+    return;
+  }
 
-    // AI turn
-    const result = game.step_ai_turn().toJs({dict_converter: Object.fromEntries});
-    const stateSnap = game.state_dict().toJs({dict_converter: Object.fromEntries});
-    const eventLines = (stateSnap.last_event_lines || []).map(l => Object.assign({}, l));
-    const playerSnaps = stateSnap.players.map(p => ({name: p.name, money: p.money, debt: p.debt, net_worth: p.net_worth}));
+  // AI turn — execute, show actions, pause, show event, pause, next
+  const result = game.step_ai_turn().toJs({dict_converter: Object.fromEntries});
+  const stateSnap = game.state_dict().toJs({dict_converter: Object.fromEntries});
+  const eventLines = (stateSnap.last_event_lines || []).map(l => Object.assign({}, l));
+  const playerSnaps = stateSnap.players.map(p => ({name: p.name, money: p.money, debt: p.debt, net_worth: p.net_worth}));
 
-    const aiActions = result.actions || [];
-    const playerName = stateSnap.players[result.player_index]?.name || "AI";
-    const actionSummary = aiActions.map(a => a.detail || a.type).join("; ") || "Pass";
-    const eventDetail = result.event?.detail || "";
+  const aiActions = result.actions || [];
+  const playerName = stateSnap.players[result.player_index]?.name || "AI";
+  const actionSummary = aiActions.map(a => a.detail || a.type).join("; ") || "Pass";
+  const eventDetail = result.event?.detail || "";
 
-    // Feed entry 1: AI actions
-    const actionEntry = {
-      kind: "turn",
-      text: `${playerName}: ${actionSummary}`,
-      details: aiActions.length > 0 ? aiActions.map(a => {
-        const nw = a.net_worth_after !== undefined ? ` (NW: $${a.net_worth_after})` : "";
-        return `${a.detail || a.type}${nw}`;
-      }).join("\n") : null,
-    };
-    addFeedEntry(actionEntry);
-    broadcastFeed(actionEntry);
+  // Step 1: Show AI actions + update board
+  const actionEntry = {
+    kind: "turn",
+    text: `${playerName}: ${actionSummary}`,
+    details: aiActions.length > 0 ? aiActions.map(a => {
+      const nw = a.net_worth_after !== undefined ? ` (NW: $${a.net_worth_after})` : "";
+      return `${a.detail || a.type}${nw}`;
+    }).join("\n") : null,
+  };
+  addFeedEntry(actionEntry);
+  broadcastFeed(actionEntry);
+  hostRefreshState();
 
-    // Feed entry 2: Event (separate, with banner)
+  // Step 2: After a pause, show the event
+  setTimeout(() => {
     if (eventDetail) {
       const eventEntry = {
         kind: "event",
@@ -528,6 +539,7 @@ function hostAdvanceGame() {
       addFeedEntry(eventEntry);
       broadcastFeed(eventEntry);
       showEventBanner(eventDetail);
+      hostRefreshState();
     }
 
     if (result.awaiting_prompt) {
@@ -535,11 +547,13 @@ function hostAdvanceGame() {
       handleHostPrompt(currentState.pending_prompt);
       return;
     }
-  }
 
-  // Game over
-  hostRefreshState();
-  showEndgame();
+    // Step 3: After event display, advance to next turn
+    setTimeout(() => {
+      hostAdvanceStep();
+    }, eventDetail ? AI_EVENT_DELAY : 200);
+
+  }, AI_TURN_DELAY);
 }
 
 function handleHostPrompt(prompt) {
