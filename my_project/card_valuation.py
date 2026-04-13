@@ -93,6 +93,7 @@ def collect_valuation_data(
         "total_positive_rates": [],
         "contracts_fulfilled": [],
         "money": [],
+        "game_avg_nw": [],  # average NW of all players in this game (normalizer)
     }
     for name in ALL_CARD_NAMES:
         data[name] = []               # binary: 1 if owned
@@ -180,6 +181,9 @@ def collect_valuation_data(
             )
             data["contracts_fulfilled"].append(player.contracts_fulfilled)
             data["money"].append(player.money)
+            # Game-level normalizer: avg NW across all players
+            game_avg_nw = sum(p.net_worth() for p in state.players) / len(state.players)
+            data["game_avg_nw"].append(game_avg_nw)
             # Target
             data["net_worth"].append(player.net_worth())
 
@@ -216,7 +220,14 @@ def fit_card_values(
         card_names = ALL_CARD_NAMES
 
     n = len(data["net_worth"])
-    y = np.array(data["net_worth"], dtype=float)
+    nw = np.array(data["net_worth"], dtype=float)
+    # Predict NW above game average — isolates "did this patent help you
+    # beat other players" from market-driven NW swings.
+    if "game_avg_nw" in data:
+        avg = np.array(data["game_avg_nw"], dtype=float)
+        y = nw - avg
+    else:
+        y = nw
 
     # Build feature matrix: timing-only, no controls
     feature_names: list[str] = []

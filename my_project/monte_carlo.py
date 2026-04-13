@@ -102,9 +102,21 @@ def _summarize_game(state: GameState) -> GameSummary:
         for p in state.players
     ]
 
-    # Action history with structured action data
+    # Action history with structured action data.
+    # Redraw chain records are merged into the parent turn's event text.
     actions = []
     for rec in state.history:
+        if rec.action == "(redraw chain)":
+            # Merge into the previous turn's event
+            if actions:
+                actions[-1]["event"] += f" | {rec.event}"
+                actions[-1]["money_after"] = rec.money_after
+                actions[-1]["debt"] = rec.debt
+                actions[-1]["contracts"] = rec.contracts_fulfilled
+                actions[-1]["market"] = rec.market_snapshot
+                actions[-1]["rates"] = rec.rates_snapshot
+            continue
+
         turn_actions = []
         for ar in rec.actions:
             action_data: dict = {"type": ar.action_type, "detail": ar.detail}
