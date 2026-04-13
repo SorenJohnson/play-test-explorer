@@ -214,8 +214,55 @@ body {
   text-align: center;
   font-size: 0.8rem;
 }
-.market-cell .res-name { font-size: 0.65rem; color: #8b949e; text-transform: uppercase; }
+.market-cell .res-name { font-size: 0.65rem; text-transform: uppercase; }
+.market-cell .res-price-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+}
 .market-cell .res-price { font-size: 1.1rem; font-weight: bold; }
+.market-cell .dots-down, .market-cell .dots-up {
+  font-size: 0.55rem;
+  color: #6e7681;
+  letter-spacing: 1px;
+}
+.market-cell.expanded { border-color: #58a6ff; background: #1c2333; }
+.market-cell { cursor: pointer; }
+.market-cell:hover { border-color: #58a6ff; }
+
+/* Market ruler (expanded track) */
+.market-ruler {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-top: 8px;
+}
+.ruler-label { font-size: 0.75rem; font-weight: 600; margin-bottom: 6px; }
+.ruler-track {
+  display: flex;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+.ruler-pip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 24px;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  color: #8b949e;
+  background: #0d1117;
+}
+.ruler-pip.current {
+  font-weight: bold;
+  border-width: 2px;
+  font-size: 0.8rem;
+  color: #fff;
+}
 
 /* ===== Contracts Grid ===== */
 .contracts-grid {
@@ -264,6 +311,9 @@ body {
 .card-costs { font-size: 0.75rem; color: #d29922; margin-top: 2px; }
 .card-sell { font-size: 0.75rem; color: #58a6ff; }
 .card-effect { font-size: 0.75rem; color: #a371f7; font-style: italic; }
+.card-bottom { font-size: 0.75rem; color: #8b949e; margin-top: 2px; border-top: 1px solid #21262d; padding-top: 2px; }
+.card-bottom .card-sell { color: #58a6ff; }
+.card-bottom .card-contract { color: #d29922; }
 
 .build-estimate {
   font-size: 0.8rem;

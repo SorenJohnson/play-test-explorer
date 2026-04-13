@@ -6,8 +6,8 @@
 
 const RESOURCE_ORDER = ["PWR","H2O","FE","C","SI","O2","FOOD","GLS","ELX"];
 const RESOURCE_COLORS = {
-  PWR:"#f0883e",H2O:"#58a6ff",FE:"#8b949e",C:"#6e7681",
-  SI:"#d2a8ff",O2:"#7ee787",FOOD:"#3fb950",GLS:"#79c0ff",ELX:"#f778ba"
+  PWR:"#e74c3c",H2O:"#2c3e80",FE:"#555555",C:"#8e44ad",
+  SI:"#f1c40f",O2:"#bdc3c7",FOOD:"#27ae60",GLS:"#5dade2",ELX:"#e67e22"
 };
 const PLAYER_COLORS = ["#58a6ff","#f0883e","#3fb950","#d2a8ff"];
 
@@ -409,6 +409,25 @@ game
   Object.assign(clientSeats, newClientSeats);
 
   showGameScreen();
+
+  // Kickoff feed entry with game setup info
+  const initState = game.state_dict().toJs({dict_converter: Object.fromEntries});
+  const setupLines = initState.players.map((p, i) => {
+    const rates = RESOURCE_ORDER.map(r => {
+      const v = p.rates?.[r] || 0;
+      return v !== 0 ? `${v > 0 ? "+" : ""}${v}${r}` : null;
+    }).filter(Boolean).join(" ");
+    return `${p.name}${p.corporation ? " (" + p.corporation + ")" : ""}: ${rates || "no rates"}`;
+  }).join("\n");
+  const marketLine = RESOURCE_ORDER.map(r => `${r}=$${initState.market[r]}`).join(" ");
+  const kickoff = {
+    kind: "turn-start",
+    text: "Game started!",
+    details: `Players:\n${setupLines}\n\nMarket: ${marketLine}`,
+  };
+  addFeedEntry(kickoff);
+  broadcastFeed(kickoff);
+
   hostAdvanceGame();
 }
 
@@ -724,15 +743,81 @@ function renderGame() {
   renderOpponents(s);
 }
 
+const PRICE_TRACK = [1,1,1,2,2,2,3,3,4,4,5,5,6,7,8,9,10];
+let expandedMarketResource = null;
+
+function stepsToChange(pos, direction) {
+  // Count steps in direction until price changes (or hits boundary)
+  const curPrice = PRICE_TRACK[pos];
+  let steps = 0;
+  let p = pos + direction;
+  while (p >= 0 && p < PRICE_TRACK.length && PRICE_TRACK[p] === curPrice) {
+    steps++;
+    p += direction;
+  }
+  // One more step to actually change
+  if (p >= 0 && p < PRICE_TRACK.length) steps++;
+  return steps;
+}
+
 function renderMarket(s) {
   const grid = document.getElementById("mp-market-grid");
-  grid.innerHTML = RESOURCE_ORDER.map(r => `
-    <div class="market-cell">
-      <div class="res-name" style="color:${RESOURCE_COLORS[r]}">${r}</div>
-      <div class="res-price">$${s.market[r] || 0}</div>
-    </div>
-  `).join("");
+  const positions = s.market_positions || {};
+
+  grid.innerHTML = RESOURCE_ORDER.map(r => {
+    const price = s.market[r] || 0;
+    const pos = positions[r] ?? 9;
+    const stepsDown = stepsToChange(pos, -1);
+    const stepsUp = stepsToChange(pos, 1);
+    const dotsLeft = stepsDown > 0 ? "○".repeat(Math.min(stepsDown, 4)) : "—";
+    const dotsRight = stepsUp > 0 ? "○".repeat(Math.min(stepsUp, 4)) : "—";
+    const isExpanded = expandedMarketResource === r;
+    return `
+      <div class="market-cell ${isExpanded ? 'expanded' : ''}" data-res="${r}">
+        <div class="res-name" style="color:${RESOURCE_COLORS[r]}">${r}</div>
+        <div class="res-price-row">
+          <span class="dots-down" title="${stepsDown} step${stepsDown !== 1 ? 's' : ''} down">${dotsLeft}</span>
+          <span class="res-price">$${price}</span>
+          <span class="dots-up" title="${stepsUp} step${stepsUp !== 1 ? 's' : ''} up">${dotsRight}</span>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  // Wire click to expand ruler
+  grid.querySelectorAll(".market-cell").forEach(el => {
+    el.addEventListener("click", () => {
+      const r = el.dataset.res;
+      expandedMarketResource = expandedMarketResource === r ? null : r;
+      renderMarketRuler(s);
+    });
+  });
+
+  renderMarketRuler(s);
   renderMarketChart(s);
+}
+
+function renderMarketRuler(s) {
+  const ruler = document.getElementById("mp-market-ruler");
+  if (!ruler) return;
+  if (!expandedMarketResource) {
+    ruler.style.display = "none";
+    return;
+  }
+  const r = expandedMarketResource;
+  const pos = (s.market_positions || {})[r] ?? 9;
+  const color = RESOURCE_COLORS[r] || "#888";
+
+  ruler.style.display = "block";
+  ruler.innerHTML = `
+    <div class="ruler-label" style="color:${color}">${r} Price Track</div>
+    <div class="ruler-track">
+      ${PRICE_TRACK.map((p, i) => {
+        const isCurrent = i === pos;
+        return `<span class="ruler-pip ${isCurrent ? 'current' : ''}" style="${isCurrent ? 'background:' + color + ';color:#000' : ''}" title="Position ${i}">$${p}</span>`;
+      }).join("")}
+    </div>
+  `;
 }
 
 function renderMarketChart(s) {
@@ -802,12 +887,7 @@ function renderPool(s) {
   const myTurn = isMyTurn(s);
   grid.innerHTML = (s.pool || []).map((c, i) => {
     const pending = pendingPoolSwap === i ? "selected" : "";
-    return `
-      <div class="pool-card ${pending}" data-pi="${i}">
-        <div class="card-name">${c.building}</div>
-        ${renderCardDetails(c)}
-      </div>
-    `;
+    return `<div class="pool-card ${pending}" data-pi="${i}">${renderCard(c)}</div>`;
   }).join("");
   if (myTurn && s.can_pool_swap) {
     grid.querySelectorAll(".pool-card").forEach(el => {
@@ -843,12 +923,7 @@ function renderHand(s) {
     const dis = !myTurn ? "disabled" : "";
     const swapHint = swapping ? "swap-target" : "";
     const unaffordable = myTurn && !swapping && !affordableSet.has(i) && !selectedCards.has(i) ? "unaffordable" : "";
-    return `
-      <div class="hand-card ${sel} ${dis} ${swapHint} ${unaffordable}" data-hi="${i}">
-        <div class="card-name">${c.building}</div>
-        ${renderCardDetails(c)}
-      </div>
-    `;
+    return `<div class="hand-card ${sel} ${dis} ${swapHint} ${unaffordable}" data-hi="${i}">${renderCard(c)}</div>`;
   }).join("");
 
   // Build cost estimate
@@ -897,18 +972,24 @@ function executePoolSwap(handIdx, poolIdx) {
   }
 }
 
-function renderCardDetails(c) {
+function renderCard(c) {
+  // Returns full card HTML: costs → name → rates → effect → sell/contract
+  const costs = (c.costs || []).map(r => `${r.amount} ${r.resource}`).join(", ");
   const rates = (c.rates || []).map(r =>
     `<span class="${r.amount > 0 ? 'rate-pos' : 'rate-neg'}">${r.amount > 0 ? '+' : ''}${r.amount} ${r.resource}</span>`
   ).join(" ");
-  const costs = (c.costs || []).map(r => `${r.amount} ${r.resource}`).join(", ");
   const sell = (c.can_sell || []).join("/");
-  const parts = [];
-  if (rates) parts.push(`<div class="card-rates">${rates}</div>`);
-  if (costs) parts.push(`<div class="card-costs">Cost: ${costs}</div>`);
-  if (sell) parts.push(`<div class="card-sell">Sell: ${sell}</div>`);
-  if (c.effect) parts.push(`<div class="card-effect">${c.effect}</div>`);
-  return parts.join("");
+  const canContract = c.can_fulfill_contract;
+  let html = "";
+  if (costs) html += `<div class="card-costs">${costs}</div>`;
+  html += `<div class="card-name">${c.building}</div>`;
+  if (rates) html += `<div class="card-rates">${rates}</div>`;
+  if (c.effect) html += `<div class="card-effect">${c.effect}</div>`;
+  const bottomParts = [];
+  if (sell) bottomParts.push(`<span class="card-sell">Sell: ${sell}</span>`);
+  if (canContract) bottomParts.push(`<span class="card-contract">\u{1F4CB}</span>`);
+  if (bottomParts.length) html += `<div class="card-bottom">${bottomParts.join(" ")}</div>`;
+  return html;
 }
 
 function renderActions(s) {
@@ -973,10 +1054,11 @@ function renderPatentActions(s) {
   if (!host) return;
   const myTurn = isMyTurn(s);
   const pa = currentLegal?.patent_actions || {};
+  const oc = currentLegal?.optimization_center_status || {};
   const parts = [];
 
-  if (pa.optimization_center?.owned) {
-    const status = pa.optimization_center;
+  if (oc.owned) {
+    const status = oc;
     const opts = (status.valid_resources || []).map(r => `<option value="${r}">${r}</option>`).join("");
     const canUse = myTurn && status.available && opts;
     parts.push(`

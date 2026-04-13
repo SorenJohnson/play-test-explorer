@@ -75,10 +75,17 @@
     <div id="game-layout">
       <!-- Left: game area -->
       <div id="game-area">
+        <!-- Other Players (above market) -->
+        <section class="game-section">
+          <h3 class="section-title">Other Players</h3>
+          <div id="mp-opponents" class="opponents-strip"></div>
+        </section>
+
         <!-- Market -->
         <section class="game-section">
-          <h3 class="section-title" style="cursor:pointer" id="market-toggle">Market <span style="font-size:0.7rem">(click for chart)</span></h3>
+          <h3 class="section-title" style="cursor:pointer" id="market-toggle">Market <span style="font-size:0.7rem">(click cell for track, header for chart)</span></h3>
           <div id="mp-market-grid" class="market-grid"></div>
+          <div id="mp-market-ruler" class="market-ruler" style="display:none"></div>
           <div id="market-chart-wrap" style="display:none;margin-top:8px">
             <canvas id="mp-market-chart" height="180"></canvas>
           </div>
@@ -89,6 +96,9 @@
           <h3 class="section-title">Contracts</h3>
           <div id="mp-contracts-grid" class="contracts-grid"></div>
         </section>
+
+        <!-- Your Stats / Player Board -->
+        <div id="mp-your-stats" class="your-stats-bar"></div>
 
         <!-- Pool -->
         <section class="game-section">
@@ -115,15 +125,6 @@
           <div id="mp-special-toggles"></div>
           <div id="mp-patent-actions"></div>
         </section>
-
-        <!-- Opponents -->
-        <section class="game-section">
-          <h3 class="section-title">Other Players</h3>
-          <div id="mp-opponents" class="opponents-strip"></div>
-        </section>
-
-        <!-- Your Stats (sticky bottom) -->
-        <div id="mp-your-stats" class="your-stats-bar"></div>
       </div>
 
       <!-- Right: event feed sidebar -->
