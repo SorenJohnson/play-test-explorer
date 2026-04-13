@@ -769,8 +769,8 @@ function renderMarket(s) {
     const pos = positions[r] ?? 9;
     const stepsDown = stepsToChange(pos, -1);
     const stepsUp = stepsToChange(pos, 1);
-    const dotsLeft = stepsDown > 0 ? "○".repeat(Math.min(stepsDown, 4)) : "";
-    const dotsRight = stepsUp > 0 ? "○".repeat(Math.min(stepsUp, 4)) : "";
+    const dotsLeft = stepsDown > 0 ? Array(Math.min(stepsDown, 4)).fill('<span class="step-dot"></span>').join("") : "";
+    const dotsRight = stepsUp > 0 ? Array(Math.min(stepsUp, 4)).fill('<span class="step-dot"></span>').join("") : "";
     const isExpanded = expandedMarketResource === r;
     return `
       <div class="market-cell ${isExpanded ? 'expanded' : ''}" data-res="${r}">
@@ -834,8 +834,12 @@ function renderMarketRuler(s) {
 }
 
 function renderMarketChart(s) {
-  const history = s.market_history || [];
-  if (history.length < 2) return;
+  let history = s.market_history || [];
+  // Prepend current market as turn 0 if history is empty or missing the start
+  if (history.length === 0 && s.market) {
+    history = [{turn: 0, market: s.market}];
+  }
+  if (history.length < 1) return;
   const canvas = document.getElementById("mp-market-chart");
   if (!canvas) return;
   const labels = history.map(h => h.turn);

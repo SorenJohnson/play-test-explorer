@@ -222,19 +222,21 @@ body {
   justify-content: center;
 }
 .market-cell .res-price { font-size: 1.1rem; font-weight: bold; }
-.market-cell .dots-down {
+.market-cell .dots-down, .market-cell .dots-up {
   position: absolute;
-  left: 2px;
-  font-size: 0.45rem;
-  color: #6e7681;
-  letter-spacing: 0px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  align-items: center;
 }
-.market-cell .dots-up {
-  position: absolute;
-  right: 2px;
-  font-size: 0.45rem;
-  color: #6e7681;
-  letter-spacing: 0px;
+.market-cell .dots-down { left: 3px; top: 50%; transform: translateY(-50%); }
+.market-cell .dots-up { right: 3px; top: 50%; transform: translateY(-50%); }
+.step-dot {
+  display: block;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #c9d1d9;
 }
 .market-cell.expanded { border-color: #58a6ff; background: #1c2333; }
 .market-cell { cursor: pointer; }
