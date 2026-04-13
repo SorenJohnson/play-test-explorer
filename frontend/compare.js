@@ -1,10 +1,7 @@
 const SCENARIOS = [
   { file: "data/sim_3random.json", label: "3 Random", color: "#f85149" },
-  { file: "data/sim_3smart.json", label: "3 Smart", color: "#3fb950" },
   { file: "data/sim_3optimal.json", label: "3 Optimal", color: "#d2a8ff" },
   { file: "data/sim_optimal_smart_random.json", label: "Optimal+S+R", color: "#f0883e" },
-  { file: "data/sim_optimal_vs_smart.json", label: "Optimal vs 2 Smart", color: "#58a6ff" },
-  { file: "data/sim_1optimal_2random.json", label: "1 Optimal + 2R", color: "#a371f7" },
 ];
 
 const RESOURCE_COLORS = {
