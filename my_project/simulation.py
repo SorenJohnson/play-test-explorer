@@ -2176,6 +2176,46 @@ def resume_pending_event(state: GameState, active_player: Player) -> str:
     return detail
 
 
+def _build_event_structured(
+    event_type: EventType, detail: str, state: GameState,
+) -> dict:
+    """Build a structured dict describing what happened in an event.
+
+    Called right after the event fires but before PWR adjust / redraws.
+    The frontend uses this instead of parsing the detail string.
+    """
+    import re
+    d: dict = {"event_type": event_type.value}
+
+    if event_type == EventType.DRAW_BUILDING_CARD:
+        m = re.search(r"→\s*(.+?)(?:\s*\(replaced (.+?)\))?$", detail)
+        d["card_drawn"] = m.group(1).strip() if m else ""
+        d["card_replaced"] = m.group(2).strip() if m and m.group(2) else None
+
+    elif event_type == EventType.NEWS_BULLETIN:
+        m = re.match(r"NEWS:\s*(.+?)(?:\s*\((.+)\))?$", detail)
+        d["news_name"] = m.group(1).strip() if m else detail
+        d["news_effects"] = m.group(2).strip() if m and m.group(2) else ""
+
+    elif event_type == EventType.PATENT_AUCTION:
+        m = re.match(r"patent auction:\s*(.+)", detail, re.I)
+        d["auction_result"] = m.group(1).strip() if m else detail
+
+    elif event_type == EventType.END_ROUND:
+        d["sub_events"] = ["Power Bill", "Futures Settlement"]
+    elif event_type == EventType.END_GAME:
+        d["sub_events"] = ["Power Bill", "Futures Settlement"]
+
+    # Player snapshots after the event
+    d["player_snapshots"] = [
+        {"name": p.name, "money": p.money, "debt": p.debt,
+         "net_worth": p.net_worth()}
+        for p in state.players
+    ]
+
+    return d
+
+
 def execute_event(state: GameState, event: EventCard, active_player: Player) -> str:
     """Execute an event card and return a description.
 
@@ -2220,16 +2260,32 @@ def execute_event(state: GameState, event: EventCard, active_player: Player) -> 
             detail = "END GAME (final power bill + futures settlement)"
         case _:
             detail = f"unknown event: {event.type}"
+
+    # Attach structured metadata based on event type
+    state._last_event_structured = _build_event_structured(
+        event.type, detail, state,
+    )
+    structured = state._last_event_structured
+
     # PWR_Adjust modifier: fire after the primary effect if the card flag is set.
-    # Skip if the primary effect was already a standalone PWR_ADJUST (avoid double-fire).
     if event.pwr_adjust and event.type != EventType.PWR_ADJUST:
+        pwr_before = state.market.price(Resource.PWR)
         do_pwr_adjust(state, active_player)
-        detail += f" + PWR adjust ({active_player.rate(Resource.PWR):+d})"
+        pwr_after = state.market.price(Resource.PWR)
+        pwr_rate = active_player.rate(Resource.PWR)
+        detail += f" + PWR adjust ({pwr_rate:+d})"
+        structured["pwr_adjust"] = {
+            "rate": pwr_rate,
+            "price_before": pwr_before,
+            "price_after": pwr_after,
+        }
     # Bonus building-card draw: if the event carries the redraws flag,
-    # also draw a building card into the pool (like draw_building_card).
     if event.redraws and event.type != EventType.DRAW_BUILDING_CARD:
         bonus_detail = do_draw_building_card(state)
         detail += f" + {bonus_detail}"
+
+    structured["detail"] = detail
+    state._last_event_data = structured
     return detail
 
 

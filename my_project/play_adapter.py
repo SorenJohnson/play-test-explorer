@@ -974,6 +974,8 @@ class PlayableGame:
                 {k: v for k, v in line.items()}
                 for line in s.last_event_lines
             ],
+            # Structured event data (for clean frontend rendering)
+            "last_event_data": getattr(s, "_last_event_data", None) or {},
             # Full event deck for debug/inspection (type + flags for remaining cards)
             "event_deck_remaining": [
                 {

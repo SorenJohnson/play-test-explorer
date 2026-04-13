@@ -552,7 +552,8 @@ function hostAdvanceStep() {
     }
 
     if (eventDetail) {
-      addEventFeedEntries(eventDetail, eventLines, playerSnaps);
+      const evData = stateSnap.last_event_data || {};
+      addEventFeedEntries(eventDetail, eventLines, playerSnaps, evData);
       hostRefreshState();
     }
 
@@ -604,6 +605,7 @@ function handleRemoteEndTurn(peerId) {
     result.detail || "Turn ended",
     (snap.last_event_lines || []).map(l => Object.assign({}, l)),
     snap.players.map(p => ({name: p.name, money: p.money, debt: p.debt, net_worth: p.net_worth})),
+    snap.last_event_data || {},
   );
 
   if (result.awaiting_prompt) {
@@ -720,6 +722,7 @@ function tryResolvePrompt() {
     result.detail || "Prompt resolved",
     (snapAfter.last_event_lines || []).map(l => Object.assign({}, l)),
     snapAfter.players.map(p => ({name: p.name, money: p.money, debt: p.debt, net_worth: p.net_worth})),
+    snapAfter.last_event_data || {},
   );
 
   if (result.awaiting_prompt) {
@@ -1448,28 +1451,73 @@ function broadcastFeed(entry) {
   Object.values(connections).forEach(c => c.send(msg));
 }
 
-function addEventFeedEntries(eventDetail, eventLines, playerSnaps) {
-  // Split on " | " only — these are independent events (redraw chains).
-  // " + " stays together (PWR adjust is a modifier of its parent event).
+function addEventFeedEntries(eventDetail, eventLines, playerSnaps, eventData) {
+  // If we have structured event data, use it directly
+  if (eventData && eventData.event_type) {
+    const entry = {
+      kind: "event",
+      eventData: eventData,
+      event_lines: eventLines,
+      player_snapshots: eventData.player_snapshots || playerSnaps,
+    };
+    addFeedEntry(entry);
+    broadcastFeed(entry);
+    showEventBanner(buildEventTitle(eventData));
+    return;
+  }
+  // Fallback: split on "|" for legacy string-based events
   if (!eventDetail) return;
   const parts = eventDetail.split(/\s*\|\s*/);
   for (let i = 0; i < parts.length; i++) {
     const part = parts[i];
     const title = formatEventTitle(part);
     if (!title) continue;
-    const isLast = i === parts.length - 1;
     const entry = {
       kind: "event",
       text: part,
-      // Attach lines to all entries (they filter by relevance when rendering)
       event_lines: eventLines,
-      player_snapshots: isLast ? playerSnaps : [],
+      player_snapshots: i === parts.length - 1 ? playerSnaps : [],
     };
     addFeedEntry(entry);
     broadcastFeed(entry);
   }
   const lastTitle = formatEventTitle(parts[parts.length - 1]);
   if (lastTitle) showEventBanner(lastTitle);
+}
+
+function buildEventTitle(ed) {
+  // Build a clean title from structured event data
+  if (!ed) return "";
+  const type = ed.event_type || "";
+  let title = "";
+
+  switch (type) {
+    case "draw_building_card":
+      title = `Draw: ${ed.card_drawn || "?"}`;
+      break;
+    case "news_bulletin":
+      title = `News: ${ed.news_name || "?"}`;
+      break;
+    case "patent_auction":
+      title = `Patent Auction: ${ed.auction_result || ""}`;
+      break;
+    case "power_bill": title = "Power Bill"; break;
+    case "debt_collection": title = "Debt Collection"; break;
+    case "futures_trading": title = "Futures Trading"; break;
+    case "futures_settlement": title = "Futures Settlement"; break;
+    case "end_round": title = "END OF ROUND"; break;
+    case "end_game": title = "END GAME"; break;
+    default: title = type.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+  }
+
+  // PWR adjust arrow prefix
+  if (ed.pwr_adjust) {
+    const rate = ed.pwr_adjust.rate;
+    const arrow = rate >= 0 ? `\u2191${rate}` : `\u2193${Math.abs(rate)}`;
+    title = `${arrow} ${title}`;
+  }
+
+  return title;
 }
 
 function fmtMoney(text) {
@@ -1619,8 +1667,8 @@ function renderFeedEntry(e) {
   }
 
   if (e.kind === "event") {
-    // Game event — format title cleanly, expandable for per-player details
-    const eventTitle = formatEventTitle(e.text || "");
+    // Use structured data if available, fall back to string parsing
+    const eventTitle = e.eventData ? buildEventTitle(e.eventData) : formatEventTitle(e.text || "");
 
     let detailHtml = "";
     if (e.event_lines && e.event_lines.length > 0) {
@@ -1842,6 +1890,7 @@ function wireGameButtons() {
         result.detail || "Turn ended",
         (result.lines || snapAfter.last_event_lines || []).map(l => Object.assign({}, l)),
         snapAfter.players.map(p => ({name: p.name, money: p.money, debt: p.debt, net_worth: p.net_worth})),
+        snapAfter.last_event_data || {},
       );
       humanTurnActions = [];
 
