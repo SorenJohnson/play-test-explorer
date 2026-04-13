@@ -545,6 +545,27 @@ details.feed-group > summary.feed-group-title::-webkit-details-marker { color: #
   font-size: 0.75rem;
 }
 
+/* Action detail table */
+.feed-action-table { width: 100%; border-collapse: collapse; margin: 4px 0; }
+.feed-action-table td { padding: 2px 4px; font-size: 0.75rem; }
+.feed-at-action { color: #c9d1d9; }
+.feed-at-cash { color: #3fb950; text-align: right; white-space: nowrap; }
+.feed-at-rates { color: #8b949e; font-size: 0.7rem; }
+
+/* Before/after snapshot */
+.feed-before-after {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid #21262d;
+  font-size: 0.7rem;
+  color: #8b949e;
+}
+.feed-before-after .positive { color: #3fb950; }
+.feed-before-after .negative { color: #f85149; }
+
 .feed-action-line { color: #c9d1d9; padding: 1px 0; }
 .feed-line-header { color: #58a6ff; font-weight: 600; margin: 4px 0 2px; font-size: 0.8em; text-transform: uppercase; }
 .feed-line-note { color: #8b949e; margin: 1px 0; padding-left: 8px; }

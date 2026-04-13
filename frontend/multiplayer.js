@@ -503,6 +503,10 @@ function hostAdvanceStep() {
     return;
   }
 
+  // Snapshot player state BEFORE the AI turn
+  const preTurnState = game.state_dict().toJs({dict_converter: Object.fromEntries});
+  const playerBefore = preTurnState.players[preTurnState.current_player_index];
+
   // AI turn — execute, show actions, pause, show event, pause, next
   const result = game.step_ai_turn().toJs({dict_converter: Object.fromEntries});
   const stateSnap = game.state_dict().toJs({dict_converter: Object.fromEntries});
@@ -510,15 +514,28 @@ function hostAdvanceStep() {
   const playerSnaps = stateSnap.players.map(p => ({name: p.name, money: p.money, debt: p.debt, net_worth: p.net_worth}));
 
   const aiActions = result.actions || [];
-  const playerName = stateSnap.players[result.player_index]?.name || "AI";
-  const actionSummary = aiActions.map(a => formatActionSummary(a)).join("; ") || "Pass";
+  const playerIdx = result.player_index;
+  const playerName = stateSnap.players[playerIdx]?.name || "AI";
+  const playerAfter = stateSnap.players[playerIdx];
   const eventDetail = result.event?.detail || "";
+
+  // Concise title: just action types ("Built Iron Mine, Sold FE")
+  const titleParts = aiActions.map(a => {
+    if (a.type === "build") return `Built ${(a.buildings || []).join(", ")}`;
+    if (a.type === "sell") return `Sold ${a.sell_resource || ""}`;
+    if (a.type === "contract") return `Contract`;
+    if (a.type === "free_action") return a.detail || "Free action";
+    return a.type;
+  });
+  const titleSummary = titleParts.join(", ") || "Pass";
 
   // Step 1: Show AI actions + update board
   const actionEntry = {
     kind: "turn",
-    text: `${playerName}: ${actionSummary}`,
+    text: `${playerName}: ${titleSummary}`,
     actions: aiActions,
+    playerBefore: playerBefore ? {money: playerBefore.money, debt: playerBefore.debt, net_worth: playerBefore.net_worth, rates: playerBefore.rates} : null,
+    playerAfter: playerAfter ? {money: playerAfter.money, debt: playerAfter.debt, net_worth: playerAfter.net_worth, rates: playerAfter.rates} : null,
   };
   addFeedEntry(actionEntry);
   broadcastFeed(actionEntry);
@@ -1376,8 +1393,8 @@ function addEventFeedEntries(eventDetail, eventLines, playerSnaps) {
     const entry = {
       kind: "event",
       text: part,
-      // Attach detailed lines/snapshots to the last entry only
-      event_lines: isLast ? eventLines : [],
+      // Attach lines to all entries (they filter by relevance when rendering)
+      event_lines: eventLines,
       player_snapshots: isLast ? playerSnaps : [],
     };
     addFeedEntry(entry);
@@ -1473,7 +1490,6 @@ function renderFeedEntry(e) {
   }
 
   if (e.kind === "turn") {
-    // Player/AI actions — extract player name for coloring
     const colonIdx = (e.text || "").indexOf(":");
     const playerName = colonIdx > 0 ? e.text.substring(0, colonIdx) : "";
     const playerIdx = currentState?.players?.findIndex(p => p.name === playerName) ?? -1;
@@ -1481,20 +1497,43 @@ function renderFeedEntry(e) {
     const title = playerName || "Turn";
     const summary = colonIdx > 0 ? e.text.substring(colonIdx + 1).trim() : e.text;
 
-    // Build detailed action lines with rates for the expandable section
     const actionList = e.actions || [];
-    const hasDetailedActions = actionList.length > 0;
+    const before = e.playerBefore;
+    const after = e.playerAfter;
 
-    if (hasDetailedActions) {
-      const actionHtml = actionList.map(a => {
+    // Build structured detail: action table + before/after comparison
+    let detailHtml = "";
+    if (actionList.length > 0) {
+      detailHtml += `<table class="feed-action-table">`;
+      for (const a of actionList) {
         const rates = formatRates(a.rates_gained);
-        const nw = a.net_worth_after !== undefined ? `<span class="feed-nw-inline">NW $${a.net_worth_after}</span>` : "";
-        return `<div class="feed-action-line">${fmtMoney(a.detail || a.type)}${rates ? " " + rates : ""} ${nw}</div>`;
-      }).join("");
+        const cost = a.build_money_spent > 0 ? `<span class="feed-money">-$${a.build_money_spent}</span>` : "";
+        const rev = a.sell_revenue > 0 ? `<span class="feed-money">+$${a.sell_revenue}</span>` : "";
+        const reward = a.contract_reward > 0 ? `<span class="feed-money">+$${a.contract_reward}</span>` : "";
+        const label = a.type === "build" ? (a.buildings || []).join(", ")
+          : a.type === "sell" ? `Sell ${a.sell_amount || ""} ${a.sell_resource || ""}`
+          : a.type === "contract" ? `Contract ${a.contract_label || ""}`
+          : a.detail || a.type;
+        detailHtml += `<tr><td class="feed-at-action">${label}</td><td class="feed-at-cash">${cost}${rev}${reward}</td><td class="feed-at-rates">${rates}</td></tr>`;
+      }
+      detailHtml += `</table>`;
+    }
+    // Before/after snapshot
+    if (before && after) {
+      const nwDelta = after.net_worth - before.net_worth;
+      const nwClass = nwDelta >= 0 ? "positive" : "negative";
+      detailHtml += `<div class="feed-before-after">`;
+      detailHtml += `<span>$${before.money}→$${after.money}</span>`;
+      if (after.debt > 0 || before.debt > 0) detailHtml += `<span class="negative">Debt $${before.debt}→$${after.debt}</span>`;
+      detailHtml += `<span class="${nwClass}">NW $${before.net_worth}→$${after.net_worth} (${nwDelta >= 0 ? "+" : ""}${nwDelta})</span>`;
+      detailHtml += `</div>`;
+    }
+
+    if (detailHtml) {
       return `
         <details class="feed-group turn" style="border-left-color:${color}">
           <summary class="feed-group-title"><span class="feed-player-name" style="color:${color}">${title}</span> ${fmtMoney(summary)} <span class="feed-time">${e.time}</span></summary>
-          <div class="feed-group-body">${actionHtml}</div>
+          <div class="feed-group-body">${detailHtml}</div>
         </details>
       `;
     }
