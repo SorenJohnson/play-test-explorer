@@ -541,6 +541,9 @@ function hostAdvanceStep() {
   broadcastFeed(actionEntry);
   hostRefreshState();
 
+  // AI action animations
+  animateAiActions(aiActions, playerIdx);
+
   // Step 2: After a pause, show the event (or handle prompt)
   setTimeout(() => {
     // If awaiting prompt (e.g. patent auction), don't add event entry yet —
@@ -796,6 +799,50 @@ function animateReward(rect, text) {
   });
   document.body.appendChild(el);
   setTimeout(() => { if (el.parentNode) el.remove(); }, 900);
+}
+
+function animateAiActions(actions, playerIdx) {
+  // Find the opponent card element for this player
+  const oppCards = document.querySelectorAll("#mp-opponents .opponent-card");
+  let oppEl = null;
+  for (const card of oppCards) {
+    // Match by checking if the card's name matches
+    const nameEl = card.querySelector(".opponent-name");
+    const playerName = currentState?.players[playerIdx]?.name || "";
+    if (nameEl && nameEl.textContent.includes(playerName)) {
+      oppEl = card;
+      break;
+    }
+  }
+  if (!oppEl) return;
+  const oppRect = oppEl.getBoundingClientRect();
+
+  // Pool area as source for builds (AI "picks" from pool conceptually)
+  const poolGrid = document.getElementById("mp-pool-grid");
+  const poolRect = poolGrid?.getBoundingClientRect() || {left: oppRect.left, top: oppRect.top - 100, width: 160, height: 30};
+
+  let delay = 0;
+  for (const a of actions) {
+    if (a.type === "build") {
+      // Card flies from pool area to opponent's panel
+      const names = (a.buildings || []).join(", ");
+      const rates = Object.entries(a.rates_gained || {})
+        .filter(([, v]) => v !== 0)
+        .map(([r, v]) => `<span class="${v > 0 ? 'rate-pos' : 'rate-neg'}">${v > 0 ? '+' : ''}${v} ${r}</span>`)
+        .join(" ");
+      const html = `<div class="card-name">${names}</div>${rates ? `<div class="card-rates">${rates}</div>` : ""}`;
+      const sourceRect = {left: poolRect.left + poolRect.width / 2 - 80, top: poolRect.top, width: 160, height: 40};
+      setTimeout(() => animateCard(sourceRect, oppRect, html), delay);
+      delay += 120;
+    } else if (a.type === "sell" && a.sell_revenue > 0) {
+      // Reward popup near opponent
+      setTimeout(() => animateReward(oppRect, `+$${a.sell_revenue}`), delay);
+      delay += 80;
+    } else if (a.type === "contract" && a.contract_reward > 0) {
+      setTimeout(() => animateReward(oppRect, `+$${a.contract_reward}`), delay);
+      delay += 80;
+    }
+  }
 }
 
 // ===== Deck viewer =====
@@ -1954,7 +2001,7 @@ function wireGameButtons() {
     const cardRect = el?.getBoundingClientRect();
     const cardHtml = el?.innerHTML || "";
 
-    const action = {type: "sell", sell_card: cardIdx};
+    const action = {type: "sell", card_idx: cardIdx};
     const resSel = document.getElementById("mp-sell-resource");
     if (resSel?.value) action.sell_resource = resSel.value;
     const hTarget = document.getElementById("mp-hacker-target");
