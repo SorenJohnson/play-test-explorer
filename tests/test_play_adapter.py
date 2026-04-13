@@ -16,7 +16,7 @@ def test_game_initializes():
     assert len(state["players"]) == 3
     assert len(state["market"]) == 9
     # Hand only revealed for the human
-    assert len(state["players"][0]["hand"]) == 3
+    assert len(state["players"][0]["hand"]) == 4
     assert state["players"][1]["hand"] == []
     assert state["players"][2]["hand"] == []
 
@@ -39,13 +39,17 @@ def test_pass_action_ends_turn():
     assert result["ok"]
     event_result = game.end_human_turn()
     assert "type" in event_result
-    # After ending, it should be an AI player's turn (or game could still be human
-    # if num_players == 1, but we're 3p)
-    assert not game.is_human_turn() or game.is_over()
+    # After ending, the turn advances. It may hit a patent auction prompt
+    # (which pauses for human input) or proceed to an AI turn.
+    assert (
+        not game.is_human_turn()
+        or game.is_over()
+        or game.state.pending_prompt is not None
+    )
 
 
 def test_ai_turn_runs():
-    game = PlayableGame(seed=42, num_rounds=1)
+    game = PlayableGame(seed=42, num_rounds=1, disable_prompts=True)
     # Skip human turn
     game.begin_human_turn()
     game.apply_human_action({"type": "pass"})
@@ -117,7 +121,6 @@ def test_build_action_affects_state():
         result = game.apply_human_action({
             "type": "build",
             "build_cards": [card_idx],
-            "discard_cards": [],
         })
         assert result["ok"]
         after = game.state_dict()
@@ -141,7 +144,7 @@ def test_one_build_per_turn():
     result = game.apply_human_action({
         "type": "build",
         "build_cards": [first_idx],
-        "discard_cards": [],
+
     })
     assert result["ok"]
 
@@ -159,7 +162,6 @@ def test_one_build_per_turn():
         result2 = game.apply_human_action({
             "type": "build",
             "build_cards": [0],
-            "discard_cards": [],
         })
         assert not result2["ok"]
         assert "already built" in result2["reason"].lower()
@@ -211,7 +213,7 @@ def test_pool_swap_allowed_after_action():
     result = game.apply_human_action({
         "type": "build",
         "build_cards": [card_idx],
-        "discard_cards": [],
+
     })
     assert result["ok"]
     # Swap should still be allowed after the build action
@@ -285,7 +287,7 @@ def test_strategy_cannot_see_current_event_in_ai_turn():
     """When the AI acts, its strategy must NOT see the current turn's event
     in state.remaining_events(). This is the bug the user reported.
     """
-    game = PlayableGame(seed=42)
+    game = PlayableGame(seed=42, disable_prompts=True)
     # Skip the human turn so the next step_ai_turn actually runs an AI player
     game.begin_human_turn()
     game.apply_human_action({"type": "pass"})

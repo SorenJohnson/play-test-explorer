@@ -125,14 +125,14 @@ class TestParseContracts:
 
     def test_single_resource_contract(self):
         contracts = parse_contracts(DATA_DIR / "Contracts.csv")
-        first = contracts[0]  # 4 H2O
-        assert first.requirements == [ResourceAmount(Resource.H2O, 4)]
+        first = contracts[0]  # 3 H2O
+        assert first.requirements == [ResourceAmount(Resource.H2O, 3)]
 
     def test_multi_resource_contract(self):
         contracts = parse_contracts(DATA_DIR / "Contracts.csv")
-        second = contracts[1]  # 3 H2O, 1 O2
+        second = contracts[1]  # 2 H2O, 1 O2
         assert second.requirements == [
-            ResourceAmount(Resource.H2O, 3),
+            ResourceAmount(Resource.H2O, 2),
             ResourceAmount(Resource.O2, 1),
         ]
 

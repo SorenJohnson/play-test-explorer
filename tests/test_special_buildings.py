@@ -120,7 +120,7 @@ class TestOneOfEach:
         p.money = 100
         for r in Resource:
             p.rates[r] = 5
-        record = execute_build(state, p, build_indices=[0], discard_indices=[])
+        record = execute_build(state, p, build_indices=[0])
         assert record is None
 
     def test_can_build_first_special(self):
@@ -133,7 +133,7 @@ class TestOneOfEach:
         p.money = 100
         for r in Resource:
             p.rates[r] = 5
-        record = execute_build(state, p, build_indices=[0], discard_indices=[])
+        record = execute_build(state, p, build_indices=[0])
         assert record is not None
         assert any(c.building == "Pleasure Dome" for c in p.buildings_played)
 
@@ -152,7 +152,7 @@ class TestOneOfEach:
         p.money = 100
         for r in Resource:
             p.rates[r] = 5
-        record = execute_build(state, p, build_indices=[0], discard_indices=[])
+        record = execute_build(state, p, build_indices=[0])
         assert record is not None
 
 

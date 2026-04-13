@@ -235,7 +235,8 @@ def parse_event_rows(
     Rows whose Condition doesn't match `num_players` are skipped.
 
     Returns a list of dicts, each:
-        {"event": "news_bulletin", "count": 3, "redraw": False, "pwr_adjust": True}
+        {"event": "news_bulletin", "count": 3, "redraw": False, "pwr_adjust": True,
+         "round2_event": "", "round2_redraw": ""}
     """
     rows: list[dict] = []
     with open(path, newline="") as f:
@@ -244,11 +245,22 @@ def parse_event_rows(
             condition = (row.get("Condition") or "").strip()
             if not _condition_matches(condition, num_players):
                 continue
+            # Redraw column: "true" = always redraw, or a player-count
+            # condition like "2" or "2-3" (redraw only for that player count).
+            redraw_raw = (row.get("Redraw") or "").strip()
+            if redraw_raw.lower() == "true":
+                has_redraw = True
+            elif redraw_raw:
+                has_redraw = _condition_matches(redraw_raw, num_players)
+            else:
+                has_redraw = False
             rows.append({
                 "event": row["Event"].strip(),
                 "count": int(row["Count"].strip()),
-                "redraw": (row.get("Redraw") or "").strip().lower() == "true",
+                "redraw": has_redraw,
                 "pwr_adjust": (row.get("PWR_Adjust") or "").strip().lower() == "true",
+                "round2_event": (row.get("Round2_Event") or "").strip(),
+                "round2_redraw": (row.get("Round2_Redraw") or "").strip(),
             })
     return rows
 

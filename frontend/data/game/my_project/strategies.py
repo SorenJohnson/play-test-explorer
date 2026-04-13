@@ -24,8 +24,6 @@ from my_project.simulation import (
     swap_pool_card,
 )
 
-# Valuation constants
-SELL_VALUE_MULTIPLIER = 1.5  # positive rate value = current sell price × this
 
 
 # --- Pool Swapping ---
@@ -73,7 +71,8 @@ def _score_card(card, player: Player, state) -> float:
                 player, contract, apply_elevator=se_available
             )
             can_afford = all(
-                player.rate(req.resource) >= req.amount for req in effective
+                req.amount == 0 or player.rate(req.resource) >= req.amount
+                for req in effective
             )
             if can_afford:
                 score = _score_contract(state, player, contract)
@@ -140,16 +139,10 @@ def random_strategy(state: GameState, player: Player) -> Action:
     # single-card builds.
     cr = player.cards_remaining()
     if has_cards and not player.has_built_this_turn:
-        max_discards = cr - 1  # 1 build card + up to (cr-1) discards
         for i, card in enumerate(player.hand):
-            remaining = [j for j in range(len(player.hand)) if j != i]
-            # Try without discards first, then with (capped by card budget)
-            for num_disc in range(min(len(remaining), max_discards) + 1):
-                discard_list = remaining[:num_disc]
-                result = compute_build_deficit([card], player, num_disc, state.market)
-                if result is not None:
-                    options.append(Action(ActionType.BUILD, build_cards=[i], discard_cards=list(discard_list)))
-                    break  # found cheapest affordable discard level
+            result = compute_build_deficit([card], player, state.market)
+            if result is not None:
+                options.append(Action(ActionType.BUILD, build_cards=[i]))
 
     # Sell: requires 1 AP per sell.
     has_hacker = _count_buildings(player, "Hacker Array") > 0
@@ -186,7 +179,7 @@ def random_strategy(state: GameState, player: Player) -> Action:
         if se_available:
             disc_reqs = effective_contract_requirements(player, contract, apply_elevator=True)
             disc_affordable = all(
-                player.rate(req.resource) >= req.amount for req in disc_reqs
+                req.amount == 0 or player.rate(req.resource) >= req.amount for req in disc_reqs
             )
         else:
             disc_affordable = False
@@ -256,32 +249,21 @@ def greedy_strategy(state: GameState, player: Player) -> Action:
     if has_cards and not player.has_built_this_turn:
         max_build_size = min(cr, len(player.hand))
         for size in range(1, max_build_size + 1):
-            max_discards = cr - size  # total cards (build+discard) ≤ cr
             for build_combo in combinations(hand_indices, size):
                 build_list = list(build_combo)
-                remaining = [i for i in hand_indices if i not in build_combo]
                 cards = [player.hand[i] for i in build_list]
 
-                # Try with increasing discards, capped by card budget
-                best_for_combo = None
-                for num_disc in range(min(len(remaining), max_discards) + 1):
-                    discard_list = remaining[:num_disc]
-                    result = compute_build_deficit(cards, player, num_disc, state.market)
-                    if result is None:
-                        continue
+                result = compute_build_deficit(cards, player, state.market)
+                if result is None:
+                    continue
 
-                    _, estimated_cost = result
-                    value = _score_build_value(cards, state, player)
-                    score = value - estimated_cost
+                _, estimated_cost = result
+                value = _score_build_value(cards, state, player)
+                score = value - estimated_cost
 
-                    if best_for_combo is None or score > best_for_combo[0]:
-                        best_for_combo = (score, build_list, list(discard_list))
-
-                if best_for_combo is not None:
-                    score, bl, dl = best_for_combo
-                    if score > best_score:
-                        best_score = score
-                        best_action = Action(ActionType.BUILD, build_cards=bl, discard_cards=dl)
+                if score > best_score:
+                    best_score = score
+                    best_action = Action(ActionType.BUILD, build_cards=build_list)
 
     # Score sell options (spends 1 card each)
     if has_cards:
@@ -363,17 +345,14 @@ def _get_card_values_full() -> dict[str, dict]:
 def card_value_now(card_name: str, state: GameState) -> float:
     """Look up the time-adjusted value of a card at the current game state.
 
-    Combines the base regression value with the early/mid/late bonus
-    based on how far through the event deck we are.
-
-    Returns: base + timing_bonus for the current game phase.
+    Returns the regression coefficient for the current game phase
+    (early/mid/late). Each coefficient is the direct value of
+    acquiring this card at that phase — no base + bonus split.
     """
     table = _get_card_values_full()
     entry = table.get(card_name)
     if entry is None:
         return 0.0
-
-    base = entry["base"]
 
     # Determine game phase from event deck progress
     total = len(state.event_deck)
@@ -384,13 +363,11 @@ def card_value_now(card_name: str, state: GameState) -> float:
         progress = consumed / total  # 0.0 = start, 1.0 = end
 
     if progress < 0.33:
-        bonus = entry["early"]
+        return entry.get("early", 0.0)
     elif progress < 0.67:
-        bonus = entry["mid"]
+        return entry.get("mid", 0.0)
     else:
-        bonus = entry["late"]
-
-    return base + bonus
+        return entry.get("late", 0.0)
 
 
 def _pick_hacker_target(
@@ -450,21 +427,21 @@ def _pick_hacker_target(
 
 
 def _mechanical_building_value(card: Card, state: GameState, player: Player) -> float:
-    """Compute the mechanical floor value of a special building's effect.
+    """Compute the value of a special building's effect using the same
+    unified rate valuation as the rest of the AI.
 
-    Based on remaining events and current game state — what the effect
-    is GUARANTEED to be worth if the AI uses it correctly. This prevents
-    the regression-learned value from suppressing buildings the AI hasn't
-    learned to use yet (chicken-and-egg problem).
+    Each building's effect is translated into rate-equivalent terms
+    using _rate_ongoing_value, contract proximity, and sell income.
     """
     from my_project.simulation import (
         EventType, PLEASURE_DOME_TIERS, CONTRACT_REWARD,
-        _count_buildings, _get_patent_base_values,
+        _count_buildings, _rate_ongoing_value,
     )
     name = card.building
     remaining = state.remaining_events()
 
     if name == "Pleasure Dome":
+        # Earns a bonus at each power bill. Passive — no card/AP cost.
         bills_left = (
             remaining.get(EventType.POWER_BILL, 0)
             + remaining.get(EventType.END_ROUND, 0)
@@ -474,58 +451,168 @@ def _mechanical_building_value(card: Card, state: GameState, player: Player) -> 
         return dome_bonus * bills_left
 
     if name == "Optimization Center":
-        turns_left = sum(remaining.values())
-        avg_price = sum(state.market.price(r) for r in Resource) / max(len(Resource), 1)
-        return turns_left * avg_price * 0.3
+        # Free action: -1 PWR, +1 best positive non-PWR rate each turn.
+        # Value = ongoing value of the best conversion target minus PWR cost.
+        # Fires each turn, so multiply by remaining player turns.
+        total_events = sum(remaining.values())
+        player_turns = total_events / max(len(state.players), 1)
+        # Estimate conversion value: best non-PWR rate - PWR rate
+        pwr_val = _rate_ongoing_value(Resource.PWR, state, player)
+        candidates = [
+            r for r in Resource
+            if r != Resource.PWR and player.rate(r) > 0
+        ]
+        if candidates and player_turns > 0:
+            best_gain = max(
+                _rate_ongoing_value(r, state, player) for r in candidates
+            )
+            per_fire = max(0, best_gain - pwr_val)
+            # Diminishing: each fire shifts rates, reducing future value.
+            # Use sqrt(turns) as a rough diminishing factor.
+            import math
+            return per_fire * math.sqrt(player_turns)
+        return 0.0
 
     if name == "Launch Pad":
-        turns_left = sum(remaining.values())
-        return (turns_left / 3) * CONTRACT_REWARD * 0.3
+        # Free contract fulfillment once per turn (no card cost).
+        # Value = best contract proximity bonus × remaining turns.
+        # LP makes contracts free, so the value is the contract reward
+        # minus the rate opportunity cost (which _smart_score_contract handles).
+        total_events = sum(remaining.values())
+        player_turns = total_events / max(len(state.players), 1)
+        best_contract_val = 0.0
+        for contract in state.available_contracts:
+            sc = _smart_score_contract(state, player, contract)
+            if sc is not None and sc > best_contract_val:
+                best_contract_val = sc
+        # LP lets you fulfill without spending a card — the card savings
+        # is worth roughly one sell action's revenue.
+        if best_contract_val > 0:
+            return best_contract_val
+        # Even if no contract is affordable now, LP has future value
+        # from contract proximity — estimate from best proximity bonus.
+        best_prox = max(
+            (_contract_proximity_bonus(r, state, player) for r in Resource),
+            default=0,
+        )
+        return best_prox * player_turns * 0.5
 
     if name == "Space Elevator":
-        avg_price = max(
-            (state.market.price(r) for r in Resource if r != Resource.PWR),
-            default=4,
-        )
-        turns_left = sum(remaining.values())
-        return (turns_left / 4) * avg_price
+        # Reduces one contract requirement by 1 unit. This means:
+        # 1. You need 1 less rate to fulfill the contract (lower barrier)
+        # 2. You keep that 1 rate for selling instead of losing it
+        # The savings = ongoing value of the 1 rate you DON'T consume.
+        # SE picks the most expensive requirement to discount.
+        best_savings = 0.0
+        for contract in state.available_contracts:
+            if not contract.requirements:
+                continue
+            # Value of keeping the most expensive rate unit
+            max_req_val = max(
+                _rate_ongoing_value(req.resource, state, player)
+                for req in contract.requirements
+            )
+            best_savings = max(best_savings, max_req_val)
+        # Also consider: SE makes contracts 1 unit easier to achieve,
+        # which increases contract proximity for near-miss contracts.
+        proximity_boost = 0.0
+        for contract in state.available_contracts:
+            total_deficit = sum(
+                max(0, req.amount - player.rate(req.resource))
+                for req in contract.requirements
+            )
+            # SE turns a 1-unit deficit into affordable
+            if total_deficit == 1:
+                proximity_boost = max(proximity_boost, float(contract.reward))
+        return max(best_savings, proximity_boost)
 
     if name == "Patent Office":
-        # Draw 2, keep better one. Expected value ≈ avg of top half of
-        # patent values (since you pick the better of 2 random draws).
-        learned = _get_learned_card_values()
-        patent_names = [
-            "Superconductors", "Energy Vault", "Financial Instruments",
-            "Water Engine", "Nanotechnology", "Cold Fusion", "Virtual Reality",
-            "Perpetual Motion", "Carbon Scrubbing", "Slant Drilling",
-            "Thinking Machines", "Teleportation",
-        ]
-        patent_vals = sorted([max(0, learned.get(n, 0)) for n in patent_names], reverse=True)
-        # Expected value of keeping the better of 2 random draws ≈ top-third average
+        # Draw 2 patents, keep the better one. Value = expected value
+        # of the best-of-2 from available patents using learned values.
+        patent_vals = sorted(
+            [max(0, card_value_now(n, state)) for n in (
+                "Superconductors", "Energy Vault", "Financial Instruments",
+                "Water Engine", "Nanotechnology", "Cold Fusion", "Virtual Reality",
+                "Perpetual Motion", "Carbon Scrubbing", "Slant Drilling",
+                "Thinking Machines", "Teleportation",
+            )],
+            reverse=True,
+        )
+        # Best-of-2 from the pool ≈ top-third average
         top_third = patent_vals[: max(len(patent_vals) // 3, 1)]
         return sum(top_third) / max(len(top_third), 1)
 
     if name == "Hacker Array":
-        turns_left = sum(remaining.values())
-        return turns_left * 1.5
+        # Shifts market ±3 positions on each sell. Two sources of value:
+        # 1. Raise price of a resource you sell → extra revenue per sell
+        # 2. Lower price of a negative rate → reduced futures debt
+        from my_project.simulation import (
+            PRICE_TRACK, _expected_sell_events, _sell_rank_discount,
+        )
+        total_events = sum(remaining.values())
+        player_turns = total_events / max(len(state.players), 1)
+
+        # --- Sell boost: value of +3 price shift on sellable resources ---
+        # HA is strongest when the player has 2+ good sellable rates,
+        # because it can raise the price of whichever is being sold.
+        sellable = sorted(
+            [(r, player.rate(r) * state.market.price(r))
+             for r in Resource if r != Resource.PWR and player.rate(r) > 0],
+            key=lambda x: -x[1],
+        )
+        sell_boost = 0.0
+        for rank, (r, revenue) in enumerate(sellable[:2]):  # top 2 sell options
+            # Price gain from +3 positions
+            cur_pos = state.market.positions[r]
+            boosted_pos = min(cur_pos + 3, len(PRICE_TRACK) - 1)
+            price_gain = PRICE_TRACK[boosted_pos] - PRICE_TRACK[cur_pos]
+            # Expected sells for this resource
+            sell_events = _expected_sell_events(r, state, player)
+            discount = _sell_rank_discount(r, state, player)
+            sell_boost += price_gain * player.rate(r) * sell_events * discount
+
+        # --- Futures relief: value of -3 price shift on negative rates ---
+        futures_relief = 0.0
+        end_events = (
+            remaining.get(EventType.END_ROUND, 0)
+            + remaining.get(EventType.END_GAME, 0)
+        )
+        settlements = remaining.get(EventType.FUTURES_SETTLEMENT, 0) + end_events
+        for r in Resource:
+            if r == Resource.PWR or player.rate(r) >= 0:
+                continue
+            cur_pos = state.market.positions[r]
+            lowered_pos = max(cur_pos - 3, 0)
+            price_saved = PRICE_TRACK[cur_pos] - PRICE_TRACK[lowered_pos]
+            futures_relief += price_saved * abs(player.rate(r)) * settlements
+
+        return sell_boost + futures_relief
 
     return 0.0
+
+
+# Exploration mode: when set to a dict, _special_building_value returns
+# the pre-rolled value for each building. Set per-game by card_valuation.py.
+# Dict maps building name → forced value. None = normal mode.
+_exploration_overrides: dict[str, float] | None = None
 
 
 def _special_building_value(card: Card, state: GameState, player: Player) -> float:
     """Estimate the value of a special building or patent's effect.
 
-    Uses the MAX of:
-    - Mechanical floor: what the effect is guaranteed to be worth
-    - Time-adjusted learned value: base + early/mid/late bonus from
-      CardValues.csv based on current game progress
+    In exploration mode: returns a per-game pre-rolled value (stable
+    within a game so the AI plays coherently, varied across games
+    for timing diversity in the regression).
 
-    This prevents the regression from suppressing buildings the AI
-    hasn't learned to use yet, while allowing the regression (with
-    timing) to boost values when the data says they're worth more.
+    In normal mode: uses MAX of mechanical floor and time-adjusted
+    learned value from CardValues.csv.
     """
     if not card.effect:
         return 0.0
+
+    if _exploration_overrides and card.building in _exploration_overrides:
+        return _exploration_overrides[card.building]
+
     mechanical = _mechanical_building_value(card, state, player)
     learned = card_value_now(card.building, state)
     return max(mechanical, learned)
@@ -559,68 +646,60 @@ def _score_build_value(cards, state: GameState, player: Player) -> float:
     reflects the ACTUAL rates after hooks fire (e.g. Perpetual Motion
     strips -PWR, Superconductors adds +1 PWR).
 
-    Uses _effective_rate_value for positive rates, which accounts for
-    conversion patents (Water Engine makes H2O worth max(H2O, 2×PWR)).
+    Uses unified _rate_ongoing_value for both positive rates (sell income +
+    patent synergies + contract bonus) and negative rates (futures cost).
     """
+    from my_project.simulation import _rate_ongoing_value
+
     hooked_cards = _apply_hooks_to_copy(cards, player, state)
     value = 0.0
     for card in hooked_cards:
         for ra in card.rates:
             if ra.amount > 0:
-                value += _effective_rate_value(ra.resource, ra.amount, state, player)
+                value += _rate_ongoing_value(ra.resource, state, player) * ra.amount
             else:
-                price = state.market.price(ra.resource)
-                value -= _rate_value(ra.resource, price) * abs(ra.amount)
+                value -= _rate_ongoing_value(ra.resource, state, player) * abs(ra.amount)
         value += _special_building_value(card, state, player)
     return value
 
 
-def _rate_value(resource: Resource, market_price: int) -> float:
-    """Estimate ongoing value of +1 rate."""
-    return market_price * 3
-
-
-def _effective_rate_value(
-    resource: Resource, amount: int, state: GameState, player: Player,
+def _contract_proximity_bonus(
+    resource: Resource, state: GameState, player: Player,
 ) -> float:
-    """Value a rate gain accounting for conversion patents the player owns.
+    """Bonus value for +1 rate that moves the player closer to a contract.
 
-    With Water Engine: +1 H2O is worth max(1×H2O_value, 2×PWR_value)
-    since you'd convert it if PWR is more valuable.
+    For each available contract, computes the rate deficit (how many
+    units the player is short). If this resource reduces the deficit,
+    the bonus is: contract_reward × (1 / deficit) × time_discount.
 
-    With Optimization Center: any +1 positive non-PWR rate can be
-    converted to +1 of the most valuable resource (at -1 PWR cost).
-    So its effective value is max(own_value, best_other_value - PWR_value).
+    Closer contracts → higher bonus. Less time remaining → lower bonus.
+    Returns the best bonus across all available contracts.
     """
-    from my_project.simulation import _player_owns_patent, _count_buildings
+    remaining = state.remaining_events()
+    total_events = sum(remaining.values())
+    player_turns = total_events / max(len(state.players), 1)
 
-    base = state.market.price(resource) * 3 * abs(amount)
-    if amount <= 0:
-        return base  # conversions only apply to positive rates
+    best_bonus = 0.0
+    for contract in state.available_contracts:
+        # How many total rate units is the player short?
+        total_deficit = 0
+        resource_helps = False
+        for req in contract.requirements:
+            shortfall = max(0, req.amount - player.rate(req.resource))
+            total_deficit += shortfall
+            if req.resource == resource and shortfall > 0:
+                resource_helps = True
 
-    # Water Engine: +1 H2O can become +2 PWR
-    if resource == Resource.H2O and _player_owns_patent(player, "Water Engine"):
-        pwr_value = state.market.price(Resource.PWR) * 3 * 2  # 2 PWR per H2O
-        base = max(base, pwr_value) * amount
+        if total_deficit == 0 or not resource_helps:
+            continue
 
-    # OC: any positive non-PWR rate can become +1 of something better
-    # (at -1 PWR cost). Only worth it if the best target > this + PWR cost.
-    if (
-        resource != Resource.PWR
-        and _count_buildings(player, "Optimization Center") > 0
-    ):
-        pwr_cost = state.market.price(Resource.PWR) * 3
-        best_other = max(
-            (state.market.price(r) * 3 for r in Resource if r != Resource.PWR and r != resource),
-            default=0,
-        )
-        # You could convert: gain best_other, lose this rate + PWR
-        # Only relevant if best_other - pwr_cost > base (otherwise just keep the rate)
-        converted_value = best_other - pwr_cost
-        if converted_value > base / amount:
-            base = converted_value * amount
+        # Time discount: need enough turns to close the gap via builds
+        time_discount = min(1.0, player_turns / total_deficit)
 
-    return base
+        bonus = contract.reward * (1.0 / total_deficit) * time_discount
+        best_bonus = max(best_bonus, bonus)
+
+    return best_bonus
 
 
 def _score_sell(state: GameState, player: Player, card) -> float:
@@ -640,113 +719,28 @@ def _score_sell(state: GameState, player: Player, card) -> float:
 
 
 def _score_contract(state: GameState, player: Player, contract) -> float | None:
-    """Score a contract: reward minus opportunity cost of rates spent (sell value)."""
+    """Score a contract: reward minus ongoing value of rates permanently lost.
+
+    Passes player so the opportunity cost includes lost sell income,
+    not just futures settlement cost.
+    """
+    from my_project.simulation import _rate_ongoing_value
+
     for req in contract.requirements:
         if player.rate(req.resource) < req.amount:
             return None
 
-    opportunity_cost = 0.0
-    for req in contract.requirements:
-        sell_value = state.market.price(req.resource) * SELL_VALUE_MULTIPLIER
-        opportunity_cost += sell_value * req.amount
-
+    opportunity_cost = sum(
+        _rate_ongoing_value(req.resource, state, player) * req.amount
+        for req in contract.requirements
+    )
     return contract.reward - opportunity_cost
 
 
-# --- Time-dependent rate valuation ---
 
-
-def _best_contract_value_per_unit(resource: Resource, state: GameState) -> float:
-    """For each contract in the pool that uses this resource,
-    compute $/unit. Return the best (highest) value per unit.
-
-    Example: "3 FOOD" contract → $50/3 = $16.67/FOOD unit.
-    """
-    best = 0.0
-    for contract in state.available_contracts:
-        total_units = sum(req.amount for req in contract.requirements)
-        if total_units == 0:
-            continue
-        uses_resource = any(req.resource == resource for req in contract.requirements)
-        if uses_resource:
-            value_per_unit = contract.reward / total_units
-            best = max(best, value_per_unit)
-    return best
-
-
-def _expected_pwr_price(state: GameState) -> float:
-    """Estimate average PWR price across remaining power bills.
-
-    Each PWR_ADJUST event shifts the market by the active player's PWR rate
-    (positive rate shifts market DOWN like selling, negative shifts UP).
-    We approximate the expected market trajectory by using the AVERAGE
-    PWR rate across all players (since we don't know which player will
-    be active when each adjust fires).
-
-    Returns the avg between current PWR price and the projected future price.
-    """
-    from my_project.simulation import PRICE_TRACK
-
-    remaining = state.remaining_events()
-    num_adjusts = remaining.get(EventType.PWR_ADJUST, 0)
-    # END_GAME also fires a power bill
-    num_bills = remaining.get(EventType.POWER_BILL, 0) + remaining.get(EventType.END_GAME, 0)
-
-    if num_bills == 0 or not state.players:
-        return float(state.market.price(Resource.PWR))
-
-    # Average PWR rate across all players
-    avg_pwr_rate = sum(p.rate(Resource.PWR) for p in state.players) / len(state.players)
-
-    # Total expected market shift over remaining adjusts
-    # Positive avg rate pushes market DOWN (each adjust shifts -rate positions)
-    expected_shift = -avg_pwr_rate * num_adjusts
-
-    current_pos = state.market.positions[Resource.PWR]
-    projected_pos = max(0, min(current_pos + expected_shift, len(PRICE_TRACK) - 1))
-
-    # Average between current and projected position (linear trajectory)
-    avg_pos = (current_pos + projected_pos) / 2
-    avg_pos_idx = max(0, min(int(round(avg_pos)), len(PRICE_TRACK) - 1))
-    return float(PRICE_TRACK[avg_pos_idx])
-
-
-def _positive_rate_value(resource: Resource, state: GameState) -> float:
-    """Value of +1 positive rate.
-
-    - PWR: earns at every power bill. Uses expected avg PWR price
-      (accounts for market drift from PWR_ADJUST events).
-    - Other: max of sell value × multiplier OR best contract value per unit.
-    """
-    if resource == Resource.PWR:
-        remaining = state.remaining_events()
-        # END_GAME also fires a power bill
-        collections = remaining.get(EventType.POWER_BILL, 0) + remaining.get(EventType.END_GAME, 0)
-        avg_price = _expected_pwr_price(state)
-        return avg_price * collections
-
-    price = state.market.price(resource)
-    sell_value = price * SELL_VALUE_MULTIPLIER
-    contract_value = _best_contract_value_per_unit(resource, state)
-    return max(sell_value, contract_value)
-
-
-def _negative_rate_cost(resource: Resource, state: GameState) -> float:
-    """Cost of -1 negative rate.
-
-    - PWR: charged at every power bill at expected avg price.
-    - Other: charged at every futures settlement at current price.
-    """
-    remaining = state.remaining_events()
-    if resource == Resource.PWR:
-        collections = remaining.get(EventType.POWER_BILL, 0) + remaining.get(EventType.END_GAME, 0)
-        avg_price = _expected_pwr_price(state)
-        return avg_price * collections
-
-    price = state.market.price(resource)
-    # END_GAME also fires a futures settlement
-    collections = remaining.get(EventType.FUTURES_SETTLEMENT, 0) + remaining.get(EventType.END_GAME, 0)
-    return price * collections
+# _positive_rate_value, _negative_rate_cost, _expected_pwr_price, and
+# _best_contract_value_per_unit have been replaced by the unified
+# _rate_ongoing_value in simulation.py.
 
 
 def _smart_score_build_value(cards, state: GameState, player: Player) -> float:
@@ -754,50 +748,50 @@ def _smart_score_build_value(cards, state: GameState, player: Player) -> float:
 
     Applies patent build hooks to copies so the score reflects actual
     rates after hooks (e.g. Perpetual Motion strips -PWR).
-    Positive rates use _effective_rate_value (accounts for conversion
-    patents like Water Engine making H2O worth max(H2O, 2×PWR)).
-    Negative rates valued by settlement/power-bill cost.
-    Special buildings valued by empirical CardValues.csv data.
+    Uses unified rate valuation: sell income for positive, futures for negative.
     """
+    from my_project.simulation import _rate_ongoing_value
+
     hooked_cards = _apply_hooks_to_copy(cards, player, state)
     value = 0.0
     for card in hooked_cards:
         for ra in card.rates:
             if ra.amount > 0:
-                value += _effective_rate_value(ra.resource, ra.amount, state, player)
+                value += _rate_ongoing_value(ra.resource, state, player) * ra.amount
             else:
-                value -= _negative_rate_cost(ra.resource, state) * abs(ra.amount)
+                value -= _rate_ongoing_value(ra.resource, state, player) * abs(ra.amount)
         value += _special_building_value(card, state, player)
     return value
 
 
 def _smart_score_contract(state: GameState, player: Player, contract) -> float | None:
-    """Score contract: reward minus opportunity cost of rates spent.
+    """Score contract: reward minus ongoing value of rates permanently lost.
 
-    Opportunity cost = what you'd otherwise get from selling those rates,
-    NOT the contract value (which would double-count).
+    Passes player so opportunity cost includes lost sell income.
     """
+    from my_project.simulation import _rate_ongoing_value
+
     for req in contract.requirements:
         if player.rate(req.resource) < req.amount:
             return None
 
-    opportunity_cost = 0.0
-    for req in contract.requirements:
-        # If you don't fulfill this contract, you'd sell the rates instead
-        sell_value = state.market.price(req.resource) * SELL_VALUE_MULTIPLIER
-        opportunity_cost += sell_value * req.amount
-
+    opportunity_cost = sum(
+        _rate_ongoing_value(req.resource, state, player) * req.amount
+        for req in contract.requirements
+    )
     return contract.reward - opportunity_cost
 
 
 def _smart_score_card(card, player: Player, state: GameState) -> float:
     """Score a card for pool swap using time-dependent values."""
+    from my_project.simulation import _rate_ongoing_value
+
     build_value = 0.0
     for ra in card.rates:
         if ra.amount > 0:
-            build_value += _positive_rate_value(ra.resource, state) * ra.amount
+            build_value += _rate_ongoing_value(ra.resource, state, player) * ra.amount
         else:
-            build_value -= _negative_rate_cost(ra.resource, state) * abs(ra.amount)
+            build_value -= _rate_ongoing_value(ra.resource, state, player) * abs(ra.amount)
 
     build_cost = 0.0
     for ra in card.costs:
@@ -865,38 +859,27 @@ def smart_greedy_strategy(state: GameState, player: Player) -> Action:
     best_action = Action(ActionType.PASS)
     hand_indices = list(range(len(player.hand)))
 
-    # Score build options. Capped by cards_remaining (build cards + discards
-    # all count toward the 2-card-per-turn cap).
+    # Score build options.
     # Rule: only one build action per turn. Skip entirely if already built.
     cr = player.cards_remaining()
     if has_cards and not player.has_built_this_turn:
         max_build_size = min(cr, len(player.hand))
         for size in range(1, max_build_size + 1):
-            max_discards = cr - size
             for build_combo in combinations(hand_indices, size):
                 build_list = list(build_combo)
-                remaining = [i for i in hand_indices if i not in build_combo]
                 cards = [player.hand[i] for i in build_list]
 
-                best_for_combo = None
-                for num_disc in range(min(len(remaining), max_discards) + 1):
-                    discard_list = remaining[:num_disc]
-                    result = compute_build_deficit(cards, player, num_disc, state.market)
-                    if result is None:
-                        continue
+                result = compute_build_deficit(cards, player, state.market)
+                if result is None:
+                    continue
 
-                    _, estimated_cost = result
-                    value = _smart_score_build_value(cards, state, player)
-                    score = value - estimated_cost
+                _, estimated_cost = result
+                value = _smart_score_build_value(cards, state, player)
+                score = value - estimated_cost
 
-                    if best_for_combo is None or score > best_for_combo[0]:
-                        best_for_combo = (score, build_list, list(discard_list))
-
-                if best_for_combo is not None:
-                    score, bl, dl = best_for_combo
-                    if score > best_score:
-                        best_score = score
-                        best_action = Action(ActionType.BUILD, build_cards=bl, discard_cards=dl)
+                if score > best_score:
+                    best_score = score
+                    best_action = Action(ActionType.BUILD, build_cards=build_list)
 
     # Score sell options (cost 1 AP each). Hacker Array: AI picks the best
     # target strategically — raise a resource we produce, or lower one we owe.
@@ -936,7 +919,7 @@ def smart_greedy_strategy(state: GameState, player: Player) -> Action:
         if se_available:
             disc_reqs = effective_contract_requirements(player, contract, apply_elevator=True)
             disc_affordable = all(
-                player.rate(req.resource) >= req.amount for req in disc_reqs
+                req.amount == 0 or player.rate(req.resource) >= req.amount for req in disc_reqs
             )
         else:
             disc_affordable = False
@@ -949,8 +932,9 @@ def smart_greedy_strategy(state: GameState, player: Player) -> Action:
             continue
         if contract_score is None:
             # Affordable only with elevator — re-score using effective reqs
+            from my_project.simulation import _rate_ongoing_value
             opportunity_cost = sum(
-                state.market.price(req.resource) * SELL_VALUE_MULTIPLIER * req.amount
+                _rate_ongoing_value(req.resource, state, player) * req.amount
                 for req in disc_reqs
             )
             contract_score = contract.reward - opportunity_cost
@@ -979,35 +963,6 @@ def smart_greedy_strategy(state: GameState, player: Player) -> Action:
                 use_launch_pad=True,
                 use_elevator=use_elev and se_available,
             )
-        # Fall back to discard-2 path (costs 2 cards, no contract-icon needed)
-        if chosen is None and player.cards_remaining() >= 2 and len(player.hand) >= 2:
-            # Pick the 2 lowest-value cards to discard
-            indexed_values = sorted(
-                range(len(player.hand)),
-                key=lambda i: sum(
-                    state.market.price(ra.resource) * ra.amount
-                    for ra in player.hand[i].rates
-                    if ra.amount > 0
-                ),
-            )
-            discard_idxs = indexed_values[:2]
-            # Only propose if the contract reward outweighs the lost cards
-            discard_cost = sum(
-                sum(
-                    state.market.price(ra.resource) * abs(ra.amount)
-                    for ra in player.hand[i].rates
-                    if ra.amount > 0
-                )
-                for i in discard_idxs
-            )
-            if contract_score > discard_cost:
-                chosen = Action(
-                    ActionType.CONTRACT,
-                    contract_card=-1,
-                    contract_idx=ci,
-                    use_elevator=use_elev and se_available,
-                    discard_card_indices=sorted(discard_idxs),
-                )
         if chosen is not None and (plain_affordable or disc_affordable):
             best_score = contract_score
             best_action = chosen
@@ -1036,12 +991,14 @@ def _card_value(card, player: Player, state: GameState) -> float:
     hcard = hooked[0]
 
     # Build value: net rate value minus estimated market cost
+    from my_project.simulation import _rate_ongoing_value
+
     build_val = 0.0
     for ra in hcard.rates:
         if ra.amount > 0:
-            build_val += _positive_rate_value(ra.resource, state) * ra.amount
+            build_val += _rate_ongoing_value(ra.resource, state, player) * ra.amount
         else:
-            build_val -= _negative_rate_cost(ra.resource, state) * abs(ra.amount)
+            build_val -= _rate_ongoing_value(ra.resource, state, player) * abs(ra.amount)
     # Subtract estimated build cost (what we'd need to buy from market)
     for ra in hcard.costs:
         have = max(0, player.rate(ra.resource))
@@ -1070,7 +1027,7 @@ def _card_value(card, player: Player, state: GameState) -> float:
             eff = effective_contract_requirements(
                 player, contract, apply_elevator=se_avail
             )
-            if all(player.rate(req.resource) >= req.amount for req in eff):
+            if all(req.amount == 0 or player.rate(req.resource) >= req.amount for req in eff):
                 sc = _smart_score_contract(state, player, contract)
                 if sc is not None:
                     contract_val = max(contract_val, sc)
@@ -1094,10 +1051,8 @@ def _enumerate_actions(
     if not player.has_built_this_turn and cr >= 1:
         max_build = min(cr, len(player.hand))
         for size in range(1, max_build + 1):
-            max_disc = cr - size
             for combo in combinations(hand_indices, size):
                 build_list = list(combo)
-                remaining = [i for i in hand_indices if i not in combo]
                 cards = [player.hand[i] for i in build_list]
                 # One-of-each special check
                 dominated = False
@@ -1107,24 +1062,16 @@ def _enumerate_actions(
                 if dominated:
                     continue
 
-                best_for_combo = None
-                for nd in range(min(len(remaining), max_disc) + 1):
-                    disc_list = remaining[:nd]
-                    result = compute_build_deficit(cards, player, nd, state.market)
-                    if result is None:
-                        continue
-                    _, cost = result
-                    value = _smart_score_build_value(cards, state, player)
-                    score = value - cost
-                    if best_for_combo is None or score > best_for_combo[0]:
-                        best_for_combo = (score, build_list, disc_list)
-
-                if best_for_combo is not None:
-                    sc, bl, dl = best_for_combo
-                    actions.append((
-                        sc,
-                        Action(ActionType.BUILD, build_cards=bl, discard_cards=dl),
-                    ))
+                result = compute_build_deficit(cards, player, state.market)
+                if result is None:
+                    continue
+                _, cost = result
+                value = _smart_score_build_value(cards, state, player)
+                score = value - cost
+                actions.append((
+                    score,
+                    Action(ActionType.BUILD, build_cards=build_list),
+                ))
 
     # --- Sells ---
     if cr >= 1:
@@ -1160,7 +1107,7 @@ def _enumerate_actions(
         # Check affordability
         if se_avail:
             disc_reqs = effective_contract_requirements(player, contract, apply_elevator=True)
-            disc_ok = all(player.rate(r.resource) >= r.amount for r in disc_reqs)
+            disc_ok = all(r.amount == 0 or player.rate(r.resource) >= r.amount for r in disc_reqs)
         else:
             disc_ok = False
         plain_ok = all(
@@ -1172,8 +1119,9 @@ def _enumerate_actions(
         c_score = _smart_score_contract(state, player, contract)
         if c_score is None:
             if disc_ok:
+                from my_project.simulation import _rate_ongoing_value
                 opp = sum(
-                    state.market.price(r.resource) * SELL_VALUE_MULTIPLIER * r.amount
+                    _rate_ongoing_value(r.resource, state, player) * r.amount
                     for r in disc_reqs
                 )
                 c_score = contract.reward - opp
@@ -1204,25 +1152,6 @@ def _enumerate_actions(
                        use_elevator=use_elev),
             ))
 
-        # Path C: discard 2 (2 cards spent)
-        if cr >= 2 and len(player.hand) >= 2:
-            # Pick 2 lowest-value cards
-            indexed = sorted(
-                range(len(player.hand)),
-                key=lambda i: _card_value(player.hand[i], player, state),
-            )
-            discard_idxs = indexed[:2]
-            discard_cost = sum(
-                _card_value(player.hand[i], player, state)
-                for i in discard_idxs
-            )
-            if c_score > discard_cost:
-                actions.append((
-                    c_score - discard_cost,
-                    Action(ActionType.CONTRACT, contract_card=-1,
-                           contract_idx=ci, use_elevator=use_elev,
-                           discard_card_indices=sorted(discard_idxs)),
-                ))
 
     actions.sort(key=lambda x: -x[0])
     return actions

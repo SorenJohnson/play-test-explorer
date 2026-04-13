@@ -263,6 +263,7 @@ def main() -> None:
     eval_cards = sub.add_parser("evaluate-cards", help="Run exploration games and learn card values via regression")
     eval_cards.add_argument("-n", "--games", type=int, default=2000, help="Number of exploration games")
     eval_cards.add_argument("-p", "--players", type=int, default=3, help="Number of players per game")
+    eval_cards.add_argument("--refit", action="store_true", help="Re-fit regression on cached data (skip games)")
 
     # refresh-all (pipeline: simulate → analyze → publish → sync)
     refresh = sub.add_parser("refresh-all", help="Simulate all, analyze, publish, sync (no card re-evaluation)")
@@ -285,7 +286,7 @@ def main() -> None:
             cmd_sync_play()
         case "evaluate-cards":
             from my_project.card_valuation import run_evaluation
-            run_evaluation(n_games=args.games, num_players=args.players)
+            run_evaluation(n_games=args.games, num_players=args.players, refit=args.refit)
         case "refresh-all":
             import argparse as _ap
             print("=" * 60)

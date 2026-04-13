@@ -62,12 +62,10 @@ function activeHumanIndex(s) {
 
 // --- Hand selection state ---
 // selectedBuildIdxs: set of card indices to build together (one build action)
-// selectedDiscardIdxs: set of card indices to discard for cost reduction
 // selectedContractIdx: the available-contracts index for a contract action
 // pendingPoolSwapIdx: pool index clicked by the user, waiting for a hand click
 // Sell and contract actions require exactly one card in selectedBuildIdxs.
 let selectedBuildIdxs = new Set();
-let selectedDiscardIdxs = new Set();
 let selectedContractIdx = null;
 let pendingPoolSwapIdx = null;
 // Special-building per-action toggles:
@@ -78,11 +76,6 @@ let pendingPoolSwapIdx = null;
 let useElevatorThisFulfill = false;
 let elevatorTargetResource = "";
 let useLaunchPadThisFulfill = false;
-// useDiscardForContract: when true, the next "Fulfill Contract" click uses
-// the discard-2 path. selectedBuildIdxs holds the 2 cards to discard (any
-// 2 hand cards — no contract-icon requirement). Mutually exclusive with
-// useLaunchPadThisFulfill.
-let useDiscardForContract = false;
 // Patent Office pick: when building a Patent Office, the index (0 or 1) of
 // the patent the human wants to keep. null = auto-pick (AI default).
 let patentOfficePick = null;
@@ -171,7 +164,7 @@ const DEFAULT_EVENT_CONFIG_TEXT = JSON.stringify(DEFAULT_EVENT_CONFIG, null, 2);
 
 // Last-used config so the New Game modal pre-fills with the previous settings.
 let lastGameConfig = {
-  seats: ["human", "smart", "smart"],
+  seats: ["human", "optimal", "optimal"],
   names: ["Player_1", "Player_2", "Player_3"],
   rounds: 8,
   seed: null,
@@ -309,7 +302,7 @@ function populateNewGameForm(cfg) {
     const n = parseInt(numSeatsSelect.value, 10);
     const { seats: curSeats, names: curNames } = readSeatRows();
     const nextSeats = Array.from({ length: n }, (_, i) =>
-      curSeats[i] || (i === 0 ? "human" : "smart")
+      curSeats[i] || (i === 0 ? "human" : "optimal")
     );
     const nextNames = Array.from({ length: n }, (_, i) => curNames[i] || defaultSeatName(i));
     renderSeatRows(nextSeats, nextNames);
@@ -327,6 +320,7 @@ function renderSeatRows(seats, names) {
              value="${escapeAttr(name)}" maxlength="20">
       <select data-seat-idx="${i}">
         <option value="human" ${s === "human" ? "selected" : ""}>Human</option>
+        <option value="optimal" ${s === "optimal" ? "selected" : ""}>Optimal AI</option>
         <option value="smart" ${s === "smart" ? "selected" : ""}>Smart AI</option>
         <option value="greedy" ${s === "greedy" ? "selected" : ""}>Greedy AI</option>
         <option value="random" ${s === "random" ? "selected" : ""}>Random AI</option>
@@ -417,13 +411,11 @@ function parseEventConfig(text) {
 
 function clearSelection() {
   selectedBuildIdxs.clear();
-  selectedDiscardIdxs.clear();
   selectedContractIdx = null;
   pendingPoolSwapIdx = null;
   useElevatorThisFulfill = false;
   elevatorTargetResource = "";
   useLaunchPadThisFulfill = false;
-  useDiscardForContract = false;
   patentOfficePick = null;
   selectedSellResource = null;
   hackerTarget = "";
@@ -867,7 +859,6 @@ function renderHand() {
     try {
       const pyResult = game.estimate_build_cost(
         pyodide.toPy([...selectedBuildIdxs]),
-        pyodide.toPy([...selectedDiscardIdxs]),
       );
       buildEstimate = pyResult.toJs({ dict_converter: Object.fromEntries });
     } catch (err) {
@@ -879,13 +870,11 @@ function renderHand() {
 
   el.innerHTML = p.hand.map((card, i) => {
     const inBuild = selectedBuildIdxs.has(i);
-    const inDiscard = selectedDiscardIdxs.has(i);
     const affordable = affordableSingleIdxs.has(i);
     const classes = ["hand-card"];
     if (swapPending) classes.push("swap-target");
     if (inBuild) classes.push("selected-build");
-    if (inDiscard) classes.push("selected-discard");
-    if (!affordable && card.costs.length && !inBuild && !inDiscard) {
+    if (!affordable && card.costs.length && !inBuild) {
       classes.push("unaffordable");
     }
 
@@ -909,7 +898,7 @@ function renderHand() {
       ? `<div class="hand-card-effect">${card.effect}</div>`
       : "";
 
-    const marker = inBuild ? "✓ BUILD" : inDiscard ? "✗ DISCARD" : "";
+    const marker = inBuild ? "✓ BUILD" : "";
 
     return `
       <div class="${classes.join(" ")}" data-hand-idx="${i}">
@@ -937,42 +926,21 @@ function renderHand() {
         executePoolSwap(idx, pendingPoolSwapIdx);
         return;
       }
-      if (e.shiftKey) {
-        // Toggle as discard; mutually exclusive with build
-        if (selectedDiscardIdxs.has(idx)) {
-          selectedDiscardIdxs.delete(idx);
-        } else {
-          selectedDiscardIdxs.add(idx);
-          selectedBuildIdxs.delete(idx);
-        }
+      // Toggle as "selected hand card". The same selection set is reused
+      // for build / sell / contract paths.
+      if (selectedBuildIdxs.has(idx)) {
+        selectedBuildIdxs.delete(idx);
       } else {
-        // Toggle as "selected hand card". The same selection set is reused
-        // for build / sell / contract / discard-2-for-contract paths.
-        if (selectedBuildIdxs.has(idx)) {
-          selectedBuildIdxs.delete(idx);
-        } else {
-          // Cap selection size:
-          //   - discard-2-for-contract mode: max 2 cards (you'll discard them)
-          //   - normal mode: max is min(2, action_points_remaining), since
-          //     each additional build card costs 1 AP. Sell/contract use 1
-          //     of the selected cards as the target, so 1 is always fine.
-          const legal = currentLegal || {};
-          const cr = legal.cards_remaining ?? 2;
-          let cap;
-          if (useDiscardForContract) {
-            cap = 2;
-          } else {
-            // Allow selecting up to cards_remaining — this enables
-            // multi-card builds. For sell/contract the user picks 1.
-            cap = Math.max(1, cr);
-          }
-          if (selectedBuildIdxs.size >= cap) {
-            // Refuse silently — render will show a hint
-            return;
-          }
-          selectedBuildIdxs.add(idx);
-          selectedDiscardIdxs.delete(idx);
+        // Cap selection size by cards_remaining — this enables
+        // multi-card builds. For sell/contract the user picks 1.
+        const legal = currentLegal || {};
+        const cr = legal.cards_remaining ?? 2;
+        const cap = Math.max(1, cr);
+        if (selectedBuildIdxs.size >= cap) {
+          // Refuse silently — render will show a hint
+          return;
         }
+        selectedBuildIdxs.add(idx);
       }
       render();
     });
@@ -991,8 +959,7 @@ function renderHand() {
         .map(([r, a]) => `${a} ${r}`)
         .join(", ") || "nothing";
       summaryEl.innerHTML = `
-        <span style="color:#8b949e">Building ${selectedBuildIdxs.size} card(s)
-        (${selectedDiscardIdxs.size} discard):
+        <span style="color:#8b949e">Building ${selectedBuildIdxs.size} card(s):
         market needs <strong style="color:#c9d1d9">${deficitStr}</strong>,
         cost <strong class="positive">$${buildEstimate.cost}</strong></span>`;
     } else if (buildEstimate) {
@@ -1033,8 +1000,7 @@ function renderActionBar() {
   const canBuild =
     hasBuildCards &&
     !alreadyBuilt &&
-    !useDiscardForContract &&
-    (buildSize + selectedDiscardIdxs.size) <= cr;
+    buildSize <= cr;
   buildBtn.disabled = !canBuild;
 
   // Sell: requires exactly one card selected, sellable, AND ≥ 1 card remaining.
@@ -1043,7 +1009,6 @@ function renderActionBar() {
   const canSellIdxs = new Set(canSellList.map((e) => e.card_idx));
   const singleSelected = selectedBuildIdxs.size === 1 ? [...selectedBuildIdxs][0] : null;
   const canSell =
-    !useDiscardForContract &&
     singleSelected !== null &&
     canSellIdxs.has(singleSelected) &&
     cr >= 1;
@@ -1084,40 +1049,24 @@ function renderActionBar() {
   // Contract: legal if a contract is selected and EITHER:
   //   (a) a hand-card is selected and the (card,contract) pair is in can_contract
   //   (b) Launch Pad toggle is on (FREE — no AP gate)
-  //   (c) discard-2 mode is on AND exactly 2 hand cards are selected AND the
-  //       (contract, elevator?) pair is in can_contract_via_discard
-  // Paths (a) and (c) cost 1 AP; (b) is free.
+  // Path (a) costs 1 AP; (b) is free.
   const canContractList = legal.can_contract || [];
   const matchKey = (entry) =>
     `${entry.card_idx}-${entry.contract_idx}-${entry.use_elevator ? 1 : 0}-${entry.use_launch_pad ? 1 : 0}-${entry.elevator_target || ""}`;
   const validKeys = new Set(canContractList.map(matchKey));
-  const discardCandidates = legal.can_contract_via_discard || [];
-  const discardValidKeys = new Set(
-    discardCandidates.map((e) => `${e.contract_idx}-${e.use_elevator ? 1 : 0}-${e.elevator_target || ""}`)
-  );
   let canContract = false;
   if (selectedContractIdx !== null) {
-    if (useDiscardForContract) {
-      const elevatorKey = useElevatorThisFulfill ? (elevatorTargetResource || "") : "";
-      canContract =
-        selectedBuildIdxs.size === 2 &&
-        cr >= 2 &&
-        discardValidKeys.has(
-          `${selectedContractIdx}-${useElevatorThisFulfill ? 1 : 0}-${elevatorKey}`
-        );
-    } else {
-      const targetCardIdx = useLaunchPadThisFulfill ? -1 : singleSelected;
-      const elevatorKey = useElevatorThisFulfill ? (elevatorTargetResource || "") : "";
-      const crOk = useLaunchPadThisFulfill || cr >= 1;
-      canContract =
-        targetCardIdx !== null &&
-        targetCardIdx !== undefined &&
-        (useLaunchPadThisFulfill || singleSelected !== null) &&
-        crOk &&
-        validKeys.has(
-          `${targetCardIdx}-${selectedContractIdx}-${useElevatorThisFulfill ? 1 : 0}-${useLaunchPadThisFulfill ? 1 : 0}-${elevatorKey}`
-        );
-    }
+    const targetCardIdx = useLaunchPadThisFulfill ? -1 : singleSelected;
+    const elevatorKey = useElevatorThisFulfill ? (elevatorTargetResource || "") : "";
+    const crOk = useLaunchPadThisFulfill || cr >= 1;
+    canContract =
+      targetCardIdx !== null &&
+      targetCardIdx !== undefined &&
+      (useLaunchPadThisFulfill || singleSelected !== null) &&
+      crOk &&
+      validKeys.has(
+        `${targetCardIdx}-${selectedContractIdx}-${useElevatorThisFulfill ? 1 : 0}-${useLaunchPadThisFulfill ? 1 : 0}-${elevatorKey}`
+      );
   }
   contractBtn.disabled = !canContract;
 
@@ -1127,20 +1076,12 @@ function renderActionBar() {
   // Hint text
   if (cr === 0 && !useLaunchPadThisFulfill) {
     instr.textContent = "No cards left to spend this turn. Free actions / Launch Pad still available, otherwise pass.";
-  } else if (useDiscardForContract) {
-    if (selectedContractIdx === null) {
-      instr.textContent = "Discard-2 mode: pick a contract first.";
-    } else if (selectedBuildIdxs.size < 2) {
-      instr.textContent = `Discard-2 mode: select 2 hand cards to discard (${selectedBuildIdxs.size}/2).`;
-    } else {
-      instr.textContent = "Click Fulfill Contract to discard these 2 cards and claim the reward.";
-    }
   } else if (alreadyBuilt && selectedBuildIdxs.size === 0 && selectedContractIdx === null) {
     instr.textContent = "You've already built this turn. You can still sell, fulfill contracts, or pass.";
   } else if (selectedBuildIdxs.size === 0 && selectedContractIdx === null) {
     instr.textContent = `Cards: ${cr}/2. Click hand cards to build, sell, or pick a contract.`;
   } else if (selectedBuildIdxs.size > 1) {
-    instr.textContent = `Building ${selectedBuildIdxs.size} card(s) (+ ${selectedDiscardIdxs.size} discard). Click Build to confirm.`;
+    instr.textContent = `Building ${selectedBuildIdxs.size} card(s). Click Build to confirm.`;
   } else if (canContract) {
     instr.textContent = "Click Fulfill Contract to pay the rate cost and claim the reward.";
   } else if (singleSelected !== null) {
@@ -1233,23 +1174,6 @@ function renderSpecialToggles(legal, singleSelected) {
     `);
   }
 
-  // Discard-2-for-contract toggle. Visible whenever the player has ≥ 2 hand
-  // cards and is currently looking at a contract. When checked, the next
-  // "Fulfill Contract" click discards the 2 selected hand cards instead of
-  // requiring a contract-icon card.
-  const discardCandidates = (legal && legal.can_contract_via_discard) || [];
-  const hasDiscardOption = discardCandidates.length > 0;
-  if (hasDiscardOption) {
-    parts.push(`
-      <div class="toggle-row">
-        <label class="toggle-checkbox-label">
-          <input type="checkbox" id="discard-2-toggle" ${useDiscardForContract ? "checked" : ""}>
-          <span>Discard 2 cards to fulfill contract (1 AP, no contract icon needed)</span>
-        </label>
-      </div>
-    `);
-  }
-
   host.innerHTML = parts.join("");
 
   // Wire HA picker
@@ -1296,22 +1220,6 @@ function renderSpecialToggles(legal, singleSelected) {
   if (lpToggleEl) {
     lpToggleEl.addEventListener("change", (e) => {
       useLaunchPadThisFulfill = e.target.checked;
-      // LP and discard-2 are mutually exclusive
-      if (useLaunchPadThisFulfill) useDiscardForContract = false;
-      render();
-    });
-  }
-  const discard2El = document.getElementById("discard-2-toggle");
-  if (discard2El) {
-    discard2El.addEventListener("change", (e) => {
-      useDiscardForContract = e.target.checked;
-      // Discard-2 and LP are mutually exclusive
-      if (useDiscardForContract) {
-        useLaunchPadThisFulfill = false;
-        // Clear any single-card selection — the user now needs 2 cards.
-        // Don't clear the set entirely so any in-progress selection of 2
-        // cards is preserved.
-      }
       render();
     });
   }
@@ -1842,7 +1750,6 @@ function onBuild() {
   const action = {
     type: "build",
     build_cards: [...selectedBuildIdxs],
-    discard_cards: [...selectedDiscardIdxs],
   };
   if (patentOfficePick !== null) {
     action.patent_office_pick = patentOfficePick;
@@ -1873,35 +1780,19 @@ function onSell() {
 
 function onContract() {
   if (selectedContractIdx === null) return;
-  // Three paths:
+  // Two paths:
   //   - useLaunchPadThisFulfill: card_idx = -1, no hand card needed (FREE)
-  //   - useDiscardForContract: 2 selected cards become discard_card_indices
   //   - default: exactly 1 selected card becomes the contract card
-  let action;
-  if (useDiscardForContract) {
-    if (selectedBuildIdxs.size !== 2) return;
-    action = {
-      type: "contract",
-      card_idx: -1,
-      contract_idx: selectedContractIdx,
-      use_discard: true,
-      discard_card_indices: [...selectedBuildIdxs],
-      use_elevator: useElevatorThisFulfill,
-      use_launch_pad: false,
-      elevator_target: useElevatorThisFulfill ? elevatorTargetResource : "",
-    };
-  } else {
-    if (!useLaunchPadThisFulfill && selectedBuildIdxs.size !== 1) return;
-    const cardIdx = useLaunchPadThisFulfill ? -1 : [...selectedBuildIdxs][0];
-    action = {
-      type: "contract",
-      card_idx: cardIdx,
-      contract_idx: selectedContractIdx,
-      use_elevator: useElevatorThisFulfill,
-      use_launch_pad: useLaunchPadThisFulfill,
-      elevator_target: useElevatorThisFulfill ? elevatorTargetResource : "",
-    };
-  }
+  if (!useLaunchPadThisFulfill && selectedBuildIdxs.size !== 1) return;
+  const cardIdx = useLaunchPadThisFulfill ? -1 : [...selectedBuildIdxs][0];
+  const action = {
+    type: "contract",
+    card_idx: cardIdx,
+    contract_idx: selectedContractIdx,
+    use_elevator: useElevatorThisFulfill,
+    use_launch_pad: useLaunchPadThisFulfill,
+    elevator_target: useElevatorThisFulfill ? elevatorTargetResource : "",
+  };
   applyHumanAction(action, (result) => {
     if (result.ok) {
       logHumanAction(result);

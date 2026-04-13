@@ -407,7 +407,7 @@ class PlayableGame:
 
         `action` is a dict with at minimum `type` in {build, sell, contract, pass}.
         Additional keys per type:
-          - build: build_cards (list[int]), discard_cards (list[int])
+          - build: build_cards (list[int])
           - sell: card_idx (int)
           - contract: card_idx (int), contract_idx (int)
 
@@ -427,19 +427,17 @@ class PlayableGame:
             if player.has_built_this_turn:
                 return {"ok": False, "reason": "Already built this turn"}
             build_idx = list(action.get("build_cards") or [])
-            discard_idx = list(action.get("discard_cards") or [])
             if not build_idx:
                 return {"ok": False, "reason": "No cards selected"}
             if len(build_idx) > 2:
                 return {"ok": False, "reason": "Max 2 cards per build"}
-            total_cards = len(build_idx) + len(discard_idx)
-            if total_cards > player.cards_remaining():
-                return {"ok": False, "reason": f"Would spend {total_cards} cards but only {player.cards_remaining()} left this turn"}
+            if len(build_idx) > player.cards_remaining():
+                return {"ok": False, "reason": f"Would spend {len(build_idx)} cards but only {player.cards_remaining()} left this turn"}
             patent_office_pick = action.get("patent_office_pick")
             if patent_office_pick is not None:
                 patent_office_pick = int(patent_office_pick)
             record = execute_build(
-                self.state, player, build_idx, discard_idx,
+                self.state, player, build_idx,
                 patent_office_pick=patent_office_pick,
             )
             if record is None:
@@ -474,14 +472,10 @@ class PlayableGame:
             contract_idx = action.get("contract_idx", -1)
             use_elevator = bool(action.get("use_elevator", False))
             use_launch_pad = bool(action.get("use_launch_pad", False))
-            use_discard = bool(action.get("use_discard", False))
-            discard_card_indices = list(action.get("discard_card_indices") or [])
             elevator_target = action.get("elevator_target") or None
-            # Card-spend check (Launch Pad is free; discard-2 costs 2; hand card costs 1)
+            # Card-spend check (Launch Pad is free; hand card costs 1)
             if use_launch_pad:
                 cards_cost = 0
-            elif use_discard:
-                cards_cost = 2
             else:
                 cards_cost = 1
             if cards_cost > player.cards_remaining():
@@ -489,14 +483,6 @@ class PlayableGame:
             # Path-specific validation
             if use_launch_pad:
                 pass  # execute_contract validates the LP-once-per-turn flag
-            elif use_discard:
-                if len(discard_card_indices) != 2:
-                    return {"ok": False, "reason": "Pick exactly 2 cards to discard"}
-                if discard_card_indices[0] == discard_card_indices[1]:
-                    return {"ok": False, "reason": "Cannot discard the same card twice"}
-                for di in discard_card_indices:
-                    if di < 0 or di >= len(player.hand):
-                        return {"ok": False, "reason": "Invalid discard card"}
             else:
                 if card_idx < 0 or card_idx >= len(player.hand):
                     return {"ok": False, "reason": "Invalid card"}
@@ -509,7 +495,6 @@ class PlayableGame:
                 player,
                 card_idx,
                 contract_idx,
-                discard_card_indices=discard_card_indices if use_discard else None,
                 use_elevator=use_elevator,
                 use_launch_pad=use_launch_pad,
                 elevator_target=elevator_target,
@@ -975,12 +960,8 @@ class PlayableGame:
             builds that are currently affordable (filtered by cards_remaining)
           - can_sell: list of card indices sellable this turn (filtered by cards_remaining)
           - can_contract: list of {card_idx, contract_idx, ...} entries (Path A
-            entries need cards_remaining ≥ 1; Launch Pad Path C entries are always
+            entries need cards_remaining ≥ 1; Launch Pad Path B entries are always
             shown when LP is unused since LP spends 0 cards)
-          - can_contract_via_discard: list of {contract_idx, elevator_target}
-            entries that can be fulfilled by discarding 2 hand cards (the new
-            Path B). Only emitted if the player has ≥ 2 hand cards AND
-            cards_remaining ≥ 2.
         """
         if not self.is_human_turn():
             return {
@@ -990,7 +971,6 @@ class PlayableGame:
                 "affordable_single_builds": [],
                 "can_sell": [],
                 "can_contract": [],
-                "can_contract_via_discard": [],
                 "space_elevator_status": {"owned": False, "used": False},
                 "launch_pad_status": {"owned": False, "used": False},
                 "hacker_array_status": {"owned": False},
@@ -1019,7 +999,7 @@ class PlayableGame:
             for i, card in enumerate(player.hand):
                 if card.effect and _count_buildings(player, card.building) > 0:
                     continue  # already owns this special
-                result = compute_build_deficit([card], player, 0, self.state.market)
+                result = compute_build_deficit([card], player, self.state.market)
                 if result is not None:
                     _, cost = result
                     affordable.append({"card_idx": i, "cost": cost})
@@ -1065,10 +1045,9 @@ class PlayableGame:
         # Contract-fulfillable combinations. Each entry includes flags for
         # which special-building paths it requires. With the new SE semantics
         # (-1 to ONE resource), we enumerate per-resource elevator picks too.
-        # Path A (hand card) and Path B (discard 2) cost 1 AP; Path C
-        # (Launch Pad) is free, so LP entries are emitted regardless of AP.
+        # Path A (hand card) costs 1 AP; Path B (Launch Pad) is free, so LP
+        # entries are emitted regardless of AP.
         can_contract: list[dict] = []
-        can_contract_via_discard: list[dict] = []
         for j, contract in enumerate(self.state.available_contracts):
             plain_reqs = effective_contract_requirements(player, contract, apply_elevator=False)
             plain_ok = all(player.rate(req.resource) >= req.amount for req in plain_reqs)
@@ -1081,7 +1060,7 @@ class PlayableGame:
                     disc_reqs = effective_contract_requirements(
                         player, contract, apply_elevator=True, elevator_target=target
                     )
-                    if all(player.rate(r.resource) >= r.amount for r in disc_reqs):
+                    if all(r.amount == 0 or player.rate(r.resource) >= r.amount for r in disc_reqs):
                         se_targets.append(target)
 
             if not plain_ok and not se_targets:
@@ -1104,21 +1083,7 @@ class PlayableGame:
                             "use_elevator": True, "use_launch_pad": False,
                             "elevator_target": target,
                         })
-            # Path B — discard 2 cards (spends 2 cards, no contract-card requirement)
-            if cr >= 2 and len(player.hand) >= 2:
-                if plain_ok:
-                    can_contract_via_discard.append({
-                        "contract_idx": j,
-                        "use_elevator": False,
-                        "elevator_target": "",
-                    })
-                for target in se_targets:
-                    can_contract_via_discard.append({
-                        "contract_idx": j,
-                        "use_elevator": True,
-                        "elevator_target": target,
-                    })
-            # Path C — Launch Pad (FREE, no AP cost; still gated by per-turn flag)
+            # Path B — Launch Pad (FREE, no AP cost; still gated by per-turn flag)
             if lp_owned and not lp_used:
                 if plain_ok:
                     can_contract.append({
@@ -1182,7 +1147,6 @@ class PlayableGame:
             "affordable_single_builds": affordable,
             "can_sell": can_sell,
             "can_contract": can_contract,
-            "can_contract_via_discard": can_contract_via_discard,
             "space_elevator_status": {"owned": se_owned, "used": se_used},
             "launch_pad_status": {"owned": lp_owned, "used": lp_used},
             "hacker_array_status": {"owned": ha_owned},
@@ -1208,7 +1172,7 @@ class PlayableGame:
             for p in s.patent_pile[s.patent_idx : s.patent_idx + 2]
         ]
 
-    def estimate_build_cost(self, build_indices: list[int], discard_indices: list[int]) -> dict:
+    def estimate_build_cost(self, build_indices: list[int]) -> dict:
         """Estimate the market cost of a proposed multi-card build.
 
         Used by the UI to show live feedback as the user selects cards.
@@ -1223,7 +1187,7 @@ class PlayableGame:
         if not build_indices:
             return {"ok": False, "reason": "No cards selected"}
         cards = [player.hand[i] for i in build_indices]
-        result = compute_build_deficit(cards, player, len(discard_indices), self.state.market)
+        result = compute_build_deficit(cards, player, self.state.market)
         if result is None:
             return {"ok": False, "reason": "Cannot afford", "cost": -1}
         deficit, cost = result

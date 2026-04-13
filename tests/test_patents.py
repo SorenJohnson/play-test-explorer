@@ -134,7 +134,7 @@ def _execute_single_build(state: GameState, player: Player, card: Card) -> Card:
     Card object that landed in buildings_played (so tests can inspect the
     rates that were actually applied)."""
     player.hand = [card]
-    record = execute_build(state, player, build_indices=[0], discard_indices=[])
+    record = execute_build(state, player, build_indices=[0])
     assert record is not None, "build failed"
     # The newly-appended card is the last one in buildings_played that isn't
     # the patent we set up earlier.
@@ -328,7 +328,7 @@ class TestCarbonScrubbing:
         p.hand = [card]
         p.rates[Resource.FE] = 1  # FE cost covered
         money_before = p.money
-        record = execute_build(state, p, build_indices=[0], discard_indices=[])
+        record = execute_build(state, p, build_indices=[0])
         # Build succeeded and the player paid market cost for the C
         assert record is not None
         assert p.money < money_before
@@ -340,7 +340,7 @@ class TestCarbonScrubbing:
         card = _build_card("OxygenHog", costs=[(Resource.O2, 2)], rates=[(Resource.PWR, 1)])
         p.hand = [card]
         money_before = p.money
-        record = execute_build(state, p, build_indices=[0], discard_indices=[])
+        record = execute_build(state, p, build_indices=[0])
         # Build succeeded and the player paid market cost for the O2
         assert record is not None
         assert p.money < money_before

@@ -58,10 +58,10 @@ def collect_valuation_data(
 ) -> dict[str, list]:
     """Run exploration games and collect per-player feature/outcome data.
 
-    Forces all special buildings and patents to the same base value
-    ($20) during exploration so the AI builds them all equally. This
-    prevents the regression from being biased by the AI's prior
-    avoidance of "low-value" cards.
+    Forces exploration values scaled to each building's build cost so
+    ALL specials get built at roughly equal rates. Without this,
+    expensive buildings (OC, PO, SE) would never get built and the
+    regression would have no data for them.
 
     Includes timing interaction terms: each card gets early/mid/late
     features based on when it was acquired relative to total turns.
@@ -72,24 +72,21 @@ def collect_valuation_data(
         _get_learned_card_values,
         _learned_card_values,
         optimal_strategy,
+        smart_greedy_strategy,
         random_strategy,
     )
     import my_project.strategies as strat_mod
 
-    # Force flat base values so the AI explores all buildings equally
-    flat_values = {name: 20.0 for name in ALL_CARD_NAMES}
-    strat_mod._learned_card_values = flat_values
-
-    strategies_pool = [
-        [optimal_strategy] * num_players,
-        [random_strategy] * num_players,
-        [optimal_strategy, random_strategy, random_strategy],
-    ]
-
     cards = parse_cards(DATA_DIR / "Cards.csv")
     contracts = parse_contracts(DATA_DIR / "Contracts.csv")
 
-    # Feature columns: binary flags + timing interactions + controls
+    # No forced exploration — AI plays normally using mechanical floor +
+    # current learned values. Natural card draw variation provides the
+    # data. This avoids distorting play with forced suboptimal decisions.
+    strategies_pool = [
+        [optimal_strategy, smart_greedy_strategy, random_strategy],
+    ]
+
     data: dict[str, list] = {
         "net_worth": [],
         "num_buildings": [],
@@ -102,6 +99,9 @@ def collect_valuation_data(
         data[f"{name}_early"] = []    # 1 if acquired in first third of game
         data[f"{name}_mid"] = []      # 1 if acquired in middle third
         data[f"{name}_late"] = []     # 1 if acquired in last third
+    # Track patent source: 1 = auction, 0 = PO or unknown
+    for name in PATENTS:
+        data[f"{name}_auction"] = []
 
     for game_idx in range(n_games):
         strats = strategies_pool[game_idx % len(strategies_pool)]
@@ -118,9 +118,12 @@ def collect_valuation_data(
         total_turns = len(state.history)
         third = max(total_turns // 3, 1)
 
-        # Build a map: player_name → {building_name: turn_acquired}
+        # Build maps: player → {building: turn}, player → {patent: source}
         build_turns: dict[str, dict[str, int]] = {
             p.name: {} for p in state.players
+        }
+        auction_patents: dict[str, set[str]] = {
+            p.name: set() for p in state.players
         }
         for turn_idx, rec in enumerate(state.history):
             for action_rec in rec.actions:
@@ -129,16 +132,25 @@ def collect_valuation_data(
                         build_turns[rec.player][bname] = turn_idx
             # Patent auctions show in the event detail
             if "patent auction:" in rec.event.lower() and "won" in rec.event.lower():
-                # Parse "patent auction: Player_2 won Superconductors for $15 debt"
                 parts = rec.event.split("won")
                 if len(parts) >= 2:
                     patent_part = parts[1].strip().split(" for")[0].strip()
                     if patent_part and rec.player in build_turns:
                         build_turns[rec.player][patent_part] = turn_idx
+                        auction_patents[rec.player].add(patent_part)
 
-        for player in state.players:
+        # Only include seat 0 (optimal player)
+        for player in state.players[:1]:
             owned = set(player.building_names())
             p_turns = build_turns.get(player.name, {})
+            p_auctions = auction_patents.get(player.name, set())
+
+            # Patents from Patent Office: tag with PO's build turn
+            po_turn = p_turns.get("Patent Office", -1)
+            if po_turn >= 0:
+                for name in PATENTS:
+                    if name in owned and name not in p_turns:
+                        p_turns[name] = po_turn
 
             for name in ALL_CARD_NAMES:
                 has_it = 1 if name in owned else 0
@@ -155,6 +167,12 @@ def collect_valuation_data(
                     data[f"{name}_mid"].append(0)
                     data[f"{name}_late"].append(0)
 
+            # Patent source tracking
+            for name in PATENTS:
+                data[f"{name}_auction"].append(
+                    1 if name in p_auctions else 0
+                )
+
             # Control variables
             data["num_buildings"].append(len(player.buildings_played))
             data["total_positive_rates"].append(
@@ -165,44 +183,48 @@ def collect_valuation_data(
             # Target
             data["net_worth"].append(player.net_worth())
 
-    # Restore the real learned values (we forced flat values for exploration)
+    # Restore normal mode
     strat_mod._learned_card_values = None  # force reload from CSV on next access
+    strat_mod._card_values_full = None  # force reload from CSV on next access
+
+    # Cache to disk so we can re-fit the regression without re-running games
+    import json
+    cache_path = DATA_DIR / "exploration_data.json"
+    with open(cache_path, "w") as f:
+        json.dump(data, f)
 
     return data
 
 
-def fit_card_values(data: dict[str, list]) -> dict[str, dict]:
+def fit_card_values(
+    data: dict[str, list],
+    card_names: list[str] | None = None,
+    periods: tuple[str, ...] = ("early", "mid", "late"),
+) -> dict[str, dict]:
     """Fit OLS linear regression and return per-card value estimates.
 
-    Model includes:
-    - Binary flags for each card (owned or not)
-    - Timing interactions: early/mid/late acquisition for each card
-    - Control variables: num_buildings, total_positive_rates, contracts
+    Model uses timing binary features ONLY. If you own a card, exactly
+    one timing flag is 1; if you don't, all are 0.
 
-    The "value" for each card is the base coefficient. The timing
-    coefficients show how much MORE the card is worth when acquired
-    early vs late.
+    `periods` controls which timing columns to include. Default is
+    ("early", "mid", "late"). For patents (auction-only, first half),
+    use ("early", "mid").
 
-    Returns a dict mapping card name → {"value", "std_err", "early", "mid", "late"}.
+    Returns a dict mapping card name → {period: value, ...}.
     """
+    if card_names is None:
+        card_names = ALL_CARD_NAMES
+
     n = len(data["net_worth"])
     y = np.array(data["net_worth"], dtype=float)
 
-    # Build feature matrix: card flags + timing + controls
-    # Base card flags
-    feature_names = list(ALL_CARD_NAMES)
-    # Timing interaction terms
-    timing_features = []
-    for name in ALL_CARD_NAMES:
-        for period in ("early", "mid", "late"):
+    # Build feature matrix: timing-only, no controls
+    feature_names: list[str] = []
+    for name in card_names:
+        for period in periods:
             key = f"{name}_{period}"
             if key in data:
-                timing_features.append(key)
-    feature_names += timing_features
-    # Control variables
-    feature_names += [
-        "num_buildings", "total_positive_rates", "contracts_fulfilled",
-    ]
+                feature_names.append(key)
 
     X = np.ones((n, len(feature_names) + 1), dtype=float)  # +1 for intercept
     for i, name in enumerate(feature_names):
@@ -239,108 +261,130 @@ def fit_card_values(data: dict[str, list]) -> dict[str, dict]:
             "n_observations": n,
         }
     }
-    # Build a name→index map for easy lookup
     name_to_idx = {name: i + 1 for i, name in enumerate(feature_names)}
 
-    for name in ALL_CARD_NAMES:
-        idx = name_to_idx.get(name)
-        if idx is None:
-            continue
-        entry: dict = {
-            "value": round(float(beta[idx]), 1),
-            "std_err": round(float(std_errs[idx]), 1),
-        }
-        # Timing coefficients
-        for period in ("early", "mid", "late"):
+    for name in card_names:
+        entry: dict[str, float] = {}
+        for period in periods:
             key = f"{name}_{period}"
             tidx = name_to_idx.get(key)
             if tidx is not None:
                 entry[period] = round(float(beta[tidx]), 1)
-        results[name] = entry
-
-    # Also include control variable coefficients
-    for ctrl in ("num_buildings", "total_positive_rates", "contracts_fulfilled"):
-        idx = name_to_idx.get(ctrl)
-        if idx is not None:
-            results[ctrl] = {
-                "value": round(float(beta[idx]), 1),
-                "std_err": round(float(std_errs[idx]), 1),
-            }
+                entry[f"{period}_se"] = round(float(std_errs[tidx]), 1)
+        if entry:
+            results[name] = entry
 
     return results
 
 
 def export_card_values(results: dict[str, dict], path: Path) -> None:
-    """Write learned card values to CardValues.csv."""
+    """Write learned card values to CardValues.csv.
+
+    New format: Early/Mid/Late are the direct regression coefficients
+    (value of acquiring the card at that game phase), not base + bonus.
+    Learned_Value is the average of the three phases for backward compat.
+    """
     with open(path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["Card", "Type", "Learned_Value", "Std_Error", "Early_Bonus", "Mid_Bonus", "Late_Bonus"])
-        for name in SPECIAL_BUILDINGS:
-            if name in results:
-                r = results[name]
-                writer.writerow([
-                    name, "special", r["value"], r["std_err"],
-                    r.get("early", ""), r.get("mid", ""), r.get("late", ""),
-                ])
         for name in PATENTS:
-            if name in results:
-                r = results[name]
-                writer.writerow([
-                    name, "patent", r["value"], r["std_err"],
-                    r.get("early", ""), r.get("mid", ""), r.get("late", ""),
-                ])
+            if name not in results:
+                continue
+            r = results[name]
+            early = r.get("early", 0)
+            mid = r.get("mid", 0)
+            avg = round((early + mid) / 2, 1)
+            writer.writerow([name, "patent", avg, 0.0, early, mid, 0])
+
+
+def _print_regression(label: str, results: dict[str, dict], card_names: list[str]) -> list[tuple[str, dict]]:
+    """Print a regression results table. Returns sorted (name, entry) list."""
+    meta = results["_meta"]
+    print(f"\n{'=' * 55}")
+    print(f"  {label}")
+    print(f"  R² = {meta['r_squared']:.3f}, intercept = ${meta['intercept']:.0f}, n = {meta['n_observations']}")
+    print(f"{'=' * 55}")
+    print(f"{'Card':<25} {'Early':>8} {'Mid':>8} {'Late':>8}")
+    print("-" * 55)
+
+    card_results = [
+        (name, results[name]) for name in card_names if name in results
+    ]
+    # Sort by best phase value descending
+    card_results.sort(key=lambda x: -max(
+        x[1].get("early", 0), x[1].get("mid", 0), x[1].get("late", 0),
+    ))
+    for name, r in card_results:
+        early = f"${r['early']:+.0f}" if "early" in r else "—"
+        mid = f"${r['mid']:+.0f}" if "mid" in r else "—"
+        late = f"${r['late']:+.0f}" if "late" in r else "—"
+        print(f"  {name:<23} {early:>7}  {mid:>7}  {late:>7}")
+    return card_results
 
 
 def run_evaluation(
     n_games: int = 2000,
     num_players: int = 3,
+    refit: bool = False,
 ) -> dict[str, dict]:
-    """Full pipeline: collect data, fit model, export values, print report."""
-    print(f"Running {n_games} exploration games ({num_players} players, random strategy)...")
-    data = collect_valuation_data(n_games, num_players)
+    """Full pipeline: collect data, fit two separate models, export values.
+
+    Runs two independent regressions:
+    1. Specials-only: features are special building flags (no patents)
+    2. Patents-only: features are patent flags (no specials)
+
+    When `refit=True`, loads cached exploration data from disk instead
+    of re-running games. Use this to iterate on the regression model
+    without waiting for 1500 games.
+    """
+    if refit:
+        import json
+        cache_path = DATA_DIR / "exploration_data.json"
+        if not cache_path.exists():
+            print("No cached data — run without --refit first.")
+            return {}
+        print(f"Loading cached exploration data from {cache_path}...")
+        with open(cache_path) as f:
+            data = json.load(f)
+    else:
+        print(f"Running {n_games} exploration games ({num_players} players, optimal+smart+random)...")
+        data = collect_valuation_data(n_games, num_players)
     n_obs = len(data["net_worth"])
     print(f"Collected {n_obs} player observations.")
 
-    print("\nFitting OLS regression...")
-    results = fit_card_values(data)
+    # --- Patent regression (auction-acquired, early+mid) ---
+    # Patents with timing flags came from auctions (event parser).
+    # PO-granted patents have no timing (all zeros) and don't affect
+    # early/mid coefficients. No specials regression — specials are
+    # valued by the mechanical heuristic at runtime.
+    print("\nFitting patent regression (auction-acquired, early+mid)...")
+    results = fit_card_values(data, card_names=PATENTS, periods=("early", "mid"))
+    patent_cards = _print_regression(
+        "PATENTS (auction-acquired, early+mid)",
+        results, PATENTS,
+    )
 
-    meta = results["_meta"]
-    print(f"R² = {meta['r_squared']:.3f}, intercept = ${meta['intercept']:.0f}")
-
-    print(f"\nCard Values (learned from {n_games} games):")
-    print(f"{'Card':<25} {'Base':>7} {'Early':>7} {'Mid':>7} {'Late':>7} {'± SE':>7}")
-    print("-" * 65)
-
-    # Sort by value descending
-    card_results = [
-        (name, results[name]) for name in ALL_CARD_NAMES if name in results
-    ]
-    card_results.sort(key=lambda x: -x[1]["value"])
-    for name, r in card_results:
-        early = f"${r['early']:+.0f}" if "early" in r else "—"
-        mid = f"${r['mid']:+.0f}" if "mid" in r else "—"
-        late = f"${r['late']:+.0f}" if "late" in r else "—"
-        print(f"  {name:<23} ${r['value']:>5.0f}  {early:>6} {mid:>6} {late:>6}  ±${r['std_err']:.0f}")
-
-    # Export research JSON (for frontend display — doesn't change AI behavior)
+    # Export research JSON
     import json
     research_path = Path("frontend/data/card_valuation.json")
     research_data = {
-        "meta": meta,
+        "meta": results["_meta"],
         "cards": [
             {
                 "name": name,
-                "type": "special" if name in SPECIAL_BUILDINGS else "patent",
-                "base_value": r["value"],
-                "early_bonus": r.get("early", 0),
-                "mid_bonus": r.get("mid", 0),
-                "late_bonus": r.get("late", 0),
-                "early_total": r["value"] + r.get("early", 0),
-                "mid_total": r["value"] + r.get("mid", 0),
-                "late_total": r["value"] + r.get("late", 0),
-                "std_err": r["std_err"],
+                "type": "patent",
+                "early_total": r.get("early", 0),
+                "mid_total": r.get("mid", 0),
+                "late_total": 0,
+                "base_value": round(
+                    (r.get("early", 0) + r.get("mid", 0)) / 2, 1
+                ),
+                "early_bonus": 0,
+                "mid_bonus": 0,
+                "late_bonus": 0,
+                "std_err": 0.0,
             }
-            for name, r in card_results
+            for name, r in patent_cards
         ],
     }
     research_path.parent.mkdir(parents=True, exist_ok=True)
@@ -348,11 +392,11 @@ def run_evaluation(
         json.dump(research_data, f, indent=2)
     print(f"\nResearch data → {research_path}")
 
-    # Export CSV (updates AI behavior only when explicitly run)
+    # Export CSV (patents only — specials use mechanical heuristic)
     out_path = DATA_DIR / "CardValues.csv"
     export_card_values(results, out_path)
     print(f"AI values   → {out_path}")
     print("\n💡 To use these values in the AI, commit CardValues.csv.")
-    print("   To just view results, check the Research tab in the analytics dashboard.")
+    print("   Special buildings are valued by mechanical heuristic (no regression).")
 
     return results

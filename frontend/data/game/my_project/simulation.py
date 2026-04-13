@@ -401,39 +401,23 @@ def _build_event_pool(
         override = getattr(config, override_key, None)
         if override is not None:
             count = _resolve_count(override)
-        events.extend([
-            _ec(et, redraws=spec["redraw"], pwr_adjust=spec["pwr_adjust"])
-        ] * count)
+        # Store round2 conversion info on the event card
+        r2_event = spec.get("round2_event", "")
+        r2_redraw = spec.get("round2_redraw", "")
+        for _ in range(count):
+            ec = _ec(et, redraws=spec["redraw"], pwr_adjust=spec["pwr_adjust"])
+            ec._round2_event = r2_event  # type: ignore[attr-defined]
+            ec._round2_redraw = r2_redraw  # type: ignore[attr-defined]
+            events.append(ec)
 
     # Legacy direct-NEWS pool (JSON Advanced section).
     news_n = _resolve_count(config.news_count)
     if news_n > 0 and config.news_pool:
         events.extend(random.choices(config.news_pool, k=news_n))
 
-    # Separate "bonus draw" markers from actual player-turn events.
-    # Redraw-flagged events aren't standalone player-turns — they indicate
-    # "this many events in the round also draw a building card into the pool."
-    # We shuffle the real events, then randomly tag N of them with redraws=True
-    # so execute_event fires a bonus draw_building_card after the primary event.
-    real_events = [e for e in events if not e.redraws]
-    bonus_draw_count = sum(1 for e in events if e.redraws)
-
-    random.shuffle(real_events)
-
-    # Tag random events to carry a bonus building-card draw
-    if bonus_draw_count > 0 and real_events:
-        tag_indices = random.sample(
-            range(len(real_events)),
-            min(bonus_draw_count, len(real_events)),
-        )
-        for idx in tag_indices:
-            e = real_events[idx]
-            real_events[idx] = EventCard(
-                type=e.type, payload=e.payload, label=e.label,
-                redraws=True, pwr_adjust=e.pwr_adjust,
-            )
-
-    return real_events
+    # Each event keeps its own redraw flag from CSV. No redistribution.
+    random.shuffle(events)
+    return events
 
 
 def build_event_deck(
@@ -462,13 +446,30 @@ def build_event_deck(
     cfg = config or EventDeckConfig()
     pool = _build_event_pool(num_players, cfg)
 
+    _type_map = {e.value: e for e in EventType}
+
     all_events: list[EventCard] = []
     for round_idx in range(num_rounds):
         is_last = round_idx == num_rounds - 1
 
         if round_idx > 0:
-            # Remove patent auction cards for subsequent rounds
-            pool = [e for e in pool if e.type != EventType.PATENT_AUCTION]
+            # Convert events with Round2_Event to their round-2 replacement.
+            # Patent auctions without a conversion are dropped.
+            from my_project.parsing import _condition_matches
+            converted: list[EventCard] = []
+            for e in pool:
+                r2 = getattr(e, "_round2_event", "")
+                if r2:
+                    r2_type = _type_map.get(r2)
+                    if r2_type:
+                        r2_cond = getattr(e, "_round2_redraw", "")
+                        is_redraw = bool(r2_cond) and _condition_matches(r2_cond, num_players)
+                        converted.append(_ec(r2_type, redraws=is_redraw, pwr_adjust=e.pwr_adjust))
+                    continue
+                elif e.type == EventType.PATENT_AUCTION:
+                    continue  # patent with no round2 conversion → drop
+                converted.append(e)
+            pool = converted
 
         round_events = list(pool)
         random.shuffle(round_events)
@@ -494,7 +495,6 @@ class ActionType(StrEnum):
 class Action:
     action_type: ActionType
     build_cards: list[int] = field(default_factory=list)  # indices of cards to build
-    discard_cards: list[int] = field(default_factory=list)  # indices of cards to discard for discount
     sell_card: int = -1  # index of card to sell with
     contract_card: int = -1  # index of card to use for contract
     contract_idx: int = -1  # index into available_contracts
@@ -505,9 +505,6 @@ class Action:
     # Per-sell Hacker Array choice (used by execute_sell when set)
     hacker_target: str = ""        # resource value (e.g. "GLS"); empty = no bonus
     hacker_direction: int = 0      # +1 / -1 / 0 for no bonus
-    # Discard-2-for-contract: indices of 2 hand cards to discard instead of
-    # using a contract-icon card. When set, contract_card is ignored.
-    discard_card_indices: list[int] | None = None
     detail: str = ""
 
 
@@ -724,39 +721,24 @@ class GameState:
 def compute_build_deficit(
     cards: list[Card],
     player: Player,
-    num_discards: int,
     market: Market,
 ) -> tuple[dict[Resource, int], int] | None:
     """Compute the market deficit and estimated cost for building multiple cards.
 
     Returns (deficit_per_resource, estimated_total_cost) or None if unaffordable.
-    Deficit = total cost per resource - player rate, then reduced by discards
-    applied to the most expensive resource first.
+    Deficit = total cost per resource - player rate.
     """
-    # Total costs across all cards
     combined: dict[Resource, int] = defaultdict(int)
     for card in cards:
         for ra in card.costs:
             combined[ra.resource] += ra.amount
 
-    # Deficit per resource
     deficit: dict[Resource, int] = {}
     for resource, total_cost in combined.items():
         d = max(0, total_cost - max(0, player.rate(resource)))
         if d > 0:
             deficit[resource] = d
 
-    # Apply discards to most expensive resource first
-    discards_remaining = num_discards
-    while discards_remaining > 0 and deficit:
-        # Find the resource with highest market price
-        most_expensive = max(deficit.keys(), key=lambda r: market.price(r))
-        deficit[most_expensive] -= 1
-        if deficit[most_expensive] <= 0:
-            del deficit[most_expensive]
-        discards_remaining -= 1
-
-    # Estimate total cost
     total_cost = 0
     for resource, amount in deficit.items():
         total_cost += market.estimate_buy_cost(resource, amount)
@@ -793,32 +775,24 @@ def execute_build(
     state: GameState,
     player: Player,
     build_indices: list[int],
-    discard_indices: list[int],
     patent_office_pick: int | None = None,
 ) -> ActionRecord | None:
-    """Play one or more building cards. Optionally discard cards to reduce deficit.
+    """Play one or more building cards.
 
     Returns ActionRecord on success, None if:
       - the player has already built this turn (one build action per turn),
-      - the total cards used (build cards + discards) would exceed
-        MAX_CARDS_PER_TURN when added to cards already spent this turn.
-
-    Every card that leaves the hand counts toward the per-turn cap:
-    both the cards being built AND any discards used to reduce the
-    market deficit.
+      - the build cards would exceed MAX_CARDS_PER_TURN.
     """
     if player.has_built_this_turn:
         return None
 
     n_build_cards = len(build_indices)
-    total_cards_used = n_build_cards + len(discard_indices)
     if n_build_cards == 0:
         return None
-    if total_cards_used > player.cards_remaining():
+    if n_build_cards > player.cards_remaining():
         return None
 
     build_cards = [player.hand[i] for i in build_indices]
-    num_discards = len(discard_indices)
 
     # One-of-each special-building constraint: a player can only ever own
     # ONE copy of any slot-4 special. The `effect` field is the slot-4
@@ -850,7 +824,7 @@ def execute_build(
                 if hook:
                     hook(state, player, card)
 
-    result = compute_build_deficit(build_cards, player, num_discards, state.market)
+    result = compute_build_deficit(build_cards, player, state.market)
     if result is None:
         return None
 
@@ -908,21 +882,18 @@ def execute_build(
             _patent_office_trigger(state, player, pick_idx=patent_office_pick)
 
     # Remove cards from hand (highest indices first to avoid shifting) → discard pile
-    all_indices = sorted(set(build_indices) | set(discard_indices), reverse=True)
+    all_indices = sorted(set(build_indices), reverse=True)
     for idx in all_indices:
         state.deck.discard.append(player.hand.pop(idx))
 
     # Enforce one build per turn
     player.has_built_this_turn = True
-    # Count all hand cards consumed (builds + discards) toward the per-turn cap
-    player.cards_spent_this_turn += total_cards_used
+    player.cards_spent_this_turn += n_build_cards
 
     names = ", ".join(c.building for c in build_cards)
     detail = f"Built {names}"
     if cost_detail:
         detail += f" (bought {', '.join(cost_detail)})"
-    if num_discards > 0:
-        detail += f" (discarded {num_discards} cards)"
 
     return ActionRecord(
         action_type="build",
@@ -1031,31 +1002,26 @@ def execute_contract(
     card_idx: int,
     contract_idx: int,
     *,
-    discard_card_indices: list[int] | None = None,
     use_elevator: bool = False,
     use_launch_pad: bool = False,
     elevator_target: str | None = None,
 ) -> ActionRecord | None:
     """Fulfill a contract.
 
-    Three ways to fulfill a contract:
+    Two ways to fulfill a contract:
 
     1. **Hand card** (default): pass `card_idx` pointing at a hand card
        with `can_fulfill_contract=True`. Costs 1 AP.
 
-    2. **Discard 2 cards** (new): pass `discard_card_indices` with exactly
-       2 distinct hand indices. The cards are discarded as the cost; no
-       contract-capable card is required. Costs 1 AP. `card_idx` is ignored.
-
-    3. **Launch Pad** (free): pass `use_launch_pad=True`. Skips the
+    2. **Launch Pad** (free): pass `use_launch_pad=True`. Skips the
        hand-card requirement entirely. **Free** (0 AP) but still gated by
        `has_used_launch_pad_this_turn` (only one Launch Pad contract per
-       turn). `card_idx` and `discard_card_indices` are ignored.
+       turn). `card_idx` is ignored.
 
     `use_elevator=True`: applies a one-time -1 to ONE resource (Space
     Elevator's per-turn discount). The resource is `elevator_target`
     (e.g. "FE"); if not provided, defaults to the first requirement.
-    Also gated by the per-turn flag. Combines with all three paths.
+    Also gated by the per-turn flag. Combines with both paths.
 
     Returns ActionRecord on success, None if any precondition fails
     (including insufficient action points).
@@ -1066,15 +1032,8 @@ def execute_contract(
 
     # Determine which path is being taken and how many hand cards will be
     # consumed. Launch Pad spends 0 cards (it IS the free icon).
-    use_discard = (
-        not use_launch_pad
-        and discard_card_indices is not None
-        and len(discard_card_indices) > 0
-    )
     if use_launch_pad:
         cards_cost = 0
-    elif use_discard:
-        cards_cost = 2  # the two discarded hand cards
     else:
         cards_cost = 1  # the contract-icon hand card
     if cards_cost > player.cards_remaining():
@@ -1086,16 +1045,6 @@ def execute_contract(
             return None
         if _count_buildings(player, "Launch Pad") == 0:
             return None
-    elif use_discard:
-        # Discard-2 path: validate that we have exactly 2 distinct in-range
-        # hand indices.
-        if len(discard_card_indices) != 2:
-            return None
-        if discard_card_indices[0] == discard_card_indices[1]:
-            return None
-        for idx in discard_card_indices:
-            if idx < 0 or idx >= len(player.hand):
-                return None
     else:
         if card_idx < 0 or card_idx >= len(player.hand):
             return None
@@ -1114,9 +1063,11 @@ def execute_contract(
         player, contract, apply_elevator=use_elevator, elevator_target=elevator_target
     )
 
-    # Check if player can afford the (discounted) rate costs
+    # Check if player can afford the (discounted) rate costs.
+    # A requirement of 0 (e.g. discounted by SE) is always affordable
+    # regardless of the player's rate in that resource.
     for req in effective_reqs:
-        if player.rate(req.resource) < req.amount:
+        if req.amount > 0 and player.rate(req.resource) < req.amount:
             return None
 
     # Compute costs from ledger before spending rates (uses discounted reqs)
@@ -1143,14 +1094,9 @@ def execute_contract(
         player.credit += leftover
     player.contracts_fulfilled += 1
 
-    # Burn the contract-icon card or the two discards, depending on path.
+    # Burn the contract-icon card (Launch Pad doesn't consume a card).
     if use_launch_pad:
         pass  # no card consumed — Launch Pad is the free icon
-    elif use_discard:
-        # Pop indices in descending order so the second pop doesn't shift
-        # the first.
-        for idx in sorted(discard_card_indices, reverse=True):
-            state.deck.discard.append(player.hand.pop(idx))
     else:
         state.deck.discard.append(player.hand.pop(card_idx))
 
@@ -1471,13 +1417,22 @@ def effective_contract_requirements(
         return list(contract.requirements)
     if not contract.requirements:
         return []
-    # Pick which req to discount.
+    # Pick which req to discount. If elevator_target is specified (human),
+    # use that. Otherwise discount the largest requirement (saves the
+    # most rate).
     target_idx = 0
     if elevator_target:
         for i, req in enumerate(contract.requirements):
             if req.resource.value == elevator_target:
                 target_idx = i
                 break
+    else:
+        # AI: discount the largest requirement
+        best_amount = -1
+        for i, req in enumerate(contract.requirements):
+            if req.amount > best_amount:
+                best_amount = req.amount
+                target_idx = i
     out: list[ResourceAmount] = []
     for i, req in enumerate(contract.requirements):
         if i == target_idx:
@@ -1998,17 +1953,17 @@ def _get_patent_base_values() -> dict[str, int]:
 
 
 def _default_ai_bid(state: "GameState", player: Player, patent: Card) -> int:
-    """Time-aware bid for a patent auction.
+    """Bid on a patent auction using regression-learned values.
 
-    Uses the time-adjusted learned value from CardValues.csv (base +
-    early/mid/late bonus based on current game progress). Falls back
-    to Patents.csv AI_Value, then rate-based heuristic.
+    Uses the time-adjusted value from CardValues.csv (early/mid phase
+    based on game progress). Adds noise (±$10 in $5 increments) to
+    keep games varied. Falls back to Patents.csv AI_Value, then
+    rate-based heuristic.
 
-    Players with non-positive net cash pass (bid $0).
+    The AI is willing to go into debt for valuable patents — the bid
+    is based on the patent's value, not available cash. Debt interest
+    is cheap ($1 per $10) relative to patent value.
     """
-    available = player.money - player.debt
-    if available <= 0:
-        return 0
     # Time-adjusted value from regression
     from my_project.strategies import card_value_now
     base_value = int(card_value_now(patent.building, state))
@@ -2016,16 +1971,16 @@ def _default_ai_bid(state: "GameState", player: Player, patent: Card) -> int:
         base_value = _get_patent_base_values().get(patent.building, 0)
     if base_value <= 0:
         base_value = sum(ra.amount for ra in patent.rates if ra.amount > 0) * 8
-    # Randomize ±$5
-    jitter = random.choice([-5, 0, 0, 5, 5, 10])
-    target = base_value + jitter
-    # Clamp to half available cash and a reasonable ceiling
-    cash_cap = available // 2
-    target = max(5, min(target, cash_cap, 50))
+    if base_value <= 0:
+        return 0
+    # Bid 50-85% of value — the AI wants a return on the debt it takes on.
+    # Each AI rolls independently so bids differ even for the same patent.
+    fraction = random.uniform(0.50, 0.85)
+    target = base_value * fraction
+    # Add per-player jitter so low-value patents don't all round the same
+    target += random.uniform(-10, 10)
     # Round to $5 increments
-    bid = (target // 5) * 5
-    if bid == 0 and available >= 5:
-        bid = 5
+    bid = max(5, (round(target / 5) * 5))
     return bid
 
 
@@ -2220,7 +2175,7 @@ def swap_pool_card(state: GameState, player: Player, hand_idx: int, pool_idx: in
 def _execute_action(state: GameState, player: Player, action: Action) -> ActionRecord | None:
     """Execute a single action. Returns ActionRecord or None on failure."""
     if action.action_type == ActionType.BUILD and action.build_cards:
-        return execute_build(state, player, action.build_cards, action.discard_cards)
+        return execute_build(state, player, action.build_cards)
 
     elif action.action_type == ActionType.SELL and action.sell_card >= 0:
         return execute_sell(
@@ -2240,7 +2195,6 @@ def _execute_action(state: GameState, player: Player, action: Action) -> ActionR
             player,
             action.contract_card,
             action.contract_idx,
-            discard_card_indices=action.discard_card_indices,
             use_elevator=action.use_elevator,
             use_launch_pad=action.use_launch_pad,
             elevator_target=action.elevator_target or None,
@@ -2249,19 +2203,170 @@ def _execute_action(state: GameState, player: Player, action: Action) -> ActionR
     return None
 
 
-def _rate_ongoing_value(resource: Resource, state: GameState) -> float:
-    """Estimate the ongoing value of +1 rate of a resource for the rest
-    of the game. PWR earns/costs at power bills; non-PWR costs at
-    futures settlements. Uses remaining event counts × current price."""
+def _expected_price(resource: Resource, state: GameState) -> float:
+    """Estimate the average price of a resource over remaining events.
+
+    Projects market drift from all players' net rates (positive rates
+    push price down from selling, negative rates push up from buying).
+    Returns the average between current and projected price.
+    """
+    if not state.players:
+        return float(state.market.price(resource))
+
     remaining = state.remaining_events()
-    price = state.market.price(resource)
-    end_events = remaining.get(EventType.END_ROUND, 0) + remaining.get(EventType.END_GAME, 0)
+
+    # For PWR, use PWR_ADJUST events; for others, use sell/settlement events
     if resource == Resource.PWR:
-        bills = remaining.get(EventType.POWER_BILL, 0) + end_events
-        return price * bills
+        num_adjusts = remaining.get(EventType.PWR_ADJUST, 0)
+        avg_rate = sum(p.rate(resource) for p in state.players) / len(state.players)
+        expected_shift = -avg_rate * num_adjusts
     else:
-        settlements = remaining.get(EventType.FUTURES_SETTLEMENT, 0) + end_events
-        return price * settlements
+        # Non-PWR: selling pushes price down, futures buying pushes up.
+        # Net effect over remaining player turns.
+        total_events = sum(remaining.values())
+        player_turns = total_events / len(state.players)
+        avg_rate = sum(p.rate(resource) for p in state.players) / len(state.players)
+        # Positive avg rate = net selling → price drops
+        expected_shift = -avg_rate * player_turns
+
+    current_pos = state.market.positions[resource]
+    projected_pos = max(0, min(
+        current_pos + expected_shift, len(PRICE_TRACK) - 1,
+    ))
+    avg_pos = int(round((current_pos + projected_pos) / 2))
+    avg_pos = max(0, min(avg_pos, len(PRICE_TRACK) - 1))
+    return float(PRICE_TRACK[avg_pos])
+
+
+def _expected_sell_events(
+    resource: Resource, state: GameState, player: Player,
+) -> float:
+    """Expected number of sell events for this resource over remaining game.
+
+    Computed from:
+    - Remaining player turns (from event deck)
+    - Fraction of remaining deck cards that can sell THIS resource
+    - Visible cards per turn (hand + pool, pool swaps are free)
+    - AP budget cap
+
+    Does NOT include Teleportation free sells (valued separately as
+    a patent effect to avoid double-counting).
+    """
+    remaining = state.remaining_events()
+    total_events = sum(remaining.values())
+    player_turns = total_events / max(len(state.players), 1)
+
+    # Sell fraction from actual remaining deck cards for THIS resource
+    deck_remaining = state.deck.cards
+    if not deck_remaining:
+        return 0.0
+    sell_fraction = sum(
+        1 for c in deck_remaining
+        if c.can_sell and resource in c.can_sell
+    ) / len(deck_remaining)
+    if sell_fraction <= 0:
+        return 0.0
+
+    # Visible cards per turn = actual hand + actual pool
+    visible_cards = len(player.hand) + len(state.pool)
+    if _player_owns_patent(player, "Thinking Machines"):
+        visible_cards += 1
+
+    # P(at least 1 matching sell card in visible cards)
+    sell_prob = 1.0 - (1.0 - sell_fraction) ** visible_cards
+
+    # Cap by AP budget
+    sells_per_turn = min(sell_prob, float(MAX_CARDS_PER_TURN))
+
+    return player_turns * sells_per_turn
+
+
+def _sell_rank_discount(
+    resource: Resource, state: GameState, player: Player,
+) -> float:
+    """Discount factor based on how this resource ranks among the
+    player's sellable rates. Best gets 1.0, 2nd gets 0.5, 3rd 0.33, etc.
+
+    The player has limited AP per turn, so they prioritize selling
+    their most valuable resources first. Lower-ranked resources get
+    fewer sell turns.
+    """
+    sellable = sorted(
+        [r for r in Resource if r != Resource.PWR and player.rate(r) > 0],
+        key=lambda r: player.rate(r) * state.market.price(r),
+        reverse=True,
+    )
+    for rank, r in enumerate(sellable):
+        if r == resource:
+            return 1.0 / (rank + 1)
+    return 0.0
+
+
+def _rate_ongoing_value(
+    resource: Resource, state: GameState, player: Player | None = None,
+) -> float:
+    """Value of +1 rate of a resource for the rest of the game.
+
+    PWR: earns automatically at power bills → avg_price × bills.
+    Non-PWR with player: max of sell income vs futures cost, plus
+        patent synergies (Water Engine, OC conversion) and contract
+        proximity bonus.
+    Non-PWR without player: futures cost only.
+    """
+    remaining = state.remaining_events()
+
+    if resource == Resource.PWR:
+        bills = (
+            remaining.get(EventType.POWER_BILL, 0)
+            + remaining.get(EventType.END_GAME, 0)
+        )
+        avg_price = _expected_price(resource, state)
+        return avg_price * bills
+
+    # Non-PWR: max of sell income vs futures cost
+    sell_value = 0.0
+    if player and player.rate(resource) > 0:
+        sell_events = _expected_sell_events(resource, state, player)
+        discount = _sell_rank_discount(resource, state, player)
+        avg_price = _expected_price(resource, state)
+        sell_value = avg_price * sell_events * discount
+
+    end_events = (
+        remaining.get(EventType.END_ROUND, 0)
+        + remaining.get(EventType.END_GAME, 0)
+    )
+    settlements = remaining.get(EventType.FUTURES_SETTLEMENT, 0) + end_events
+    futures_value = state.market.price(resource) * settlements
+
+    base = max(sell_value, futures_value)
+
+    # Patent synergies and contract bonus (only when player is known)
+    if player:
+        # Water Engine: +1 H2O can become +2 PWR
+        if resource == Resource.H2O and _player_owns_patent(player, "Water Engine"):
+            pwr_value = _rate_ongoing_value(Resource.PWR, state, player) * 2
+            base = max(base, pwr_value)
+
+        # OC: any positive non-PWR rate can become +1 of something better
+        if (
+            resource != Resource.PWR
+            and _count_buildings(player, "Optimization Center") > 0
+        ):
+            pwr_cost = _rate_ongoing_value(Resource.PWR, state, player)
+            best_other = max(
+                (_rate_ongoing_value(r, state)  # no player → avoids recursion
+                 for r in Resource if r != Resource.PWR and r != resource),
+                default=0,
+            )
+            converted = best_other - pwr_cost
+            if converted > base:
+                base = converted
+
+        # Contract proximity bonus
+        from my_project.strategies import _contract_proximity_bonus
+        base += _contract_proximity_bonus(resource, state, player)
+
+    return base
 
 
 def _execute_free_actions(state: GameState, player: Player) -> list[str]:
@@ -2280,12 +2385,12 @@ def _execute_free_actions(state: GameState, player: Player) -> list[str]:
     # --- Rate conversion free actions ---
     # Each conversion permanently changes rates. Only fire when the
     # ongoing value of what you GAIN exceeds what you LOSE.
-    pwr_cost = _rate_ongoing_value(Resource.PWR, state)
+    # Evaluated like building a zero-cost card with those rates.
+    pwr_cost = _rate_ongoing_value(Resource.PWR, state, player)
 
     # Optimization Center: -1 PWR, +1 any positive non-PWR rate.
-    # Evaluate like a free building with -1 PWR and +1 target rate:
-    # fire when the expected return of +1 target over remaining events
-    # exceeds the loss of -1 PWR.
+    # OC target selection uses _rate_ongoing_value which includes
+    # sell income, patent synergies, and contract proximity.
     if (
         _count_buildings(player, "Optimization Center") > 0
         and not player.has_used_optimization_center_this_turn
@@ -2295,9 +2400,9 @@ def _execute_free_actions(state: GameState, player: Player) -> list[str]:
             if r != Resource.PWR and player.rate(r) > 0
         ]
         if candidates:
-            best = max(candidates, key=lambda r: _rate_ongoing_value(r, state))
-            gain = _rate_ongoing_value(best, state)
-            loss = _rate_ongoing_value(Resource.PWR, state)
+            best = max(candidates, key=lambda r: _rate_ongoing_value(r, state, player))
+            gain = _rate_ongoing_value(best, state, player)
+            loss = _rate_ongoing_value(Resource.PWR, state, player)
             if gain > loss:
                 player.rates[Resource.PWR] = player.rate(Resource.PWR) - 1
                 player.rates[best] = player.rate(best) + 1
@@ -2312,8 +2417,8 @@ def _execute_free_actions(state: GameState, player: Player) -> list[str]:
         and not player.has_used_water_engine_this_turn
         and player.rate(Resource.H2O) >= 1
     ):
-        gain = 2 * _rate_ongoing_value(Resource.PWR, state)
-        loss = _rate_ongoing_value(Resource.H2O, state)
+        gain = 2 * _rate_ongoing_value(Resource.PWR, state, player)
+        loss = _rate_ongoing_value(Resource.H2O, state, player)
         if gain > loss:
             player.rates[Resource.H2O] = player.rate(Resource.H2O) - 1
             player.rates[Resource.PWR] = player.rate(Resource.PWR) + 2

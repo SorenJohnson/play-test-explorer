@@ -75,7 +75,7 @@ class TestBuildCardCounting:
             p.rates[r] = 0
         p.money = 200
         p.hand = [_build_card("Solo", rates=[(Resource.PWR, 1)])]
-        record = execute_build(state, p, build_indices=[0], discard_indices=[])
+        record = execute_build(state, p, build_indices=[0])
         assert record is not None
         assert p.cards_spent_this_turn == 1
         assert p.cards_remaining() == 1
@@ -91,44 +91,10 @@ class TestBuildCardCounting:
             _build_card("A", rates=[(Resource.PWR, 1)]),
             _build_card("B", rates=[(Resource.PWR, 1)]),
         ]
-        record = execute_build(state, p, build_indices=[0, 1], discard_indices=[])
+        record = execute_build(state, p, build_indices=[0, 1])
         assert record is not None
         assert p.cards_spent_this_turn == 2
         assert p.cards_remaining() == 0
-
-    def test_build_with_discard_counts_all_cards(self):
-        """A 1-card build + 1 discard for deficit = 2 cards spent."""
-        cards, contracts = _load()
-        state = GameState.create(cards, contracts, num_players=2)
-        p = state.players[0]
-        for r in Resource:
-            p.rates[r] = 0
-        p.money = 200
-        p.hand = [
-            _build_card("Costly", costs=[(Resource.FE, 3)], rates=[(Resource.PWR, 1)]),
-            _build_card("Fodder", rates=[(Resource.PWR, 1)]),
-        ]
-        record = execute_build(state, p, build_indices=[0], discard_indices=[1])
-        assert record is not None
-        # 1 build card + 1 discard card = 2 cards spent
-        assert p.cards_spent_this_turn == 2
-
-    def test_three_cards_total_rejected(self):
-        """2 build + 1 discard = 3 total — exceeds the 2-card cap."""
-        cards, contracts = _load()
-        state = GameState.create(cards, contracts, num_players=2)
-        p = state.players[0]
-        for r in Resource:
-            p.rates[r] = 0
-        p.money = 200
-        p.hand = [
-            _build_card("A", rates=[(Resource.PWR, 1)]),
-            _build_card("B", rates=[(Resource.PWR, 1)]),
-            _build_card("C", rates=[(Resource.PWR, 1)]),
-        ]
-        record = execute_build(state, p, build_indices=[0, 1], discard_indices=[2])
-        assert record is None
-        assert p.cards_spent_this_turn == 0
 
     def test_build_rejected_after_spending_both_cards(self):
         """After spending 2 cards via a sell + sell, builds are blocked."""
@@ -146,7 +112,7 @@ class TestBuildCardCounting:
         execute_sell(state, p, card_idx=0)  # indices shift after first pop
         assert p.cards_spent_this_turn == 2
         # Now try to build — rejected
-        record = execute_build(state, p, build_indices=[0], discard_indices=[])
+        record = execute_build(state, p, build_indices=[0])
         assert record is None
 
 
@@ -198,47 +164,6 @@ class TestContractCardCounting:
         p.cards_spent_this_turn = 2
         record = execute_contract(state, p, card_idx=0, contract_idx=0)
         assert record is None
-
-    def test_discard_2_path_spends_2(self):
-        state, p = self._setup()
-        c1 = _build_card("Junk1")
-        c2 = _build_card("Junk2")
-        p.hand = [c1, c2]
-        record = execute_contract(
-            state, p, card_idx=-1, contract_idx=0,
-            discard_card_indices=[0, 1],
-        )
-        assert record is not None
-        assert p.cards_spent_this_turn == 2
-        assert c1 in state.deck.discard
-        assert c2 in state.deck.discard
-        assert len(p.hand) == 0
-
-    def test_discard_2_blocked_with_only_1_remaining(self):
-        """If you've already spent 1 card, you can't discard 2 more."""
-        state, p = self._setup()
-        p.hand = [_build_card("A"), _build_card("B")]
-        p.cards_spent_this_turn = 1
-        record = execute_contract(
-            state, p, card_idx=-1, contract_idx=0, discard_card_indices=[0, 1],
-        )
-        assert record is None
-        assert len(p.hand) == 2
-
-    def test_discard_2_requires_exactly_2_indices(self):
-        state, p = self._setup()
-        p.hand = [_build_card("A"), _build_card("B"), _build_card("C")]
-        # 1 index — rejected
-        record = execute_contract(
-            state, p, card_idx=-1, contract_idx=0, discard_card_indices=[0],
-        )
-        assert record is None
-        # Duplicate — rejected
-        record = execute_contract(
-            state, p, card_idx=-1, contract_idx=0, discard_card_indices=[0, 0],
-        )
-        assert record is None
-        assert len(p.hand) == 3
 
     def test_launch_pad_spends_zero(self):
         state, p = self._setup()
@@ -303,7 +228,7 @@ class TestLegalHumanActions:
         assert "cards_remaining" in legal
         assert legal["cards_remaining"] == 2
         assert "max_build_cards" in legal
-        assert "can_contract_via_discard" in legal
+        assert "can_contract" in legal
 
 
 class TestStrategiesUseLaunchPadWithZeroCards:

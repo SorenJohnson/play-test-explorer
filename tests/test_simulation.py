@@ -98,13 +98,21 @@ class TestEventDeck:
         patents_in_r2 = sum(1 for e in round2 if e.type == EventType.PATENT_AUCTION)
         assert patents_in_r2 == 0, f"Expected 0 patent auctions in round 2, got {patents_in_r2}"
 
-    def test_round_2_is_smaller_than_round_1(self):
-        """Round 2 has fewer events because patent auctions are removed."""
+    def test_round_2_converts_patents_to_draws(self):
+        """Round 2 converts patent auctions to draw_building_card events."""
         deck = build_event_deck(3, num_rounds=2)
         end_round_idx = next(i for i, e in enumerate(deck) if e.type == EventType.END_ROUND)
-        r1_size = end_round_idx  # events before END_ROUND sentinel
-        r2_size = len(deck) - end_round_idx - 1  # events after END_ROUND, before END_GAME
-        assert r2_size < r1_size
+        r1 = deck[:end_round_idx]
+        r2 = deck[end_round_idx + 1:-1]  # exclude END_GAME
+        # Round 1 has patent auctions; round 2 should have none
+        r1_patents = sum(1 for e in r1 if e.type == EventType.PATENT_AUCTION)
+        r2_patents = sum(1 for e in r2 if e.type == EventType.PATENT_AUCTION)
+        assert r1_patents > 0
+        assert r2_patents == 0
+        # Round 2 should have more draw_building_card events (converted patents)
+        r2_draws = sum(1 for e in r2 if e.type == EventType.DRAW_BUILDING_CARD)
+        r1_draws = sum(1 for e in r1 if e.type == EventType.DRAW_BUILDING_CARD)
+        assert r2_draws > r1_draws
 
     def test_single_round_has_end_game_only(self):
         """A 1-round deck has END_GAME but no END_ROUND."""
@@ -144,7 +152,7 @@ class TestBuildDeficit:
             rates=[ResourceAmount(Resource.PWR, 2)],
             effect="", can_sell=[], can_fulfill_contract=False,
         )
-        result = compute_build_deficit([card], player, 0, market)
+        result = compute_build_deficit([card], player, market)
         assert result is not None
         deficit, cost = result
         assert len(deficit) == 0
@@ -160,7 +168,7 @@ class TestBuildDeficit:
             rates=[ResourceAmount(Resource.PWR, 2)],
             effect="", can_sell=[], can_fulfill_contract=False,
         )
-        result = compute_build_deficit([card], player, 0, market)
+        result = compute_build_deficit([card], player, market)
         assert result is not None
         deficit, cost = result
         assert deficit[Resource.FE] == 2
@@ -176,24 +184,10 @@ class TestBuildDeficit:
             costs=[ResourceAmount(Resource.FE, 2)],
             rates=[], effect="", can_sell=[], can_fulfill_contract=False,
         )
-        result = compute_build_deficit([card, card], player, 0, market)
+        result = compute_build_deficit([card, card], player, market)
         assert result is not None
         deficit, _ = result
         assert deficit[Resource.FE] == 2  # 4 total - 2 rate = 2
-
-    def test_discard_reduces_deficit(self):
-        player = Player(name="test", money=100)
-        player.rates[Resource.FE] = 0
-        market = Market.create(4)
-        card = Card(
-            alternate="C/SI", slot=1, building="Test",
-            costs=[ResourceAmount(Resource.FE, 3)],
-            rates=[], effect="", can_sell=[], can_fulfill_contract=False,
-        )
-        result_no_disc = compute_build_deficit([card], player, 0, market)
-        result_with_disc = compute_build_deficit([card], player, 2, market)
-        assert result_no_disc is not None and result_with_disc is not None
-        assert result_with_disc[1] < result_no_disc[1]
 
     def test_unaffordable_returns_none(self):
         player = Player(name="test", money=0)
@@ -203,7 +197,7 @@ class TestBuildDeficit:
             costs=[ResourceAmount(Resource.FE, 5)],
             rates=[], effect="", can_sell=[], can_fulfill_contract=False,
         )
-        result = compute_build_deficit([card], player, 0, market)
+        result = compute_build_deficit([card], player, market)
         assert result is None
 
 
@@ -215,7 +209,7 @@ class TestNoBuildDebt:
         # Find a card with costs
         costly_cards = [i for i, c in enumerate(player.hand) if c.costs]
         if costly_cards:
-            result = execute_build(state, player, [costly_cards[0]], [])
+            result = execute_build(state, player, [costly_cards[0]])
             # Should fail (return None) since player has $0
             assert result is None or player.debt == 0
 
