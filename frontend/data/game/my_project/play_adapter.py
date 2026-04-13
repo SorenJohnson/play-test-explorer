@@ -439,7 +439,8 @@ class PlayableGame:
             return {"ok": True, "type": "pass", "detail": "Pass"}
 
         if atype == "build":
-            if player.has_built_this_turn:
+            from my_project.simulation import _player_owns_patent
+            if player.has_built_this_turn and not _player_owns_patent(player, "Matter Replication"):
                 return {"ok": False, "reason": "Already built this turn"}
             build_idx = list(action.get("build_cards") or [])
             if not build_idx:
@@ -572,8 +573,8 @@ class PlayableGame:
             **_nw_snapshot(player),
         }
 
-    def use_nanotechnology(self, seat_idx: int, card_idx: int) -> dict:
-        """Nanotechnology: discard ONE card from your hand, draw ONE back.
+    def use_nanotechnology(self, seat_idx: int, pool_idx: int) -> dict:
+        """Nanotechnology: discard ONE pool card, replace with a deck draw.
         Once per turn."""
         if seat_idx not in self._human_indices:
             return {"ok": False, "reason": "Not a human seat"}
@@ -582,23 +583,23 @@ class PlayableGame:
             return {"ok": False, "reason": "No Nanotechnology"}
         if player.has_used_nanotechnology_this_turn:
             return {"ok": False, "reason": "Already used this turn"}
-        if not player.hand:
-            return {"ok": False, "reason": "Hand is empty"}
-        if card_idx < 0 or card_idx >= len(player.hand):
-            return {"ok": False, "reason": f"Invalid card index: {card_idx}"}
-        # Discard the chosen card and draw one fresh card back.
-        discarded = player.hand.pop(card_idx)
+        if not self.state.pool:
+            return {"ok": False, "reason": "Pool is empty"}
+        if pool_idx < 0 or pool_idx >= len(self.state.pool):
+            return {"ok": False, "reason": f"Invalid pool index: {pool_idx}"}
+        # Discard the chosen pool card and draw a replacement from the deck.
+        discarded = self.state.pool.pop(pool_idx)
         self.state.deck.discard.append(discarded)
         drawn = self.state.deck.draw(1)
-        player.hand.extend(drawn)
+        self.state.pool.extend(drawn)
         player.has_used_nanotechnology_this_turn = True
         new_name = drawn[0].building if drawn else "(deck empty)"
         return {
             "ok": True,
             "type": "patent",
             "detail": (
-                f"Nanotechnology: discarded {discarded.building}, "
-                f"drew {new_name}"
+                f"Nanotechnology: replaced pool card {discarded.building} "
+                f"with {new_name}"
             ),
             **_nw_snapshot(player),
         }
@@ -697,6 +698,11 @@ class PlayableGame:
             for seat_idx_raw, amount in bids.items():
                 seat_idx = int(seat_idx_raw)
                 self.state.pending_bids[seat_idx] = max(0, int(amount))
+        elif kind == "debt_paydown":
+            payments = answers.get("payments", {})
+            for seat_idx_raw, amount in payments.items():
+                seat_idx = int(seat_idx_raw)
+                self.state.pending_debt_paydowns[seat_idx] = max(0, int(amount))
 
         # Resume the suspended event
         if self.human_turn_in_progress:
@@ -1004,9 +1010,11 @@ class PlayableGame:
                 },
             }
         player = self.current_player()
+        from my_project.simulation import _player_owns_patent
         already_built = player.has_built_this_turn
+        has_mr = _player_owns_patent(player, "Matter Replication")
         cr = player.cards_remaining()
-        max_build_cards = 0 if already_built else min(cr, len(player.hand))
+        max_build_cards = 0 if (already_built and not has_mr) else min(cr, len(player.hand))
 
         from my_project.simulation import _count_buildings
 
@@ -1145,7 +1153,7 @@ class PlayableGame:
             "nanotechnology": {
                 "owned": nano_owned,
                 "used": player.has_used_nanotechnology_this_turn,
-                "available": nano_owned and not player.has_used_nanotechnology_this_turn,
+                "available": nano_owned and not player.has_used_nanotechnology_this_turn and bool(self.state.pool),
             },
             "teleportation": {
                 "owned": tele_owned,
@@ -1201,7 +1209,8 @@ class PlayableGame:
         if not self.is_human_turn():
             return {"ok": False, "reason": "Not your turn"}
         player = self.current_player()
-        if player.has_built_this_turn:
+        from my_project.simulation import _player_owns_patent
+        if player.has_built_this_turn and not _player_owns_patent(player, "Matter Replication"):
             return {"ok": False, "reason": "Already built this turn"}
         if not build_indices:
             return {"ok": False, "reason": "No cards selected"}
