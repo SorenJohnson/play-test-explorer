@@ -731,18 +731,17 @@ class TestWaterEngine:
 
 
 class TestNanotechnology:
-    def test_discards_one_and_draws_one(self):
+    def test_replaces_pool_card_with_deck_draw(self):
         game = _make_game_with_human()
         p = game.state.players[0]
         p.buildings_played.append(_patent("Nanotechnology"))
-        n_before = len(p.hand)
-        target = p.hand[1]
+        pool_before = len(game.state.pool)
+        target = game.state.pool[1]
         result = game.use_nanotechnology(0, 1)
         assert result["ok"]
-        # Hand size unchanged: -1 + 1 = same
-        assert len(p.hand) == n_before
-        # The targeted card is gone (or replaced) — the slot now has a new card
-        # The discarded card landed in the discard pile
+        # Pool size unchanged: -1 + 1 = same
+        assert len(game.state.pool) == pool_before
+        # The targeted card landed in the discard pile
         assert target in game.state.deck.discard
         assert p.has_used_nanotechnology_this_turn
 
@@ -754,16 +753,16 @@ class TestNanotechnology:
         result = game.use_nanotechnology(0, 0)
         assert not result["ok"]
 
-    def test_empty_hand_blocked(self):
+    def test_empty_pool_blocked(self):
         game = _make_game_with_human()
         p = game.state.players[0]
         p.buildings_played.append(_patent("Nanotechnology"))
-        p.hand = []
+        game.state.pool = []
         result = game.use_nanotechnology(0, 0)
         assert not result["ok"]
         assert "empty" in result["reason"].lower()
 
-    def test_invalid_card_index_blocked(self):
+    def test_invalid_pool_index_blocked(self):
         game = _make_game_with_human()
         p = game.state.players[0]
         p.buildings_played.append(_patent("Nanotechnology"))

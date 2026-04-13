@@ -1480,21 +1480,22 @@ function renderPatentActions() {
 
   if (pa.nanotechnology?.owned) {
     const status = pa.nanotechnology;
-    // Build a dropdown of hand cards so the user can pick which one to discard.
-    const handOpts = (youPlayer.hand || [])
+    // Build a dropdown of pool cards so the user can pick which one to replace.
+    const pool = currentState.pool || [];
+    const poolOpts = pool
       .map((c, i) => `<option value="${i}">${i + 1}: ${c.building}</option>`)
       .join("");
-    const canUse = status.available && (youPlayer.hand || []).length > 0;
+    const canUse = status.available && pool.length > 0;
     parts.push(`
       <div class="patent-action-row">
-        <strong>Nanotechnology</strong> &mdash; discard 1 card, draw 1 card.
+        <strong>Nanotechnology</strong> &mdash; replace a pool card with a deck draw.
         <select id="pa-nano-card" class="toggle-select" ${canUse ? "" : "disabled"}>
-          ${handOpts || '<option value="">— hand is empty —</option>'}
+          ${poolOpts || '<option value="">— pool is empty —</option>'}
         </select>
         <button id="pa-nanotech-btn" class="action-btn" ${canUse ? "" : "disabled"}>
-          Discard &amp; Draw
+          Replace Pool Card
         </button>
-        ${statusLabel(status, "hand is empty")}
+        ${statusLabel(status, "pool is empty")}
       </div>
     `);
   }
@@ -1559,8 +1560,8 @@ function renderPatentActions() {
         alert("Pick a card to discard first.");
         return;
       }
-      const cardIdx = parseInt(sel.value, 10);
-      const result = game.use_nanotechnology(youIdx, cardIdx)
+      const poolIdx = parseInt(sel.value, 10);
+      const result = game.use_nanotechnology(youIdx, poolIdx)
         .toJs({ dict_converter: Object.fromEntries });
       if (result.ok) {
         logHumanAction(result);

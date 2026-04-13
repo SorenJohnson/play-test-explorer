@@ -573,8 +573,8 @@ class PlayableGame:
             **_nw_snapshot(player),
         }
 
-    def use_nanotechnology(self, seat_idx: int, card_idx: int) -> dict:
-        """Nanotechnology: discard ONE card from your hand, draw ONE back.
+    def use_nanotechnology(self, seat_idx: int, pool_idx: int) -> dict:
+        """Nanotechnology: discard ONE pool card, replace with a deck draw.
         Once per turn."""
         if seat_idx not in self._human_indices:
             return {"ok": False, "reason": "Not a human seat"}
@@ -583,23 +583,23 @@ class PlayableGame:
             return {"ok": False, "reason": "No Nanotechnology"}
         if player.has_used_nanotechnology_this_turn:
             return {"ok": False, "reason": "Already used this turn"}
-        if not player.hand:
-            return {"ok": False, "reason": "Hand is empty"}
-        if card_idx < 0 or card_idx >= len(player.hand):
-            return {"ok": False, "reason": f"Invalid card index: {card_idx}"}
-        # Discard the chosen card and draw one fresh card back.
-        discarded = player.hand.pop(card_idx)
+        if not self.state.pool:
+            return {"ok": False, "reason": "Pool is empty"}
+        if pool_idx < 0 or pool_idx >= len(self.state.pool):
+            return {"ok": False, "reason": f"Invalid pool index: {pool_idx}"}
+        # Discard the chosen pool card and draw a replacement from the deck.
+        discarded = self.state.pool.pop(pool_idx)
         self.state.deck.discard.append(discarded)
         drawn = self.state.deck.draw(1)
-        player.hand.extend(drawn)
+        self.state.pool.extend(drawn)
         player.has_used_nanotechnology_this_turn = True
         new_name = drawn[0].building if drawn else "(deck empty)"
         return {
             "ok": True,
             "type": "patent",
             "detail": (
-                f"Nanotechnology: discarded {discarded.building}, "
-                f"drew {new_name}"
+                f"Nanotechnology: replaced pool card {discarded.building} "
+                f"with {new_name}"
             ),
             **_nw_snapshot(player),
         }
@@ -1153,7 +1153,7 @@ class PlayableGame:
             "nanotechnology": {
                 "owned": nano_owned,
                 "used": player.has_used_nanotechnology_this_turn,
-                "available": nano_owned and not player.has_used_nanotechnology_this_turn,
+                "available": nano_owned and not player.has_used_nanotechnology_this_turn and bool(self.state.pool),
             },
             "teleportation": {
                 "owned": tele_owned,
