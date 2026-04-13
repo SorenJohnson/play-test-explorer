@@ -34,14 +34,6 @@
     </header>
 
     <!-- Strategy overview (compact) -->
-    <section>
-      <h2>Strategy Performance</h2>
-      <div class="chart-container wide" style="min-height:350px">
-        <canvas id="strategy-nw-chart"></canvas>
-      </div>
-    </section>
-
-    <!-- Contract cost box plots -->
     <!-- Market dynamics -->
     <section>
       <h2>Market Dynamics</h2>
@@ -52,14 +44,27 @@
         <strong>Futures Paid</strong> = debt incurred at futures settlements.
         <strong>Net Cash Flow</strong> = $ Sold − ($ Bought + Futures Paid).
       </p>
-      <div class="chart-container wide" style="min-height:400px">
-        <canvas id="market-trajectory-chart"></canvas>
-      </div>
-      <div style="margin:8px 0 0; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-        <button id="market-spread-toggle" class="view-toggle">Show spread</button>
-        <span style="font-size:0.75rem; color:#8b949e;">
-          Overlays a 50-game sample. Click resource names in the legend to focus.
-        </span>
+      <div style="display:grid; grid-template-columns:1fr 280px; gap:12px; align-items:start;">
+        <div class="chart-container wide" style="min-height:400px">
+          <canvas id="market-trajectory-chart"></canvas>
+        </div>
+        <div id="market-legend-panel" style="background:#161b22; border:1px solid #30363d; border-radius:8px; padding:8px; font-size:0.8rem;">
+          <div style="display:flex; gap:6px; margin-bottom:8px; align-items:center;">
+            <button id="market-spread-toggle" class="view-toggle" style="font-size:0.7rem; padding:3px 8px;">Spread</button>
+            <span style="font-size:0.7rem; color:#8b949e;">Click row to toggle</span>
+          </div>
+          <table id="market-legend-table" style="width:100%; border-collapse:collapse;">
+            <thead>
+              <tr style="font-size:0.65rem; color:#8b949e; text-transform:uppercase;">
+                <th style="text-align:left; padding:2px 4px;">Res</th>
+                <th style="text-align:right; padding:2px 4px;">Avg</th>
+                <th style="text-align:right; padding:2px 4px;">Std</th>
+                <th style="text-align:right; padding:2px 4px;">End</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </div>
       <div style="margin:16px 0 12px; display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
         <label style="font-size:0.8rem;">View:</label>
@@ -206,6 +211,13 @@
           </thead>
           <tbody></tbody>
         </table>
+      </div>
+    </section>
+
+    <section>
+      <h2>Strategy Performance</h2>
+      <div class="chart-container wide" style="min-height:350px">
+        <canvas id="strategy-nw-chart"></canvas>
       </div>
     </section>
 

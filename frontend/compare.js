@@ -778,6 +778,51 @@ function wireMarketSpreadToggle() {
   };
 }
 
+function buildMarketLegendTable(resources, stats) {
+  const tbody = document.querySelector("#market-legend-table tbody");
+  if (!tbody) return;
+  const chart = chartRegistry["market-trajectory-chart"];
+
+  tbody.innerHTML = resources.map((r) => {
+    const color = RESOURCE_COLORS[r] || "#888";
+    const s = stats[r] || {};
+    return `
+      <tr class="legend-row" data-resource="${r}" style="cursor:pointer; border-bottom:1px solid #21262d;">
+        <td style="padding:4px;">
+          <span style="display:inline-block; width:16px; height:2px; background:${color}; vertical-align:middle; margin-right:4px;"></span>
+          <span style="color:${color}; font-weight:600;">${r}</span>
+        </td>
+        <td style="text-align:right; padding:4px; color:#c9d1d9;">$${s.avg}</td>
+        <td style="text-align:right; padding:4px; color:#8b949e;">$${s.std}</td>
+        <td style="text-align:right; padding:4px; color:#c9d1d9;">$${s.end}</td>
+      </tr>
+    `;
+  }).join("");
+
+  // Wire row clicks to toggle chart visibility
+  tbody.querySelectorAll(".legend-row").forEach((row) => {
+    row.addEventListener("click", () => {
+      if (!chart) return;
+      const resource = row.dataset.resource;
+      const avgIdx = chart.data.datasets.findIndex(
+        (d) => d._kind === "avg" && d._resource === resource
+      );
+      if (avgIdx < 0) return;
+      const willHide = chart.isDatasetVisible(avgIdx);
+      chart.setDatasetVisibility(avgIdx, !willHide);
+      // Also toggle spread bands for this resource
+      chart.data.datasets.forEach((d, i) => {
+        if (d._kind === "spread" && d._resource === resource) {
+          chart.setDatasetVisibility(i, !willHide && mdShowSpread);
+        }
+      });
+      chart.update();
+      // Dim the row visually
+      row.style.opacity = willHide ? "0.35" : "1";
+    });
+  });
+}
+
 function renderMarketDynamics() {
   const md = getSource("market_dynamics");
   if (!md) return;
@@ -860,32 +905,30 @@ function renderMarketDynamics() {
     _kind: "avg",
   }));
 
+  // Compute per-resource stats for the legend table
+  const marketStats = {};
+  for (const r of resources) {
+    const traj = allResourcesData[r].avg_trajectory || [];
+    if (traj.length > 0) {
+      const avg = traj.reduce((a, b) => a + b, 0) / traj.length;
+      const variance = traj.reduce((a, v) => a + (v - avg) ** 2, 0) / traj.length;
+      marketStats[r] = {
+        avg: avg.toFixed(1),
+        std: Math.sqrt(variance).toFixed(1),
+        end: allResourcesData[r].avg_final_price?.toFixed(1) || traj[traj.length - 1]?.toFixed(1) || "?",
+      };
+    } else {
+      marketStats[r] = { avg: "?", std: "?", end: "?" };
+    }
+  }
+
   chartRegistry["market-trajectory-chart"] = new Chart(document.getElementById("market-trajectory-chart"), {
     type: "line",
     data: { labels, datasets },
     options: {
       responsive: true,
       plugins: {
-        legend: {
-          labels: {
-            color: "#8b949e",
-            font: { size: 11 },
-            filter: (item, chartData) => chartData.datasets[item.datasetIndex]._kind === "avg",
-          },
-          onClick: (e, legendItem, legend) => {
-            const chart = legend.chart;
-            const avgIdx = legendItem.datasetIndex;
-            const resource = chart.data.datasets[avgIdx]._resource;
-            const willHide = chart.isDatasetVisible(avgIdx);
-            chart.setDatasetVisibility(avgIdx, !willHide);
-            chart.data.datasets.forEach((d, i) => {
-              if (d._kind === "spread" && d._resource === resource) {
-                chart.setDatasetVisibility(i, !willHide && mdShowSpread);
-              }
-            });
-            chart.update();
-          },
-        },
+        legend: { display: false },  // using custom legend table
       },
       scales: {
         x: {
@@ -897,12 +940,13 @@ function renderMarketDynamics() {
           title: { display: true, text: "Avg Market Price ($)", color: "#8b949e" },
           ticks: { color: "#8b949e" },
           grid: { color: "#21262d" },
-          min: 0,
-          suggestedMax: 10,
         },
       },
     },
   });
+
+  // Build custom legend table with stats
+  buildMarketLegendTable(resources, marketStats);
 
   wireMarketSpreadToggle();
 
