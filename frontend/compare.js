@@ -637,14 +637,31 @@ function extractTrajectoriesFromGames(games) {
   return out;
 }
 
-// Push faint per-game datasets onto an existing chart. Each dataset is tagged
-// _kind="spread" + _resource so the legend filter and per-resource toggle work.
+// Compute per-turn mean and standard deviation from trajectories.
+function computeBandStats(trajectories) {
+  const maxLen = Math.max(0, ...trajectories.map((t) => t.length));
+  const mean = [];
+  const std = [];
+  for (let i = 0; i < maxLen; i++) {
+    const vals = trajectories.filter((t) => i < t.length).map((t) => t[i]);
+    if (vals.length === 0) { mean.push(0); std.push(0); continue; }
+    const m = vals.reduce((a, b) => a + b, 0) / vals.length;
+    const variance = vals.reduce((a, v) => a + (v - m) ** 2, 0) / vals.length;
+    mean.push(m);
+    std.push(Math.sqrt(variance));
+  }
+  return { mean, std };
+}
+
+// Build confidence band datasets (1σ at 30% opacity, 2σ at 10% opacity).
+// Uses Chart.js fill plugin: each band is a pair of upper/lower datasets
+// with fill targeting each other.
 function buildSpreadDatasets(chart) {
   const games = getGamesForCurrentScenario();
   const sampled = sampleArray(games, SPREAD_SAMPLE_SIZE);
   const byResource = extractTrajectoriesFromGames(sampled);
 
-  // Extend labels if any sampled trajectory is longer than the current avg-derived axis.
+  // Extend labels if needed
   const maxTrajLen = Math.max(
     0,
     ...Object.values(byResource).flatMap((trajs) => trajs.map((t) => t.length))
@@ -656,25 +673,69 @@ function buildSpreadDatasets(chart) {
   }
 
   for (const [r, trajs] of Object.entries(byResource)) {
+    if (trajs.length < 3) continue; // need enough games for meaningful stats
     const color = RESOURCE_COLORS[r] || "#888";
     const avgIdx = chart.data.datasets.findIndex(
       (d) => d._kind === "avg" && d._resource === r
     );
     const avgVisible = avgIdx >= 0 ? chart.isDatasetVisible(avgIdx) : true;
-    for (const traj of trajs) {
-      chart.data.datasets.push({
-        label: `${r}__spread`,
-        data: traj,
-        borderColor: hexToRgba(color, 0.12),
-        backgroundColor: "transparent",
-        borderWidth: 1,
-        tension: 0.2,
-        pointRadius: 0,
-        hidden: !avgVisible,
-        _resource: r,
-        _kind: "spread",
-      });
-    }
+    const { mean, std } = computeBandStats(trajs);
+
+    // 2σ band (95% coverage, very faint)
+    const upper2 = mean.map((m, i) => Math.min(m + 2 * std[i], 15));
+    const lower2 = mean.map((m, i) => Math.max(m - 2 * std[i], 0));
+    chart.data.datasets.push({
+      label: `${r}__band2_upper`,
+      data: upper2,
+      borderWidth: 0,
+      pointRadius: 0,
+      tension: 0.3,
+      fill: "+1",
+      backgroundColor: hexToRgba(color, 0.08),
+      hidden: !avgVisible,
+      _resource: r,
+      _kind: "spread",
+    });
+    chart.data.datasets.push({
+      label: `${r}__band2_lower`,
+      data: lower2,
+      borderWidth: 0,
+      pointRadius: 0,
+      tension: 0.3,
+      fill: false,
+      backgroundColor: "transparent",
+      hidden: !avgVisible,
+      _resource: r,
+      _kind: "spread",
+    });
+
+    // 1σ band (68% coverage, more visible)
+    const upper1 = mean.map((m, i) => Math.min(m + std[i], 15));
+    const lower1 = mean.map((m, i) => Math.max(m - std[i], 0));
+    chart.data.datasets.push({
+      label: `${r}__band1_upper`,
+      data: upper1,
+      borderWidth: 0,
+      pointRadius: 0,
+      tension: 0.3,
+      fill: "+1",
+      backgroundColor: hexToRgba(color, 0.20),
+      hidden: !avgVisible,
+      _resource: r,
+      _kind: "spread",
+    });
+    chart.data.datasets.push({
+      label: `${r}__band1_lower`,
+      data: lower1,
+      borderWidth: 0,
+      pointRadius: 0,
+      tension: 0.3,
+      fill: false,
+      backgroundColor: "transparent",
+      hidden: !avgVisible,
+      _resource: r,
+      _kind: "spread",
+    });
   }
 }
 
@@ -832,6 +893,8 @@ function renderMarketDynamics() {
           title: { display: true, text: "Avg Market Price ($)", color: "#8b949e" },
           ticks: { color: "#8b949e" },
           grid: { color: "#21262d" },
+          min: 0,
+          suggestedMax: 10,
         },
       },
     },
