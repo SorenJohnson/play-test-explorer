@@ -86,8 +86,7 @@ class TestEventDeck:
         # Count only real turns (not redraw chain events)
         player_turns = {}
         for rec in state.history:
-            if rec.action == "(redraw chain)":
-                continue
+
             player_turns[rec.player] = player_turns.get(rec.player, 0) + 1
         counts = list(player_turns.values())
         assert max(counts) - min(counts) <= 1, f"Turn imbalance > 1: {counts}"
@@ -226,8 +225,7 @@ class TestFixedTurns:
         state = run_game(cards, contracts, greedy_strategy, num_players=3, max_turns=10)
         player_turns = {}
         for rec in state.history:
-            if rec.action == "(redraw chain)":
-                continue
+
             player_turns[rec.player] = player_turns.get(rec.player, 0) + 1
         counts = list(player_turns.values())
         assert max(counts) - min(counts) <= 1

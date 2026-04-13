@@ -2623,26 +2623,21 @@ def run_game(
         state.event_idx += 1
         run_turn(state, player, player_strategies[player_idx], event)
 
-        # Chain redraw events: execute event only (no actions)
+        # Chain redraw events: execute event only (no actions).
+        # Merge chained event details into the parent turn's history record.
         while event.redraws and state.event_idx < len(state.event_deck):
             event = state.event_deck[state.event_idx]
             state.event_idx += 1
-            event_detail = execute_event(state, event, player)
-            # Append a history record for the chained event
-            state.history.append(TurnRecord(
-                turn=state.turn,
-                player=player.name,
-                action="(redraw chain)",
-                detail="",
-                event=event_detail,
-                money_before=player.money,
-                money_after=player.money,
-                debt=player.debt,
-                contracts_fulfilled=player.contracts_fulfilled,
-                market_snapshot=state.market.snapshot(),
-                rates_snapshot={r.value: player.rate(r) for r in Resource},
-                actions=[],
-            ))
+            chain_detail = execute_event(state, event, player)
+            # Append to the last history record's event text
+            if state.history:
+                last = state.history[-1]
+                last.event = f"{last.event} | {chain_detail}"
+                last.money_after = player.money
+                last.debt = player.debt
+                last.contracts_fulfilled = player.contracts_fulfilled
+                last.market_snapshot = state.market.snapshot()
+                last.rates_snapshot = {r.value: player.rate(r) for r in Resource}
 
         player_turn += 1
 
