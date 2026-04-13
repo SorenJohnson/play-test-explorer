@@ -583,6 +583,7 @@ const CORP_STARTING_RATES = {
   "Seneca Development": { PWR: 2, FE: 1, FOOD: -1 },
   "Yoshimi Robotics": { PWR: -2, FE: 2 },
   "Reclamation Inc.": { PWR: 1, SI: 1, C: 1, H2O: -1 },
+  "New Meridians": { PWR: -1, FE: 1, O2: 1, FOOD: 1 },
 };
 
 // Persisted across scenario changes so user selections survive filter swaps.
