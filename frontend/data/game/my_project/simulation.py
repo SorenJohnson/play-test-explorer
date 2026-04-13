@@ -1689,22 +1689,45 @@ def do_futures_trading(state: GameState) -> None:
     total negative rates across all players for each non-PWR resource.
     """
     _record_event_line(state, kind="header", text="Futures Trading")
+
+    # Track per-player contributions to negative rates
+    player_contributions: list[dict] = []
     total_negatives: dict[Resource, int] = {
         r: 0 for r in Resource if r != Resource.PWR
     }
     for player in state.players:
+        contrib: dict[str, int] = {}
         for r in total_negatives:
             rate = player.rate(r)
             if rate < 0:
                 total_negatives[r] += abs(rate)
+                contrib[r.value] = rate
+        if contrib:
+            player_contributions.append({"name": player.name, "rates": contrib})
 
+    # Apply market adjustments and track price changes
+    market_changes: list[dict] = []
     for r, total in total_negatives.items():
         if total > 0:
+            price_before = state.market.price(r)
             state.market.adjust(r, total)
+            price_after = state.market.price(r)
+            market_changes.append({
+                "resource": r.value,
+                "units": total,
+                "price_before": price_before,
+                "price_after": price_after,
+            })
             _record_event_line(
                 state, kind="note",
-                text=f"{r.value} market +{total} (negative rates)",
+                text=f"{r.value} +{total} units → ${price_before}→${price_after}",
             )
+
+    # Store structured data for the frontend
+    state._futures_trading_data = {
+        "market_changes": market_changes,
+        "player_contributions": player_contributions,
+    }
 
 
 def do_futures_settlement(state: GameState) -> None:
@@ -1860,13 +1883,26 @@ def do_draw_building_card(state: GameState) -> str:
     new_card = drawn[0]
     evicted_name = None
     if state.pool:
-        # FIFO: evict the oldest pool slot back to the discard pile.
         evicted = state.pool.pop(0)
         state.deck.discard.append(evicted)
         evicted_name = evicted.building
     state.pool.append(new_card)
     evict_text = f" (replaced {evicted_name})" if evicted_name else ""
     _record_event_line(state, kind="header", text=f"Drew {new_card.building} into pool{evict_text}")
+    # Store structured data
+    state._draw_card_data = {
+        "card_drawn": new_card.building,
+        "card_replaced": evicted_name,
+        "rates": [{
+            "resource": ra.resource.value,
+            "amount": ra.amount,
+        } for ra in new_card.rates],
+        "costs": [{
+            "resource": ra.resource.value,
+            "amount": ra.amount,
+        } for ra in new_card.costs],
+        "effect": new_card.effect or None,
+    }
     return f"draw building card → {new_card.building}{evict_text}"
 
 
@@ -2181,35 +2217,43 @@ def _build_event_structured(
 ) -> dict:
     """Build a structured dict describing what happened in an event.
 
-    Called right after the event fires but before PWR adjust / redraws.
-    The frontend uses this instead of parsing the detail string.
+    Pulls from data stored on the state by the do_* functions, so
+    no string parsing is needed.
     """
-    import re
     d: dict = {"event_type": event_type.value}
 
     if event_type == EventType.DRAW_BUILDING_CARD:
-        m = re.search(r"→\s*(.+?)(?:\s*\(replaced (.+?)\))?$", detail)
-        d["card_drawn"] = m.group(1).strip() if m else ""
-        d["card_replaced"] = m.group(2).strip() if m and m.group(2) else None
+        draw_data = getattr(state, "_draw_card_data", None) or {}
+        d["card_drawn"] = draw_data.get("card_drawn", "")
+        d["card_replaced"] = draw_data.get("card_replaced")
+        d["card_rates"] = draw_data.get("rates", [])
+        d["card_costs"] = draw_data.get("costs", [])
+        d["card_effect"] = draw_data.get("effect")
 
     elif event_type == EventType.NEWS_BULLETIN:
+        import re
         m = re.match(r"NEWS:\s*(.+?)(?:\s*\((.+)\))?$", detail)
         d["news_name"] = m.group(1).strip() if m else detail
         d["news_effects"] = m.group(2).strip() if m and m.group(2) else ""
 
     elif event_type == EventType.PATENT_AUCTION:
+        import re
         m = re.match(r"patent auction:\s*(.+)", detail, re.I)
         d["auction_result"] = m.group(1).strip() if m else detail
 
-    elif event_type == EventType.END_ROUND:
-        d["sub_events"] = ["Power Bill", "Futures Settlement"]
-    elif event_type == EventType.END_GAME:
+    elif event_type == EventType.FUTURES_TRADING:
+        ft_data = getattr(state, "_futures_trading_data", None) or {}
+        d["market_changes"] = ft_data.get("market_changes", [])
+        d["player_contributions"] = ft_data.get("player_contributions", [])
+
+    elif event_type in (EventType.END_ROUND, EventType.END_GAME):
         d["sub_events"] = ["Power Bill", "Futures Settlement"]
 
     # Player snapshots after the event
     d["player_snapshots"] = [
         {"name": p.name, "money": p.money, "debt": p.debt,
-         "net_worth": p.net_worth()}
+         "credit": p.credit, "net_worth": p.net_worth(),
+         "rates": {r.value: v for r, v in p.rates.items()}}
         for p in state.players
     ]
 

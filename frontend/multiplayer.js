@@ -876,8 +876,8 @@ function renderGame() {
 const PRICE_TRACK = [1,1,1,2,2,2,3,3,4,4,5,5,6,7,8,9,10];
 let expandedMarketResource = null;
 
-function stepsToChange(pos, direction) {
-  // Count steps in direction until price changes (or hits boundary)
+function stepsAtSamePrice(pos, direction) {
+  // Count remaining positions in direction with the SAME price (not including current)
   const curPrice = PRICE_TRACK[pos];
   let steps = 0;
   let p = pos + direction;
@@ -885,8 +885,6 @@ function stepsToChange(pos, direction) {
     steps++;
     p += direction;
   }
-  // One more step to actually change
-  if (p >= 0 && p < PRICE_TRACK.length) steps++;
   return steps;
 }
 
@@ -897,10 +895,10 @@ function renderMarket(s) {
   grid.innerHTML = RESOURCE_ORDER.map(r => {
     const price = s.market[r] || 0;
     const pos = positions[r] ?? 9;
-    const stepsDown = stepsToChange(pos, -1);
-    const stepsUp = stepsToChange(pos, 1);
-    const dotsLeft = stepsDown > 0 ? Array(Math.min(stepsDown, 4)).fill('<span class="step-dot"></span>').join("") : "";
-    const dotsRight = stepsUp > 0 ? Array(Math.min(stepsUp, 4)).fill('<span class="step-dot"></span>').join("") : "";
+    const stepsDown = stepsAtSamePrice(pos, -1);
+    const stepsUp = stepsAtSamePrice(pos, 1);
+    const dotsLeft = stepsDown > 0 ? Array(stepsDown).fill('<span class="step-dot"></span>').join("") : "";
+    const dotsRight = stepsUp > 0 ? Array(stepsUp).fill('<span class="step-dot"></span>').join("") : "";
     const isExpanded = expandedMarketResource === r;
     return `
       <div class="market-cell ${isExpanded ? 'expanded' : ''}" data-res="${r}">
@@ -1032,17 +1030,18 @@ function renderContracts(s) {
 function renderPool(s) {
   const grid = document.getElementById("mp-pool-grid");
   const myTurn = isMyTurn(s);
+  const canSwap = myTurn && s.can_pool_swap && selectedCards.size === 1;
   grid.innerHTML = (s.pool || []).map((c, i) => {
-    const pending = pendingPoolSwap === i ? "selected" : "";
-    return `<div class="pool-card ${pending}" data-pi="${i}">${renderCard(c)}</div>`;
+    const swappable = canSwap ? "swap-target" : "";
+    return `<div class="pool-card ${swappable}" data-pi="${i}">${renderCard(c)}</div>`;
   }).join("");
-  if (myTurn && s.can_pool_swap) {
+  if (canSwap) {
     grid.querySelectorAll(".pool-card").forEach(el => {
       el.addEventListener("click", () => {
         const pi = parseInt(el.dataset.pi);
-        pendingPoolSwap = pendingPoolSwap === pi ? -1 : pi;
-        renderPool(s);
-        renderHand(s);
+        const hi = Array.from(selectedCards)[0];
+        executePoolSwap(hi, pi);
+        clearSelection();
       });
     });
   }
@@ -1062,22 +1061,17 @@ function renderHand(s) {
 
   // Affordability hints from legal actions
   const affordableSet = new Set(currentLegal?.affordable_single_builds || []);
-  const swapping = pendingPoolSwap >= 0;
   const cr = currentLegal?.cards_remaining ?? 2;
 
   grid.innerHTML = hand.map((c, i) => {
     const sel = selectedCards.has(i) ? "selected" : "";
     const dis = !myTurn ? "disabled" : "";
-    const swapHint = swapping ? "swap-target" : "";
-    const unaffordable = myTurn && !swapping && !affordableSet.has(i) && !selectedCards.has(i) ? "unaffordable" : "";
-    return `<div class="hand-card ${sel} ${dis} ${swapHint} ${unaffordable}" data-hi="${i}">${renderCard(c)}</div>`;
+    return `<div class="hand-card ${sel} ${dis}" data-hi="${i}">${renderCard(c)}</div>`;
   }).join("");
 
   // Build cost estimate
   const estimateEl = document.getElementById("mp-build-estimate");
-  if (swapping) {
-    estimateEl.textContent = "Click a hand card to swap with the selected pool card";
-  } else if (selectedCards.size > 0 && myTurn && role === "host") {
+  if (selectedCards.size > 0 && myTurn && role === "host") {
     try {
       const indices = [...selectedCards];
       const est = game.estimate_build_cost(pyodide.toPy(indices)).toJs({dict_converter: Object.fromEntries});
@@ -1096,14 +1090,10 @@ function renderHand(s) {
     grid.querySelectorAll(".hand-card:not(.disabled)").forEach(el => {
       el.addEventListener("click", () => {
         const hi = parseInt(el.dataset.hi);
-        if (pendingPoolSwap >= 0) {
-          executePoolSwap(hi, pendingPoolSwap);
-          pendingPoolSwap = -1;
-          return;
-        }
         if (selectedCards.has(hi)) selectedCards.delete(hi);
         else if (selectedCards.size < cr) selectedCards.add(hi);
         renderHand(s);
+        renderPool(s);
         renderActions(s);
       });
     });
@@ -1464,7 +1454,6 @@ function addEventFeedEntries(_eventDetail, eventLines, playerSnaps, eventData) {
 }
 
 function buildEventTitle(ed) {
-  // Build a clean title from structured event data
   if (!ed) return "";
   const type = ed.event_type || "";
   let title = "";
@@ -1481,18 +1470,25 @@ function buildEventTitle(ed) {
       break;
     case "power_bill": title = "Power Bill"; break;
     case "debt_collection": title = "Debt Collection"; break;
-    case "futures_trading": title = "Futures Trading"; break;
+    case "futures_trading": {
+      const changes = (ed.market_changes || []).map(c =>
+        `${c.resource} $${c.price_before}\u2192$${c.price_after}`
+      ).join(", ");
+      title = `Futures Trading${changes ? ": " + changes : ""}`;
+      break;
+    }
     case "futures_settlement": title = "Futures Settlement"; break;
     case "end_round": title = "END OF ROUND"; break;
     case "end_game": title = "END GAME"; break;
     default: title = type.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
   }
 
-  // PWR adjust arrow prefix
+  // PWR adjust: colored +/- next to lightning icon
   if (ed.pwr_adjust) {
     const rate = ed.pwr_adjust.rate;
-    const arrow = rate >= 0 ? `\u2191${rate}` : `\u2193${Math.abs(rate)}`;
-    title = `${arrow} ${title}`;
+    const cls = rate >= 0 ? "pwr-up" : "pwr-down";
+    const sign = rate >= 0 ? "+" : "";
+    title += ` <span class="${cls}">${sign}${rate} PWR</span>`;
   }
 
   return title;
@@ -1602,10 +1598,57 @@ function renderFeedEntry(e) {
   }
 
   if (e.kind === "event") {
-    const eventTitle = buildEventTitle(e.eventData || {});
+    const ed = e.eventData || {};
+    const eventTitle = buildEventTitle(ed);
 
+    // Build rich expandable detail from structured data
     let detailHtml = "";
-    if (e.event_lines && e.event_lines.length > 0) {
+
+    // Draw building card: show card details + what was replaced
+    if (ed.event_type === "draw_building_card") {
+      detailHtml += `<div class="feed-line-note">Drew <strong>${ed.card_drawn || "?"}</strong> into pool</div>`;
+      if (ed.card_replaced) detailHtml += `<div class="feed-line-note">Replaced: ${ed.card_replaced}</div>`;
+      if (ed.card_rates?.length) {
+        const rates = ed.card_rates.map(r => `<span class="${r.amount > 0 ? 'rate-pos' : 'rate-neg'}">${r.amount > 0 ? '+' : ''}${r.amount} ${r.resource}</span>`).join(" ");
+        detailHtml += `<div class="feed-line-note">Rates: ${rates}</div>`;
+      }
+      if (ed.card_costs?.length) {
+        detailHtml += `<div class="feed-line-note">Costs: ${ed.card_costs.map(c => c.amount + " " + c.resource).join(", ")}</div>`;
+      }
+      if (ed.card_effect) detailHtml += `<div class="feed-line-note" style="color:#a371f7">${ed.card_effect}</div>`;
+    }
+
+    // Futures trading: show who caused the market moves
+    if (ed.event_type === "futures_trading") {
+      if (ed.market_changes?.length) {
+        detailHtml += `<div class="feed-line-header">Market Changes</div>`;
+        for (const c of ed.market_changes) {
+          const color = RESOURCE_COLORS[c.resource] || "#8b949e";
+          detailHtml += `<div class="feed-line-note"><span style="color:${color}">${c.resource}</span>: +${c.units} units → $${c.price_before} → $${c.price_after}</div>`;
+        }
+      }
+      if (ed.player_contributions?.length) {
+        detailHtml += `<div class="feed-line-header">Caused By</div>`;
+        for (const p of ed.player_contributions) {
+          const rates = Object.entries(p.rates).map(([r, v]) => `<span class="rate-neg">${v} ${r}</span>`).join(" ");
+          detailHtml += `<div class="feed-line-player"><span class="feed-line-name">${p.name}</span> ${rates}</div>`;
+        }
+      }
+    }
+
+    // News: show effects
+    if (ed.event_type === "news_bulletin" && ed.news_effects) {
+      detailHtml += `<div class="feed-line-note">${ed.news_effects}</div>`;
+    }
+
+    // PWR adjust detail
+    if (ed.pwr_adjust) {
+      const pa = ed.pwr_adjust;
+      detailHtml += `<div class="feed-line-note">PWR price: $${pa.price_before} → $${pa.price_after}</div>`;
+    }
+
+    // Event lines from the backend (power bill per-player details, etc.)
+    if (e.event_lines?.length > 0) {
       detailHtml += e.event_lines.map(line => {
         if (line.kind === "header") return `<div class="feed-line-header">${line.text}</div>`;
         if (line.kind === "note") return `<div class="feed-line-note">${fmtMoney(line.text)}</div>`;
@@ -1616,25 +1659,21 @@ function renderFeedEntry(e) {
         return `<div class="feed-line-note">${fmtMoney(line.text || '')}</div>`;
       }).join("");
     }
-    if (e.player_snapshots && e.player_snapshots.length > 0) {
+
+    // Player snapshots
+    if (e.player_snapshots?.length > 0) {
       detailHtml += `<div class="feed-impact">${e.player_snapshots.map(p => {
         const cls = p.net_worth >= 0 ? "positive" : "negative";
         return `<span class="feed-nw-chip ${cls}">${p.name} $${p.net_worth}</span>`;
       }).join("")}</div>`;
     }
 
-    if (detailHtml) {
-      return `
-        <details class="feed-group event">
-          <summary class="feed-group-title"><span class="feed-event-icon">&#9889;</span> ${fmtMoney(eventTitle)} <span class="feed-time">${e.time}</span></summary>
-          <div class="feed-group-body">${detailHtml}</div>
-        </details>
-      `;
-    }
+    // Always expandable for events
     return `
-      <div class="feed-group event">
-        <div class="feed-group-title"><span class="feed-event-icon">&#9889;</span> ${fmtMoney(eventTitle)} <span class="feed-time">${e.time}</span></div>
-      </div>
+      <details class="feed-group event">
+        <summary class="feed-group-title"><span class="feed-event-icon">&#9889;</span> ${eventTitle} <span class="feed-time">${e.time}</span></summary>
+        <div class="feed-group-body">${detailHtml || '<div class="feed-line-note">No additional details</div>'}</div>
+      </details>
     `;
   }
 
@@ -1846,18 +1885,35 @@ let humanTurnActions = [];
 
 function sendAction(action) {
   if (role === "host") {
+    const beforeSnap = currentState?.players[mySeat];
+    const playerBefore = beforeSnap ? {money: beforeSnap.money, debt: beforeSnap.debt, net_worth: beforeSnap.net_worth, rates: Object.assign({}, beforeSnap.rates)} : null;
+
     const result = game.apply_human_action(pyodide.toPy(action)).toJs({dict_converter: Object.fromEntries});
     if (result.ok) {
       humanTurnActions.push(result);
+      hostRefreshState();
+      const afterSnap = currentState?.players[mySeat];
+      const playerAfter = afterSnap ? {money: afterSnap.money, debt: afterSnap.debt, net_worth: afterSnap.net_worth, rates: Object.assign({}, afterSnap.rates)} : null;
       const playerName = currentState?.players[mySeat]?.name || "You";
       const title = formatActionSummary(result);
-      // Show individual action in feed (concise)
-      addFeedEntry({kind: "action", text: `${playerName}: ${title}`});
-      broadcastFeed({kind: "action", text: `${playerName}: ${title}`});
+      addFeedEntry({
+        kind: "turn",
+        text: `${playerName}: ${title}`,
+        actions: [result],
+        playerBefore: playerBefore,
+        playerAfter: playerAfter,
+      });
+      broadcastFeed({
+        kind: "turn",
+        text: `${playerName}: ${title}`,
+        actions: [result],
+        playerBefore: playerBefore,
+        playerAfter: playerAfter,
+      });
     } else {
       alert(result.reason || "Action failed");
+      hostRefreshState();
     }
-    hostRefreshState();
   } else {
     hostConn.send(JSON.stringify({type: "action", action}));
   }
