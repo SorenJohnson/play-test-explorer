@@ -535,15 +535,7 @@ function hostAdvanceStep() {
     }
 
     if (eventDetail) {
-      const eventEntry = {
-        kind: "event",
-        text: eventDetail,
-        event_lines: eventLines,
-        player_snapshots: playerSnaps,
-      };
-      addFeedEntry(eventEntry);
-      broadcastFeed(eventEntry);
-      showEventBanner(formatEventTitle(eventDetail));
+      addEventFeedEntries(eventDetail, eventLines, playerSnaps);
       hostRefreshState();
     }
 
@@ -590,8 +582,12 @@ function handleRemoteEndTurn(peerId) {
   if (seatIdx === undefined || currentState.current_player_index !== seatIdx) return;
 
   const result = game.end_human_turn().toJs({dict_converter: Object.fromEntries});
-  addFeedEntry({kind: "event", text: result.detail || "Turn ended", event: result.detail});
-  broadcastFeed({kind: "event", text: result.detail || "Turn ended"});
+  const snap = game.state_dict().toJs({dict_converter: Object.fromEntries});
+  addEventFeedEntries(
+    result.detail || "Turn ended",
+    (snap.last_event_lines || []).map(l => Object.assign({}, l)),
+    snap.players.map(p => ({name: p.name, money: p.money, debt: p.debt, net_worth: p.net_worth})),
+  );
 
   if (result.awaiting_prompt) {
     hostRefreshState();
@@ -703,15 +699,11 @@ function tryResolvePrompt() {
   pendingPromptAnswers = {};
   const result = game.resolve_pending_prompt(pyodide.toPy(merged)).toJs({dict_converter: Object.fromEntries});
   const snapAfter = game.state_dict().toJs({dict_converter: Object.fromEntries});
-  const promptEntry = {
-    kind: "event",
-    text: result.detail || "Prompt resolved",
-    event_lines: (snapAfter.last_event_lines || []).map(l => Object.assign({}, l)),
-    player_snapshots: snapAfter.players.map(p => ({name: p.name, money: p.money, debt: p.debt, net_worth: p.net_worth})),
-  };
-  addFeedEntry(promptEntry);
-  broadcastFeed(promptEntry);
-  showEventBanner(formatEventTitle(result.detail || "Event"));
+  addEventFeedEntries(
+    result.detail || "Prompt resolved",
+    (snapAfter.last_event_lines || []).map(l => Object.assign({}, l)),
+    snapAfter.players.map(p => ({name: p.name, money: p.money, debt: p.debt, net_worth: p.net_worth})),
+  );
 
   if (result.awaiting_prompt) {
     hostRefreshState();
@@ -1371,6 +1363,30 @@ function broadcastFeed(entry) {
   Object.values(connections).forEach(c => c.send(msg));
 }
 
+function addEventFeedEntries(eventDetail, eventLines, playerSnaps) {
+  // Split on " | " only — these are independent events (redraw chains).
+  // " + " stays together (PWR adjust is a modifier of its parent event).
+  if (!eventDetail) return;
+  const parts = eventDetail.split(/\s*\|\s*/);
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    const title = formatEventTitle(part);
+    if (!title) continue;
+    const isLast = i === parts.length - 1;
+    const entry = {
+      kind: "event",
+      text: part,
+      // Attach detailed lines/snapshots to the last entry only
+      event_lines: isLast ? eventLines : [],
+      player_snapshots: isLast ? playerSnaps : [],
+    };
+    addFeedEntry(entry);
+    broadcastFeed(entry);
+  }
+  const lastTitle = formatEventTitle(parts[parts.length - 1]);
+  if (lastTitle) showEventBanner(lastTitle);
+}
+
 function fmtMoney(text) {
   if (!text) return "";
   return text.replace(/\$(\d+)/g, '<span class="feed-money">$$$1</span>');
@@ -1704,15 +1720,11 @@ function wireGameButtons() {
     if (role === "host") {
       const result = game.end_human_turn().toJs({dict_converter: Object.fromEntries});
       const snapAfter = game.state_dict().toJs({dict_converter: Object.fromEntries});
-      const turnEntry = {
-        kind: "event",
-        text: result.detail || "Turn ended",
-        event_lines: (result.lines || snapAfter.last_event_lines || []).map(l => Object.assign({}, l)),
-        player_snapshots: snapAfter.players.map(p => ({name: p.name, money: p.money, debt: p.debt, net_worth: p.net_worth})),
-      };
-      addFeedEntry(turnEntry);
-      broadcastFeed(turnEntry);
-      showEventBanner(formatEventTitle(result.detail || "Event"));
+      addEventFeedEntries(
+        result.detail || "Turn ended",
+        (result.lines || snapAfter.last_event_lines || []).map(l => Object.assign({}, l)),
+        snapAfter.players.map(p => ({name: p.name, money: p.money, debt: p.debt, net_worth: p.net_worth})),
+      );
       if (result.awaiting_prompt) {
         hostRefreshState();
         handleHostPrompt(currentState.pending_prompt);
