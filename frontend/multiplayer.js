@@ -335,9 +335,16 @@ async function startGame() {
   document.getElementById("lobby-screen").style.display = "none";
   document.getElementById("loading-screen").style.display = "flex";
 
-  // Load Pyodide
+  // Load Pyodide script dynamically (only host needs it)
   const prog = document.getElementById("load-progress");
   prog.textContent = "Loading Pyodide runtime...";
+  await new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://cdn.jsdelivr.net/pyodide/v0.27.0/full/pyodide.js";
+    script.onload = resolve;
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
   pyodide = await loadPyodide();
 
   // Fetch and mount Python sources
