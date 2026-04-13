@@ -969,6 +969,11 @@ class PlayableGame:
             # Terminal event results (END_ROUND / END_GAME) that fired as
             # cleanup. The frontend should log these and then clear them.
             "terminal_events": list(self.pending_terminal_results),
+            # Last event lines for structured feed display
+            "last_event_lines": [
+                {k: v for k, v in line.items()}
+                for line in s.last_event_lines
+            ],
         }
 
     def state_for_seat(self, seat_idx: int) -> dict:

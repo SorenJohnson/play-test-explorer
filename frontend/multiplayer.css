@@ -367,6 +367,63 @@ body {
   text-align: center;
 }
 
+/* ===== Player Panel ===== */
+.player-panel-inner { padding: 8px 0; }
+.player-panel-header {
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  background: #161b22;
+  border-radius: 6px;
+}
+.player-panel-name { font-size: 1rem; font-weight: 600; margin-bottom: 4px; }
+.player-panel-money { font-size: 0.85rem; color: #c9d1d9; }
+.player-panel-rates { margin-bottom: 8px; }
+.rates-grid {
+  display: grid;
+  grid-template-columns: repeat(9, 1fr);
+  gap: 4px;
+}
+.rate-chip {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  padding: 4px 2px;
+  text-align: center;
+  font-size: 0.75rem;
+}
+.rate-chip .rate-res { display: block; font-size: 0.6rem; }
+.rate-chip .rate-val { display: block; font-weight: bold; }
+.rate-chip.rate-pos { border-color: #238636; }
+.rate-chip.rate-neg { border-color: #da3633; }
+.rate-chip.rate-zero { opacity: 0.4; }
+.player-panel-buildings { font-size: 0.8rem; }
+.built-special { font-size: 0.75rem; margin: 2px 0; }
+
+/* AP display */
+.ap-full { color: #3fb950; }
+.ap-half { color: #d29922; }
+.ap-empty { color: #8b949e; }
+
+/* Unaffordable hand cards */
+.hand-card.unaffordable { opacity: 0.45; }
+
+/* ===== Feed Detail Styles ===== */
+details.feed-entry { cursor: pointer; }
+details.feed-entry summary { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+details.feed-entry summary .feed-time { flex-shrink: 0; }
+.feed-detail-body {
+  margin-top: 6px;
+  padding: 6px 8px;
+  background: #0d1117;
+  border-radius: 4px;
+  font-size: 0.75rem;
+}
+.feed-line-header { color: #58a6ff; font-weight: 600; margin: 4px 0 2px; }
+.feed-line-note { color: #8b949e; margin: 1px 0; }
+.feed-line-player { color: #c9d1d9; margin: 1px 0; }
+.feed-event-label { color: #f0883e; font-size: 0.75rem; }
+.feed-detail-text { color: #8b949e; margin-bottom: 4px; }
+
 /* ===== Patent Actions ===== */
 .patent-action-row {
   display: flex;

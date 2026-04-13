@@ -476,8 +476,20 @@ function hostAdvanceGame() {
 
     // AI turn
     const result = game.step_ai_turn().toJs({dict_converter: Object.fromEntries});
-    addFeedEntry({kind: "turn", text: `${result.player || 'AI'}: ${result.detail || 'took actions'}`, event: result.event_detail});
-    broadcastFeed({kind: "turn", text: `${result.player || 'AI'}: ${result.detail || 'took actions'}`, event: result.event_detail});
+    // Capture event lines for structured feed
+    const stateSnap = game.state_dict().toJs({dict_converter: Object.fromEntries});
+    const eventLines = (stateSnap.last_event_lines || []).map(l => ({...l}));
+    const playerSnaps = stateSnap.players.map(p => ({name: p.name, money: p.money, debt: p.debt, net_worth: p.net_worth}));
+    const aiEntry = {
+      kind: "turn",
+      text: `${result.player || 'AI'}: ${result.detail || 'took actions'}`,
+      event: result.event_detail,
+      event_lines: eventLines,
+      player_snapshots: playerSnaps,
+      details: result.free_actions ? `Free actions: ${result.free_actions}` : null,
+    };
+    addFeedEntry(aiEntry);
+    broadcastFeed(aiEntry);
 
     if (result.awaiting_prompt) {
       hostRefreshState();
@@ -638,8 +650,15 @@ function tryResolvePrompt() {
 
   pendingPromptAnswers = {};
   const result = game.resolve_pending_prompt(pyodide.toPy(merged)).toJs({dict_converter: Object.fromEntries});
-  addFeedEntry({kind: "event", text: result.detail || "Prompt resolved"});
-  broadcastFeed({kind: "event", text: result.detail || "Prompt resolved"});
+  const snapAfter = game.state_dict().toJs({dict_converter: Object.fromEntries});
+  const promptEntry = {
+    kind: "event",
+    text: result.detail || "Prompt resolved",
+    event_lines: (snapAfter.last_event_lines || []).map(l => ({...l})),
+    player_snapshots: snapAfter.players.map(p => ({name: p.name, money: p.money, debt: p.debt, net_worth: p.net_worth})),
+  };
+  addFeedEntry(promptEntry);
+  broadcastFeed(promptEntry);
 
   if (result.awaiting_prompt) {
     hostRefreshState();
@@ -648,6 +667,14 @@ function tryResolvePrompt() {
   }
   hostRefreshState();
   hostAdvanceGame();
+}
+
+// ===== Selection helpers =====
+
+function clearSelection() {
+  selectedCards.clear();
+  selectedContract = -1;
+  pendingPoolSwap = -1;
 }
 
 // ===== Rendering =====
@@ -663,10 +690,27 @@ function renderGame() {
   const myTurn = isMyTurn(s);
 
   // Status bar
-  document.getElementById("mp-round").textContent = s.round || "-";
+  const roundStr = s.num_rounds > 1 ? `${s.round} (Rd ${s.deck_round || 1}/${s.num_rounds})` : `${s.round || "-"}`;
+  document.getElementById("mp-round").textContent = roundStr;
   document.getElementById("mp-turn").textContent = `${(s.turn_index || 0) + 1} / ${s.total_turns || "?"}`;
-  document.getElementById("mp-active").textContent = s.players[s.current_player_index]?.name || "-";
+  const activeP = s.players[s.current_player_index];
+  const activeLabel = activeP ? `${activeP.name}${s.current_player_index === mySeat ? " (You)" : ""}` : "-";
+  document.getElementById("mp-active").textContent = activeLabel;
   document.getElementById("mp-cards-left").textContent = s.cards_in_deck ?? "-";
+
+  // Cards remaining / AP display
+  const apEl = document.getElementById("mp-ap-display");
+  if (apEl) {
+    if (myTurn && currentLegal) {
+      const cr = currentLegal.cards_remaining ?? 2;
+      const builtMsg = s.human_already_built ? " (built)" : "";
+      apEl.textContent = `Cards: ${cr}/2${builtMsg}`;
+      apEl.className = "status-value " + (cr >= 2 ? "ap-full" : cr >= 1 ? "ap-half" : "ap-empty");
+    } else {
+      apEl.textContent = "-";
+      apEl.className = "status-value";
+    }
+  }
 
   const banner = document.getElementById("turn-banner");
   banner.style.display = myTurn ? "block" : "none";
@@ -676,8 +720,8 @@ function renderGame() {
   renderPool(s);
   renderHand(s);
   renderActions(s);
+  renderPlayerPanel(s);
   renderOpponents(s);
-  renderYourStats(s);
 }
 
 function renderMarket(s) {
@@ -785,41 +829,58 @@ function renderHand(s) {
 
   if (hand.length === 0) {
     grid.innerHTML = `<div style="color:#8b949e;padding:12px">${myTurn ? 'Hand is empty' : 'Cards hidden until your turn'}</div>`;
+    document.getElementById("mp-build-estimate").textContent = "";
     return;
   }
 
+  // Affordability hints from legal actions
+  const affordableSet = new Set(currentLegal?.affordable_single_builds || []);
   const swapping = pendingPoolSwap >= 0;
+  const cr = currentLegal?.cards_remaining ?? 2;
+
   grid.innerHTML = hand.map((c, i) => {
     const sel = selectedCards.has(i) ? "selected" : "";
     const dis = !myTurn ? "disabled" : "";
     const swapHint = swapping ? "swap-target" : "";
+    const unaffordable = myTurn && !swapping && !affordableSet.has(i) && !selectedCards.has(i) ? "unaffordable" : "";
     return `
-      <div class="hand-card ${sel} ${dis} ${swapHint}" data-hi="${i}">
+      <div class="hand-card ${sel} ${dis} ${swapHint} ${unaffordable}" data-hi="${i}">
         <div class="card-name">${c.building}</div>
         ${renderCardDetails(c)}
       </div>
     `;
   }).join("");
 
+  // Build cost estimate
+  const estimateEl = document.getElementById("mp-build-estimate");
   if (swapping) {
-    document.getElementById("mp-build-estimate").textContent = "Click a hand card to swap with the selected pool card";
+    estimateEl.textContent = "Click a hand card to swap with the selected pool card";
+  } else if (selectedCards.size > 0 && myTurn && role === "host") {
+    try {
+      const indices = [...selectedCards];
+      const est = game.estimate_build_cost(pyodide.toPy(indices)).toJs({dict_converter: Object.fromEntries});
+      if (est.ok) {
+        const defParts = Object.entries(est.deficit || {}).map(([r, a]) => `${a} ${r}`).join(", ");
+        estimateEl.innerHTML = `Build cost: <strong>$${est.cost}</strong>${defParts ? ` (buy ${defParts})` : ' (free)'}`;
+      } else {
+        estimateEl.innerHTML = `<span style="color:#f85149">${est.reason || 'Cannot build'}</span>`;
+      }
+    } catch { estimateEl.textContent = ""; }
   } else {
-    document.getElementById("mp-build-estimate").textContent = "";
+    estimateEl.textContent = "";
   }
 
   if (myTurn) {
-    grid.querySelectorAll(".hand-card").forEach(el => {
+    grid.querySelectorAll(".hand-card:not(.disabled)").forEach(el => {
       el.addEventListener("click", () => {
         const hi = parseInt(el.dataset.hi);
-        // Pool swap mode
         if (pendingPoolSwap >= 0) {
           executePoolSwap(hi, pendingPoolSwap);
           pendingPoolSwap = -1;
           return;
         }
-        // Normal card selection
         if (selectedCards.has(hi)) selectedCards.delete(hi);
-        else selectedCards.add(hi);
+        else if (selectedCards.size < cr) selectedCards.add(hi);
         renderHand(s);
         renderActions(s);
       });
@@ -852,13 +913,53 @@ function renderCardDetails(c) {
 
 function renderActions(s) {
   const myTurn = isMyTurn(s);
+  const cr = currentLegal?.cards_remaining ?? 0;
+  const alreadyBuilt = s.human_already_built;
   const buildBtn = document.getElementById("mp-build-btn");
   const sellBtn = document.getElementById("mp-sell-btn");
   const contractBtn = document.getElementById("mp-contract-btn");
   const passBtn = document.getElementById("mp-pass-btn");
 
-  buildBtn.disabled = !myTurn || selectedCards.size === 0;
-  sellBtn.disabled = !myTurn || selectedCards.size !== 1;
+  const canBuild = myTurn && selectedCards.size > 0 && (!alreadyBuilt || currentLegal?.matter_replication);
+  buildBtn.disabled = !canBuild;
+  if (alreadyBuilt && !currentLegal?.matter_replication) {
+    buildBtn.title = "Already built this turn";
+  } else {
+    buildBtn.title = "";
+  }
+
+  // Sell: need exactly 1 card selected and it must be sellable
+  const sellCard = selectedCards.size === 1 ? s.players[mySeat]?.hand?.[...selectedCards][0] : null;
+  const canSell = myTurn && sellCard?.can_sell?.length > 0 && cr >= 1;
+  sellBtn.disabled = !canSell;
+
+  // Sell resource picker (show when card has multiple sell options)
+  let sellPickerHtml = "";
+  if (canSell && sellCard.can_sell.length > 1) {
+    const me = s.players[mySeat];
+    const opts = sellCard.can_sell.map(r => {
+      const rate = me.rates?.[r] || 0;
+      const rev = rate > 0 ? rate * (s.market[r] || 0) : 0;
+      return `<option value="${r}">${r} (rate ${rate}, $${rev})</option>`;
+    }).join("");
+    sellPickerHtml = `<select id="mp-sell-resource" class="toggle-select">${opts}</select>`;
+  }
+  // Hacker Array picker
+  let hackerHtml = "";
+  if (canSell && currentLegal?.hacker_array_status?.owned) {
+    const resOpts = RESOURCE_ORDER.filter(r => r !== "PWR").map(r => `<option value="${r}">${r}</option>`).join("");
+    hackerHtml = `
+      <span style="font-size:0.8rem;color:#8b949e">HA target:</span>
+      <select id="mp-hacker-target" class="toggle-select">${resOpts}</select>
+      <select id="mp-hacker-dir" class="toggle-select">
+        <option value="1">+3 (raise)</option>
+        <option value="-1">-3 (lower)</option>
+      </select>
+    `;
+  }
+  const sellExtras = document.getElementById("mp-sell-extras");
+  if (sellExtras) sellExtras.innerHTML = sellPickerHtml + hackerHtml;
+
   contractBtn.disabled = !myTurn || selectedContract < 0;
   passBtn.disabled = !myTurn;
 
@@ -1007,6 +1108,53 @@ function renderSpecialToggles(s) {
   host.innerHTML = parts.join("");
 }
 
+function renderPlayerPanel(s) {
+  const me = s.players[mySeat];
+  if (!me) return;
+  const panel = document.getElementById("mp-your-stats");
+  const color = PLAYER_COLORS[mySeat % PLAYER_COLORS.length];
+
+  // Rates grid (all 9 resources, styled)
+  const ratesGrid = RESOURCE_ORDER.map(r => {
+    const v = me.rates?.[r] || 0;
+    const cls = v > 0 ? "rate-pos" : v < 0 ? "rate-neg" : "rate-zero";
+    return `<div class="rate-chip ${cls}"><span class="rate-res" style="color:${RESOURCE_COLORS[r]}">${r}</span><span class="rate-val">${v > 0 ? "+" : ""}${v}</span></div>`;
+  }).join("");
+
+  // Buildings (split into regular + specials + patents)
+  const builtCards = me.built_cards || [];
+  const buildings = builtCards.filter(c => !c.effect && c.slot !== 5).map(c => c.building);
+  const specials = builtCards.filter(c => c.effect && c.slot !== 5);
+  const patents = builtCards.filter(c => c.slot === 5);
+
+  const buildingList = buildings.length ? buildings.join(", ") : "none";
+  const specialList = specials.map(c => `<div class="built-special"><strong>${c.building}</strong> <span style="color:#a371f7">${c.effect}</span></div>`).join("");
+  const patentList = patents.map(c => `<div class="built-special"><strong>${c.building}</strong> <span style="color:#d2a8ff">${c.effect}</span></div>`).join("");
+
+  panel.innerHTML = `
+    <div class="player-panel-inner">
+      <div class="player-panel-header" style="border-left:3px solid ${color}">
+        <div class="player-panel-name" style="color:${color}">${me.name}${me.corporation ? ` — ${me.corporation}` : ''}</div>
+        <div class="player-panel-money">
+          <span>Cash: <strong>$${me.money}</strong></span>
+          ${me.debt > 0 ? `<span style="color:#f85149"> | Debt: <strong>$${me.debt}</strong></span>` : ''}
+          ${me.credit > 0 ? `<span style="color:#d29922"> | Credit: <strong>$${me.credit}</strong></span>` : ''}
+          <span style="color:${me.net_worth >= 0 ? '#3fb950' : '#f85149'}"> | NW: <strong>$${me.net_worth}</strong></span>
+          <span> | Contracts: <strong>${me.contracts_fulfilled || 0}</strong></span>
+        </div>
+      </div>
+      <div class="player-panel-rates">
+        <div class="rates-grid">${ratesGrid}</div>
+      </div>
+      <div class="player-panel-buildings">
+        <div style="font-size:0.75rem;color:#8b949e">Buildings: ${buildingList}</div>
+        ${specialList ? `<div style="margin-top:4px">${specialList}</div>` : ''}
+        ${patentList ? `<div style="margin-top:4px">${patentList}</div>` : ''}
+      </div>
+    </div>
+  `;
+}
+
 function renderOpponents(s) {
   const strip = document.getElementById("mp-opponents");
   strip.innerHTML = s.players.filter((_, i) => i !== mySeat).map((p, oi) => {
@@ -1056,6 +1204,17 @@ function addFeedEntry(entry) {
   renderFeed();
 }
 
+function addStructuredFeedEntry(entry) {
+  // Rich entry with event_lines and player_snapshots from state
+  entry.time = new Date().toLocaleTimeString();
+  // Capture event lines from the state if available
+  if (role === "host" && currentState?.last_event_lines) {
+    entry.event_lines = [...currentState.last_event_lines];
+  }
+  feedEntries.push(entry);
+  renderFeed();
+}
+
 function broadcastFeed(entry) {
   entry.time = new Date().toLocaleTimeString();
   const msg = JSON.stringify({type: "feed", entry});
@@ -1065,13 +1224,56 @@ function broadcastFeed(entry) {
 function renderFeed() {
   const container = document.getElementById("feed-entries");
   if (!container) return;
-  container.innerHTML = feedEntries.slice(-50).reverse().map(e => `
-    <div class="feed-entry ${e.kind || ''}">
-      <div class="feed-time">${e.time || ''}</div>
-      <div class="feed-text">${e.text || ''}</div>
-      ${e.event ? `<div class="feed-text" style="color:#f0883e">${e.event}</div>` : ''}
-    </div>
-  `).join("");
+  const html = feedEntries.slice(-80).reverse().map(e => {
+    const kindClass = e.kind || '';
+    const hasDetails = e.details || e.event_lines || e.player_snapshots;
+
+    // Build detail content for expandable section
+    let detailHtml = "";
+    if (e.details) {
+      detailHtml += `<div class="feed-detail-text">${e.details}</div>`;
+    }
+    if (e.event_lines && e.event_lines.length > 0) {
+      detailHtml += e.event_lines.map(line => {
+        if (line.kind === "header") return `<div class="feed-line-header">${line.text}</div>`;
+        if (line.kind === "note") return `<div class="feed-line-note">${line.text}</div>`;
+        if (line.kind === "player") {
+          const nw = line.net_worth_after !== undefined ? ` (NW: $${line.net_worth_after})` : '';
+          return `<div class="feed-line-player">${line.name || ''}: ${line.text}${nw}</div>`;
+        }
+        return `<div class="feed-line-note">${line.text || ''}</div>`;
+      }).join("");
+    }
+    if (e.player_snapshots && e.player_snapshots.length > 0) {
+      detailHtml += `<div class="feed-impact">${e.player_snapshots.map(p => {
+        const cls = p.net_worth >= 0 ? "positive" : "negative";
+        return `<span class="feed-nw-chip ${cls}">${p.name}: $${p.net_worth}</span>`;
+      }).join("")}</div>`;
+    }
+
+    if (hasDetails) {
+      return `
+        <details class="feed-entry ${kindClass}">
+          <summary>
+            <span class="feed-time">${e.time || ''}</span>
+            <span class="feed-text">${e.text || ''}</span>
+            ${e.event ? `<span class="feed-event-label">${e.event}</span>` : ''}
+          </summary>
+          <div class="feed-detail-body">${detailHtml}</div>
+        </details>
+      `;
+    }
+    return `
+      <div class="feed-entry ${kindClass}">
+        <div class="feed-time">${e.time || ''}</div>
+        <div class="feed-text">${e.text || ''}</div>
+        ${e.event ? `<div class="feed-event-label">${e.event}</div>` : ''}
+      </div>
+    `;
+  }).join("");
+  container.innerHTML = html;
+  // Auto-scroll to top (newest first)
+  container.scrollTop = 0;
 }
 
 // ===== Prompt Modal =====
@@ -1126,6 +1328,8 @@ function showPrompt(prompt) {
 
 // ===== Endgame =====
 
+let endgameNwChart = null;
+
 function showEndgame() {
   if (!currentState) return;
   const overlay = document.getElementById("endgame-overlay");
@@ -1136,12 +1340,47 @@ function showEndgame() {
     const isYou = currentState.players.indexOf(p) === mySeat;
     return `
       <div style="display:flex;justify-content:space-between;padding:8px 12px;margin:4px 0;background:#0d1117;border-radius:6px;border-left:3px solid ${color}${isYou ? ';border:1px solid #58a6ff' : ''}">
-        <span>${i + 1}. ${p.name}${isYou ? ' (You)' : ''}</span>
-        <span style="font-weight:bold;color:${p.net_worth >= 0 ? '#3fb950' : '#f85149'}">NW: $${p.net_worth}</span>
+        <span>${i + 1}. ${p.name}${isYou ? ' (You)' : ''}${p.is_human ? '' : ' (AI)'}</span>
+        <span style="font-weight:bold;color:${p.net_worth >= 0 ? '#3fb950' : '#f85149'}">NW: $${p.net_worth} | $${p.money} cash | ${p.contracts_fulfilled || 0} contracts</span>
       </div>
     `;
   }).join("");
+  renderEndgameChart();
   overlay.style.display = "flex";
+}
+
+function renderEndgameChart() {
+  const history = currentState?.player_history || [];
+  if (history.length < 2) return;
+  const canvas = document.getElementById("endgame-nw-chart");
+  if (!canvas) return;
+  const labels = history.map(h => h.turn);
+  const datasets = (currentState.players || []).map((p, idx) => ({
+    label: p.name,
+    data: history.map(h => h.players?.[idx]?.net_worth ?? 0),
+    borderColor: PLAYER_COLORS[idx % PLAYER_COLORS.length],
+    backgroundColor: "transparent",
+    borderWidth: 2,
+    pointRadius: 0,
+    tension: 0.3,
+  }));
+  if (endgameNwChart) endgameNwChart.destroy();
+  endgameNwChart = new Chart(canvas, {
+    type: "line",
+    data: {labels, datasets},
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {labels: {boxWidth: 12, font: {size: 11}, color: "#c9d1d9"}},
+        title: {display: true, text: "Net Worth Over Time", color: "#8b949e"},
+      },
+      scales: {
+        x: {ticks: {color: "#8b949e"}, grid: {color: "#21262d"}},
+        y: {ticks: {color: "#8b949e", callback: v => "$" + v}, grid: {color: "#21262d"}},
+      },
+    },
+  });
 }
 
 // ===== Action Wiring =====
@@ -1156,27 +1395,24 @@ function wireGameButtons() {
   document.getElementById("mp-build-btn").addEventListener("click", () => {
     if (selectedCards.size === 0) return;
     sendAction({type: "build", build_cards: [...selectedCards]});
-    selectedCards.clear();
+    clearSelection();
   });
   document.getElementById("mp-sell-btn").addEventListener("click", () => {
     if (selectedCards.size !== 1) return;
     const cardIdx = [...selectedCards][0];
-    const me = currentState?.players[mySeat];
-    const card = me?.hand?.[cardIdx];
-    // If card has multiple sell options, pick the one with highest rate
-    let sellRes = null;
-    if (card?.can_sell?.length > 1) {
-      const best = card.can_sell.reduce((a, b) => {
-        const rateA = me.rates?.[a] || 0;
-        const rateB = me.rates?.[b] || 0;
-        return rateA * (currentState.market[a] || 0) >= rateB * (currentState.market[b] || 0) ? a : b;
-      });
-      sellRes = best;
-    }
     const action = {type: "sell", sell_card: cardIdx};
-    if (sellRes) action.sell_resource = sellRes;
+    // Use resource picker if present
+    const resSel = document.getElementById("mp-sell-resource");
+    if (resSel?.value) action.sell_resource = resSel.value;
+    // Hacker Array target
+    const hTarget = document.getElementById("mp-hacker-target");
+    const hDir = document.getElementById("mp-hacker-dir");
+    if (hTarget?.value) {
+      action.hacker_target = hTarget.value;
+      action.hacker_direction = parseInt(hDir?.value || "1");
+    }
     sendAction(action);
-    selectedCards.clear();
+    clearSelection();
   });
   document.getElementById("mp-contract-btn").addEventListener("click", () => {
     if (selectedContract < 0) return;
@@ -1191,16 +1427,21 @@ function wireGameButtons() {
     }
     if (useSE) action.use_space_elevator = true;
     sendAction(action);
-    selectedCards.clear();
-    selectedContract = -1;
+    clearSelection();
   });
   document.getElementById("mp-pass-btn").addEventListener("click", () => {
-    selectedCards.clear();
-    selectedContract = -1;
+    clearSelection();
     if (role === "host") {
       const result = game.end_human_turn().toJs({dict_converter: Object.fromEntries});
-      addFeedEntry({kind: "event", text: result.detail || "Turn ended"});
-      broadcastFeed({kind: "event", text: result.detail || "Turn ended"});
+      const snapAfter = game.state_dict().toJs({dict_converter: Object.fromEntries});
+      const turnEntry = {
+        kind: "event",
+        text: result.detail || "Turn ended",
+        event_lines: (result.lines || snapAfter.last_event_lines || []).map(l => ({...l})),
+        player_snapshots: snapAfter.players.map(p => ({name: p.name, money: p.money, debt: p.debt, net_worth: p.net_worth})),
+      };
+      addFeedEntry(turnEntry);
+      broadcastFeed(turnEntry);
       if (result.awaiting_prompt) {
         hostRefreshState();
         handleHostPrompt(currentState.pending_prompt);
