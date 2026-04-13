@@ -2606,19 +2606,44 @@ def run_game(
     else:
         raise ValueError("Must provide either `strategy` or `strategies`")
 
-    # Play until the event deck is exhausted. Every event — including
-    # END_ROUND and END_GAME — is a player's turn. The player takes their
-    # normal actions, then the event fires. This gives exactly 30 player
-    # turns at 3P with 2 rounds (17 round 1 + 13 round 2).
+    # Play until the event deck is exhausted. Each player turn:
+    # 1. Player takes actions (build/sell/contract/pass)
+    # 2. Draw and execute events until a non-redraw event fires
+    # Redraw events chain within the same player's turn — the player
+    # only acts once, but multiple events can fire.
+    # This gives exactly 10 turns/player for all player counts.
     safety = len(state.event_deck) + 100
     player_turn = 0
     while state.event_idx < len(state.event_deck) and player_turn < safety:
-        event = state.event_deck[state.event_idx]
-        state.event_idx += 1
-
         player_idx = player_turn % num_players
         player = state.players[player_idx]
+
+        # First event: full turn (actions + event)
+        event = state.event_deck[state.event_idx]
+        state.event_idx += 1
         run_turn(state, player, player_strategies[player_idx], event)
+
+        # Chain redraw events: execute event only (no actions)
+        while event.redraws and state.event_idx < len(state.event_deck):
+            event = state.event_deck[state.event_idx]
+            state.event_idx += 1
+            event_detail = execute_event(state, event, player)
+            # Append a history record for the chained event
+            state.history.append(TurnRecord(
+                turn=state.turn,
+                player=player.name,
+                action="(redraw chain)",
+                detail="",
+                event=event_detail,
+                money_before=player.money,
+                money_after=player.money,
+                debt=player.debt,
+                contracts_fulfilled=player.contracts_fulfilled,
+                market_snapshot=state.market.snapshot(),
+                rates_snapshot={r.value: player.rate(r) for r in Resource},
+                actions=[],
+            ))
+
         player_turn += 1
 
     return state

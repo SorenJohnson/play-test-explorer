@@ -376,8 +376,7 @@ class PlayableGame:
                 "awaiting_prompt": True,
             }
 
-        # Execute the event (no redraw chaining — bonus draws are handled
-        # by the redraws flag inside execute_event).
+        # Execute the event, then chain redraws.
         event_detail = execute_event(self.state, event, player)
         if self.state.pending_prompt is not None:
             self.last_event = event_detail
@@ -387,7 +386,23 @@ class PlayableGame:
                 "lines": list(self.state.last_event_lines),
                 "awaiting_prompt": True,
             }
+        # Chain redraw events (same turn, no actions)
+        chain_detail = self._chain_redraws(player, event)
+        if chain_detail:
+            event_detail = f"{event_detail} | {chain_detail}"
         return self._finalize_human_turn(event, event_detail)
+
+    def _chain_redraws(self, player, event) -> str:
+        """If the event has redraws, keep drawing and executing events.
+        Returns combined event detail string for all chained events."""
+        details = []
+        while event.redraws and self.state.event_idx < len(self.state.event_deck):
+            event = self.state.event_deck[self.state.event_idx]
+            self.state.event_idx += 1
+            self.state.last_event_lines = []
+            detail = execute_event(self.state, event, player)
+            details.append(detail)
+        return " | ".join(details) if details else ""
 
     def _finalize_human_turn(self, event: EventCard, event_detail: str) -> dict:
         """Finalize the in-progress human turn after the event has fully resolved."""
@@ -832,6 +847,10 @@ class PlayableGame:
             }
 
         event_detail = execute_event(self.state, event, player)
+        # Chain redraw events (same turn, no actions)
+        chain_detail = self._chain_redraws(player, event)
+        if chain_detail:
+            event_detail = f"{event_detail} | {chain_detail}"
         self.last_event = event_detail
         self.last_ai_actions = actions_log
 
