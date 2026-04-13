@@ -2684,6 +2684,8 @@ def run_game(
         num_rounds=num_rounds,
         patent_pile=patent_pile,
     )
+    # Snapshot initial market before any events (for analytics Turn 0)
+    state._initial_market = state.market.snapshot()
 
     # Build per-player strategy list
     if strategies is not None:

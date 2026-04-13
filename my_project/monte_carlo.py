@@ -61,6 +61,7 @@ class GameSummary:
     futures_debt_per_resource: dict[str, int] = field(default_factory=dict)
     # Per-player flows: list[player_idx] -> {resource: amount}
     player_flows: list[dict] = field(default_factory=list)
+    initial_market: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -141,6 +142,8 @@ def _summarize_game(state: GameState) -> GameSummary:
             "rates": rec.rates_snapshot,
         })
 
+    initial_market = getattr(state, "_initial_market", final_market)
+
     return GameSummary(
         final_money=final_money,
         final_debt=final_debt,
@@ -153,6 +156,7 @@ def _summarize_game(state: GameState) -> GameSummary:
         action_history=actions,
         corporations=corporations,
         starting_rates=starting_rates,
+        initial_market=initial_market,
         pwr_total_earned=state.pwr_total_earned,
         pwr_total_debt=state.pwr_total_debt,
         futures_total_debt=state.futures_total_debt,
@@ -260,6 +264,7 @@ def results_to_dict(results: MonteCarloResults) -> dict:
         game_summaries.append({
             "game_id": i,
             "players": players_data,
+            "initial_market": g.initial_market,
             "final_market": g.final_market,
             "turn_count": g.turn_count,
             "action_history": g.action_history,

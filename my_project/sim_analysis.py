@@ -248,10 +248,13 @@ def analyze_market_dynamics(sim_files: list[Path]) -> dict:
                 for r, p in rec.get("market", {}).items():
                     per_game[r].append(p)
 
+            # Prepend actual initial market prices (Turn 0, before any events)
+            init_market = game.get("initial_market", {})
             for r, prices in per_game.items():
                 if prices:
-                    all_trajectories[r].append(prices)
-                    starting_prices[r].append(prices[0])
+                    init_price = init_market.get(r, prices[0])
+                    all_trajectories[r].append([init_price] + prices)
+                    starting_prices[r].append(init_price)
 
             # Aggregate build/sell stats
             for rec in history:
@@ -301,15 +304,10 @@ def analyze_market_dynamics(sim_files: list[Path]) -> dict:
         | set(bills_units_owed)
         | set(futures_units_bought)
     )
-    # Compute initial price from config for Turn 0 anchor.
-    # All resources start at the same position on the price track.
-    from my_project.simulation import PRICE_TRACK, DEFAULT_MARKET_POS
-    initial_price = PRICE_TRACK[min(DEFAULT_MARKET_POS, len(PRICE_TRACK) - 1)]
-
     for r in sorted(all_resources):
-        # Compute avg trajectory, prepending Turn 0 (initial price)
+        # Compute avg trajectory (Turn 0 = actual initial price, already prepended per-game)
         trajectories = all_trajectories.get(r, [])
-        avg_traj: list[float] = [float(initial_price)]  # Turn 0
+        avg_traj: list[float] = []
         if trajectories:
             max_len = max(len(t) for t in trajectories)
             for turn in range(max_len):

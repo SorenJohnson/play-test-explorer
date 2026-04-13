@@ -616,13 +616,10 @@ function sampleArray(arr, n) {
 // first action_history entry per turn), then collect prices into per-resource
 // trajectories. Prepends the initial price (Turn 0) so trajectories align
 // with the avg line. Returns { resource: [trajectory, trajectory, ...] }.
-const PRICE_TRACK = [1, 1, 1, 2, 2, 2, 3, 3, 4, 4, 5, 5, 6, 7, 8, 9, 10];
-const DEFAULT_MARKET_POS = 9;
-const INITIAL_PRICE = PRICE_TRACK[DEFAULT_MARKET_POS]; // $4
-
 function extractTrajectoriesFromGames(games) {
   const out = {};
   for (const game of games) {
+    const initMarket = game.initial_market || {};
     const seen = new Set();
     const perGame = {};
     for (const rec of game.action_history || []) {
@@ -636,8 +633,9 @@ function extractTrajectoriesFromGames(games) {
     }
     for (const r of Object.keys(perGame)) {
       if (!out[r]) out[r] = [];
-      // Prepend Turn 0 (initial price before any events)
-      out[r].push([INITIAL_PRICE, ...perGame[r]]);
+      // Prepend Turn 0 using actual per-game initial price
+      const initPrice = initMarket[r] ?? perGame[r][0] ?? 4;
+      out[r].push([initPrice, ...perGame[r]]);
     }
   }
   return out;
