@@ -36,11 +36,11 @@ class TestEventDeckConfig:
     def test_default_config_uses_csv_defaults(self):
         """Default EventDeckConfig draws counts from default_event_counts(num_players)."""
         deck = build_event_deck(3, EventDeckConfig(), num_rounds=1)
-        # 3P CSV defaults: 3 news, 2 debt, 1 power, 1 futures, 4 patent (3+1 conditional)
+        # 3P CSV defaults: 3 news, 2 debt, 1 power, 2 futures, 4 patent (3+1 conditional)
         assert _count(deck, EventType.NEWS_BULLETIN) == 3
         assert _count(deck, EventType.DEBT_COLLECTION) == 2
         assert _count(deck, EventType.POWER_BILL) == 1
-        assert _count(deck, EventType.FUTURES_TRADING) == 1
+        assert _count(deck, EventType.FUTURES_TRADING) == 2
         assert _count(deck, EventType.PATENT_AUCTION) == 4
         assert _count(deck, EventType.END_GAME) == 1
 

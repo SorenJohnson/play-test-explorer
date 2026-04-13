@@ -731,6 +731,73 @@ function tryResolvePrompt() {
   hostAdvanceGame();
 }
 
+// ===== Deck viewer =====
+
+let deckViewerOpen = false;
+
+function toggleDeckViewer() {
+  deckViewerOpen = !deckViewerOpen;
+  renderDeckViewer();
+}
+
+function renderDeckViewer() {
+  const el = document.getElementById("deck-viewer");
+  if (!el) return;
+  if (!deckViewerOpen || !currentState) {
+    el.style.display = "none";
+    return;
+  }
+  const remaining = currentState.event_deck_remaining || [];
+  const nonRedraw = remaining.filter(e => !e.redraws);
+  const numPlayers = currentState.players?.length || 3;
+
+  // Count by type
+  const counts = {};
+  for (const e of remaining) {
+    const label = e.redraws ? `${e.type} (redraw)` : e.type;
+    counts[label] = (counts[label] || 0) + 1;
+  }
+
+  const EVENT_COLORS = {
+    power_bill: "#e74c3c",
+    debt_collection: "#f85149",
+    futures_trading: "#d29922",
+    patent_auction: "#a371f7",
+    draw_building_card: "#58a6ff",
+    news_bulletin: "#3fb950",
+    news: "#3fb950",
+    end_round: "#f0883e",
+    end_game: "#f0883e",
+  };
+
+  el.style.display = "block";
+  el.innerHTML = `
+    <div class="deck-viewer-inner">
+      <div class="deck-viewer-header">
+        <strong>Event Deck</strong> — ${remaining.length} cards left, ${nonRedraw.length} player turns (${Math.floor(nonRedraw.length / numPlayers)} per player)
+        <span style="margin-left:auto;cursor:pointer;color:#8b949e" onclick="toggleDeckViewer()">close</span>
+      </div>
+      <div class="deck-viewer-summary">
+        ${Object.entries(counts).map(([type, n]) => {
+          const baseType = type.replace(" (redraw)", "");
+          const color = EVENT_COLORS[baseType] || "#8b949e";
+          return `<span class="deck-chip" style="border-color:${color}">${type}: ${n}</span>`;
+        }).join("")}
+      </div>
+      <div class="deck-viewer-list">
+        ${remaining.map((e, i) => {
+          const color = EVENT_COLORS[e.type] || "#8b949e";
+          const flags = [];
+          if (e.redraws) flags.push("redraw");
+          if (e.pwr_adjust) flags.push("PWR adj");
+          const flagStr = flags.length ? ` <span class="deck-flags">${flags.join(", ")}</span>` : "";
+          return `<span class="deck-card" style="border-left-color:${color}">${e.type.replace(/_/g, " ")}${flagStr}</span>`;
+        }).join("")}
+      </div>
+    </div>
+  `;
+}
+
 // ===== Event banner =====
 
 let eventBannerTimer = null;
@@ -800,6 +867,7 @@ function renderGame() {
   renderActions(s);
   renderPlayerPanel(s);
   renderOpponents(s);
+  renderDeckViewer();
 }
 
 const PRICE_TRACK = [1,1,1,2,2,2,3,3,4,4,5,5,6,7,8,9,10];
@@ -1716,6 +1784,9 @@ function renderEndgameChart() {
 // ===== Action Wiring =====
 
 function wireGameButtons() {
+  // Deck viewer toggle
+  document.getElementById("deck-viewer-toggle")?.addEventListener("click", toggleDeckViewer);
+
   // Market chart toggle
   document.getElementById("market-toggle")?.addEventListener("click", () => {
     const wrap = document.getElementById("market-chart-wrap");

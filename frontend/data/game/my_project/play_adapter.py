@@ -974,6 +974,16 @@ class PlayableGame:
                 {k: v for k, v in line.items()}
                 for line in s.last_event_lines
             ],
+            # Full event deck for debug/inspection (type + flags for remaining cards)
+            "event_deck_remaining": [
+                {
+                    "type": ec.type.value,
+                    "redraws": ec.redraws,
+                    "pwr_adjust": getattr(ec, "pwr_adjust", False),
+                    "label": ec.label or ec.type.value,
+                }
+                for ec in s.event_deck[s.event_idx:]
+            ],
         }
 
     def state_for_seat(self, seat_idx: int) -> dict:

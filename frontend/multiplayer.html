@@ -66,11 +66,14 @@
       <div class="status-cell"><span class="status-label">Round</span><span id="mp-round" class="status-value">-</span></div>
       <div class="status-cell"><span class="status-label">Turn</span><span id="mp-turn" class="status-value">-</span></div>
       <div class="status-cell"><span class="status-label">Active</span><span id="mp-active" class="status-value">-</span></div>
-      <div class="status-cell"><span class="status-label">Cards Left</span><span id="mp-cards-left" class="status-value">-</span></div>
+      <div class="status-cell" id="deck-viewer-toggle" style="cursor:pointer" title="Click to view remaining deck"><span class="status-label">Deck</span><span id="mp-cards-left" class="status-value">-</span></div>
       <div class="status-cell"><span class="status-label">AP</span><span id="mp-ap-display" class="status-value">-</span></div>
       <div id="turn-banner" class="turn-banner" style="display:none">YOUR TURN</div>
       <div id="event-banner" class="event-banner" style="display:none"></div>
     </div>
+
+    <!-- Deck viewer (hidden by default, toggle via status bar click) -->
+    <div id="deck-viewer" style="display:none"></div>
 
     <!-- Main content: game + event feed sidebar -->
     <div id="game-layout">
