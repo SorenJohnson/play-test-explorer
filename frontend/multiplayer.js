@@ -322,13 +322,13 @@ function renderClientLobby(seats) {
 // ===== Game Start (Host) =====
 
 const PY_FILES = [
-  "play_adapter.py","simulation.py","models.py","strategies.py",
-  "parsing.py","sim_analysis.py","card_valuation.py"
+  "__init__.py","play_adapter.py","simulation.py","models.py",
+  "strategies.py","parsing.py","accounting.py"
 ];
 const DATA_FILES = [
   "data/Cards.csv","data/Contracts.csv","data/Patents.csv",
   "data/Events.csv","data/News.csv","data/CardValues.csv",
-  "data/Buildings.csv","data/Corporations.csv"
+  "data/Corporations.csv","data/GameConfig.csv","data/market.csv"
 ];
 
 async function startGame() {
@@ -350,7 +350,6 @@ async function startGame() {
   // Fetch and mount Python sources
   prog.textContent = "Loading game files...";
   pyodide.FS.mkdirTree("/home/pyodide/my_project/data");
-  pyodide.FS.writeFile("/home/pyodide/my_project/__init__.py", "");
 
   for (const f of PY_FILES) {
     const resp = await fetch(`data/game/my_project/${f}`, {cache: "no-cache"});
