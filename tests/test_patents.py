@@ -534,9 +534,10 @@ class TestFinancialInstruments:
         # Player 0 owns FI
         state.players[0].buildings_played.append(_patent("Financial Instruments"))
         # Players 1 and 2 have debt; player 0 has none
+        # Zero cash so debt paydown phase doesn't interfere with interest test
         state.players[0].debt = 0
-        state.players[1].debt = 100  # interest = 10
-        state.players[2].debt = 50   # interest = 5
+        state.players[1].debt = 100; state.players[1].money = 0  # interest = 10
+        state.players[2].debt = 50; state.players[2].money = 0   # interest = 5
         money_before = state.players[0].money
         do_debt_collection(state)
         # Owner gains 10 + 5 = 15 cash from others' debt interest
@@ -547,6 +548,7 @@ class TestFinancialInstruments:
         state = GameState.create(cards, contracts, num_players=3)
         state.players[0].buildings_played.append(_patent("Financial Instruments"))
         state.players[0].debt = 100  # owner's own debt → 10 interest, no bonus
+        state.players[0].money = 0   # no cash to pay down
         state.players[1].debt = 0
         state.players[2].debt = 0
         money_before = state.players[0].money
@@ -556,8 +558,8 @@ class TestFinancialInstruments:
     def test_no_owner_no_bonus(self):
         cards, contracts = _load()
         state = GameState.create(cards, contracts, num_players=3)
-        state.players[0].debt = 50
-        state.players[1].debt = 50
+        state.players[0].debt = 50; state.players[0].money = 0
+        state.players[1].debt = 50; state.players[1].money = 0
         money_before = [p.money for p in state.players]
         do_debt_collection(state)
         # No FI ownership → no bonuses
@@ -574,6 +576,7 @@ class TestFinancialInstruments:
         # Player 1: $100 debt → interest 10. But P1 has $5 credit which
         # absorbs $5 of that interest. Real debt added = 5.
         state.players[1].debt = 100
+        state.players[1].money = 0  # no cash to pay down
         state.players[1].credit = 5
         money_before = state.players[0].money
         do_debt_collection(state)

@@ -1281,6 +1281,37 @@ function renderPromptModal(prompt) {
         heuristic based on the patent's rate value.
       </p>
     `;
+  } else if (prompt.kind === "debt_paydown") {
+    titleEl.textContent = "Debt Collection — Pay Down Debt";
+    const humans = currentState.human_indices || [];
+    const debtors = (prompt.players || []).filter(
+      (d) => humans.includes(d.seat)
+    );
+    if (debtors.length === 0) {
+      bodyEl.innerHTML = `<p>No human players have debt to pay down.</p>`;
+    } else {
+      const inputs = debtors
+        .map((d) => {
+          const player = currentState.players[d.seat];
+          return `
+            <div class="prompt-row">
+              <label>${player.name}: $${d.debt} debt, $${d.money} cash</label>
+              <input type="number" class="prompt-paydown-input" data-seat-idx="${d.seat}"
+                     min="0" max="${Math.min(d.debt, d.money)}" step="1" value="${Math.min(d.debt, d.money)}">
+              <span style="color:#8b949e; font-size:0.75rem;">$ to pay</span>
+            </div>
+          `;
+        })
+        .join("");
+      bodyEl.innerHTML = `
+        <p>Before interest is charged, you may pay down debt with cash.
+        Interest is $1 per $${currentState.debt_interest_divisor || 10} owed.</p>
+        ${inputs}
+        <p style="color:#8b949e; font-size:0.75rem;">
+          Set to 0 to skip. AI players pay down debt automatically.
+        </p>
+      `;
+    }
   } else {
     titleEl.textContent = "Pending";
     bodyEl.innerHTML = `<p>Unknown prompt: ${prompt.kind}</p>`;
@@ -1300,6 +1331,14 @@ function submitPromptAnswer() {
       bids[idx] = amt;
     });
     answers = { bids };
+  } else if (prompt.kind === "debt_paydown") {
+    const payments = {};
+    document.querySelectorAll(".prompt-paydown-input").forEach((inp) => {
+      const idx = parseInt(inp.dataset.seatIdx, 10);
+      const amt = Math.max(0, parseInt(inp.value, 10) || 0);
+      payments[idx] = amt;
+    });
+    answers = { payments };
   } else {
     answers = {};
   }

@@ -698,6 +698,11 @@ class PlayableGame:
             for seat_idx_raw, amount in bids.items():
                 seat_idx = int(seat_idx_raw)
                 self.state.pending_bids[seat_idx] = max(0, int(amount))
+        elif kind == "debt_paydown":
+            payments = answers.get("payments", {})
+            for seat_idx_raw, amount in payments.items():
+                seat_idx = int(seat_idx_raw)
+                self.state.pending_debt_paydowns[seat_idx] = max(0, int(amount))
 
         # Resume the suspended event
         if self.human_turn_in_progress:

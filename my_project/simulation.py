@@ -566,6 +566,9 @@ class GameState:
     # play adapter to thread human-supplied bids in. Key = seat index,
     # value = bid in $5 increments. Defaults to None for "use AI heuristic".
     pending_bids: dict[int, int] = field(default_factory=dict)
+    # Human-supplied debt paydown amounts for the next debt collection.
+    # Key = seat index, value = cash amount to pay toward debt.
+    pending_debt_paydowns: dict[int, int] = field(default_factory=dict)
     # Mid-event interruption state. When set, the event resolution loop has
     # paused waiting for human input. The play adapter exposes this to the
     # UI and resumes after the resolve_prompt call.
@@ -1597,6 +1600,13 @@ def do_power_bill(state: GameState) -> None:
             )
 
 
+def _ai_debt_paydown(state: GameState, player: Player) -> int:
+    """AI heuristic: pay down debt with cash, keeping a reserve for builds."""
+    reserve = 10  # minimum cash to keep for buying resources
+    available = max(0, player.money - reserve)
+    return min(player.debt, available)
+
+
 def do_debt_collection(state: GameState) -> None:
     """Increase debt by $1 per DEBT_INTEREST_DIVISOR owed.
 
@@ -1609,6 +1619,27 @@ def do_debt_collection(state: GameState) -> None:
     Credit-absorbed amounts don't count for the FI payout.
     """
     _record_event_line(state, kind="header", text="Debt Collection")
+
+    # Phase 1: pay down debt with cash before interest accrues.
+    # Human paydowns come from pending_debt_paydowns (set by prompt);
+    # AI paydowns use the heuristic.
+    for idx, player in enumerate(state.players):
+        if player.debt <= 0 or player.money <= 0:
+            continue
+        if idx in state.pending_debt_paydowns:
+            paydown = min(state.pending_debt_paydowns[idx], player.debt, player.money)
+        else:
+            paydown = _ai_debt_paydown(state, player)
+        if paydown > 0:
+            player.money -= paydown
+            player.debt -= paydown
+            _record_event_line(
+                state, kind="player", player=player,
+                text=f"Paid down ${paydown} debt → ${player.debt} remaining, ${player.money} cash",
+            )
+    state.pending_debt_paydowns.clear()
+
+    # Phase 2: interest charges.
     debt_added: dict[int, int] = {}
     for idx, player in enumerate(state.players):
         interest = player.debt // DEBT_INTEREST_DIVISOR
@@ -2018,8 +2049,8 @@ def _default_ai_bid(state: "GameState", player: Player, patent: Card) -> int:
 def _event_needs_prompt(state: GameState, event: EventCard) -> dict | None:
     """Inspect an event and return a prompt dict if it needs human input.
 
-    Patent Auction: needs a bid from each human seat (so they can see the
-    upcoming patent before bidding).
+    Patent Auction: needs a bid from each human seat.
+    Debt Collection: lets humans choose how much debt to pay down.
 
     Returns None if no human input is required (all-AI game, or the event
     doesn't need prompts).
@@ -2033,6 +2064,14 @@ def _event_needs_prompt(state: GameState, event: EventCard) -> dict | None:
             "kind": "patent_auction",
             "patent": _patent_to_dict(patent),
         }
+    if event.type == EventType.DEBT_COLLECTION:
+        debtors = [
+            {"seat": i, "debt": p.debt, "money": p.money}
+            for i, p in enumerate(state.players)
+            if p.debt > 0 and p.money > 0
+        ]
+        if debtors:
+            return {"kind": "debt_paydown", "players": debtors}
     return None
 
 

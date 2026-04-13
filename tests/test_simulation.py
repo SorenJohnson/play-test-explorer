@@ -438,7 +438,8 @@ class TestEventLines:
         cards, contracts = _load_data()
         state = GameState.create(cards, contracts, num_players=3)
         # Player 0 has debt → gets charged; players 1 and 2 don't
-        state.players[0].debt = 100
+        # Zero cash so paydown phase doesn't add extra lines
+        state.players[0].debt = 100; state.players[0].money = 0
         state.players[1].debt = 0
         state.players[2].debt = 0
         state.last_event_lines = []
