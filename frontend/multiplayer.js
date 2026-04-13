@@ -1174,10 +1174,10 @@ function executePoolSwap(handIdx, poolIdx) {
   const poolHtml = poolEl?.innerHTML || "";
 
   if (role === "host") {
-    game.human_pool_swap(handIdx, poolIdx);
+    game.human_pool_swap(parseInt(handIdx), parseInt(poolIdx));
     hostRefreshState();
   } else {
-    hostConn.send(JSON.stringify({type: "pool_swap", hand_idx: handIdx, pool_idx: poolIdx}));
+    hostConn.send(JSON.stringify({type: "pool_swap", hand_idx: parseInt(handIdx), pool_idx: parseInt(poolIdx)}));
   }
 
   // Cross-swap animation
