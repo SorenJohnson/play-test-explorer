@@ -800,21 +800,34 @@ function renderMarket(s) {
 function renderMarketRuler(s) {
   const ruler = document.getElementById("mp-market-ruler");
   if (!ruler) return;
-  if (!expandedMarketResource) {
-    ruler.style.display = "none";
-    return;
-  }
-  const r = expandedMarketResource;
-  const pos = (s.market_positions || {})[r] ?? 9;
-  const color = RESOURCE_COLORS[r] || "#888";
-
   ruler.style.display = "block";
+
+  const positions = s.market_positions || {};
+  const selectedRes = expandedMarketResource;
+  const selectedPos = selectedRes ? (positions[selectedRes] ?? 9) : -1;
+  const selectedColor = selectedRes ? RESOURCE_COLORS[selectedRes] : "#888";
+
+  // Build position → list of resources at that position
+  const resourcesAtPos = {};
+  for (const r of RESOURCE_ORDER) {
+    const pos = positions[r] ?? 9;
+    if (!resourcesAtPos[pos]) resourcesAtPos[pos] = [];
+    resourcesAtPos[pos].push(r);
+  }
+
   ruler.innerHTML = `
-    <div class="ruler-label" style="color:${color}">${r} Price Track</div>
     <div class="ruler-track">
       ${PRICE_TRACK.map((p, i) => {
-        const isCurrent = i === pos;
-        return `<span class="ruler-pip ${isCurrent ? 'current' : ''}" style="${isCurrent ? 'background:' + color + ';color:#000' : ''}" title="Position ${i}">$${p}</span>`;
+        const isCurrent = i === selectedPos;
+        const resHere = resourcesAtPos[i] || [];
+        const dots = resHere.map(r => {
+          const isSelected = r === selectedRes;
+          return `<span class="ruler-res-dot ${isSelected ? 'selected' : ''}" style="border-color:${RESOURCE_COLORS[r]}" title="${r}"></span>`;
+        }).join("");
+        return `<span class="ruler-pip ${isCurrent ? 'current' : ''}" style="${isCurrent ? 'border-color:' + selectedColor : ''}">
+          <span class="ruler-dots-row">${dots}</span>
+          <span class="ruler-price">$${p}</span>
+        </span>`;
       }).join("")}
     </div>
   `;

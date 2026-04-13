@@ -247,21 +247,44 @@ body {
 }
 .ruler-pip {
   display: inline-flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 24px;
+  flex: 1;
+  min-width: 0;
+  height: 38px;
   border: 1px solid #30363d;
   border-radius: 4px;
   font-size: 0.7rem;
   color: #8b949e;
   background: #0d1117;
+  position: relative;
 }
 .ruler-pip.current {
   font-weight: bold;
   border-width: 2px;
-  font-size: 0.8rem;
   color: #fff;
+}
+.ruler-price { text-align: center; }
+.ruler-dots-row {
+  display: flex;
+  gap: 1px;
+  justify-content: center;
+  min-height: 7px;
+}
+.ruler-res-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #c9d1d9;
+  border: 1px solid transparent;
+  flex-shrink: 0;
+}
+.ruler-res-dot.selected {
+  background: #fff;
+  width: 7px;
+  height: 7px;
+  box-shadow: 0 0 3px rgba(255,255,255,0.5);
 }
 
 /* ===== Contracts Grid ===== */
