@@ -543,6 +543,8 @@ class TurnRecord:
     market_snapshot: dict[str, int] = field(default_factory=dict)
     rates_snapshot: dict[str, int] = field(default_factory=dict)
     actions: list[ActionRecord] = field(default_factory=list)
+    free_actions: list[str] = field(default_factory=list)
+    event_player_snapshots: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -2594,7 +2596,7 @@ def run_turn(state: GameState, player: Player, strategy, event: EventCard) -> No
     # Free actions phase (before pool swaps and the action loop).
     # Auto-fires Optimization Center, Water Engine, Teleportation,
     # Nanotechnology using simple heuristics.
-    _execute_free_actions(state, player)
+    fired_free = _execute_free_actions(state, player)
 
     # Pool swapping phase (free, before actions)
     swap_fn = getattr(strategy, 'pool_swap', None)
@@ -2626,6 +2628,13 @@ def run_turn(state: GameState, player: Player, strategy, event: EventCard) -> No
     # events so each player gets exactly N turns.
     event_detail = execute_event(state, event, player)
 
+    # Snapshot all players after the event for the log
+    event_snapshots = [
+        {"name": p.name, "money": p.money, "debt": p.debt,
+         "credit": p.credit, "net_worth": p.net_worth()}
+        for p in state.players
+    ]
+
     detail_strs = [r.detail for r in action_records]
     state.history.append(TurnRecord(
         turn=state.turn,
@@ -2640,6 +2649,8 @@ def run_turn(state: GameState, player: Player, strategy, event: EventCard) -> No
         market_snapshot=state.market.snapshot(),
         rates_snapshot={r.value: v for r, v in player.rates.items()},
         actions=action_records,
+        free_actions=fired_free,
+        event_player_snapshots=event_snapshots,
     ))
 
 

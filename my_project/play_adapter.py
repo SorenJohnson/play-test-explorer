@@ -971,6 +971,26 @@ class PlayableGame:
             "terminal_events": list(self.pending_terminal_results),
         }
 
+    def state_for_seat(self, seat_idx: int) -> dict:
+        """Serialize game state filtered for a specific seat's perspective.
+
+        Reveals hand only when it's that seat's turn and the seat is human.
+        Used by the multiplayer host to send per-client state.
+        """
+        s = self.state
+        cur_idx = self.current_player_index() if not self.is_over() else -1
+        d = self.state_dict()
+        # Re-build players list with hand reveal filtered for this seat
+        d["players"] = [
+            _player_dict(
+                p,
+                is_human=(i in self._human_indices),
+                reveal_hand=(i == seat_idx and i == cur_idx and i in self._human_indices),
+            )
+            for i, p in enumerate(s.players)
+        ]
+        return d
+
     # --- Legal action enumeration (for UI hinting) ---
 
     def legal_human_actions(self) -> dict:

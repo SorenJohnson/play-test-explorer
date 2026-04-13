@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Multiplayer - Mars Board Game</title>
+  <link rel="stylesheet" href="report.css">
+  <link rel="stylesheet" href="multiplayer.css">
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <!-- ===== LOBBY SCREEN ===== -->
+  <div id="lobby-screen">
+    <div class="lobby-container">
+      <h1>Mars Board Game - Multiplayer</h1>
+      <p class="lobby-subtitle">WebRTC peer-to-peer. No server required.</p>
+
+      <div id="lobby-choice" class="lobby-section">
+        <button id="btn-create" class="lobby-btn primary">Create Game</button>
+        <button id="btn-join" class="lobby-btn">Join Game</button>
+      </div>
+
+      <!-- Host: create game -->
+      <div id="host-setup" class="lobby-section" style="display:none">
+        <h2>Your Room Code</h2>
+        <div id="room-code" class="room-code">Connecting...</div>
+        <p class="hint">Share this code with other players</p>
+
+        <h3>Seat Configuration</h3>
+        <div id="seat-grid" class="seat-grid"></div>
+
+        <div id="host-status" class="connection-status"></div>
+        <button id="btn-start" class="lobby-btn primary" disabled>Start Game</button>
+      </div>
+
+      <!-- Client: join game -->
+      <div id="join-setup" class="lobby-section" style="display:none">
+        <h2>Join Game</h2>
+        <div class="join-row">
+          <input id="join-code" type="text" placeholder="Enter room code" class="join-input">
+          <button id="btn-connect" class="lobby-btn">Connect</button>
+        </div>
+        <div id="join-status" class="connection-status"></div>
+
+        <div id="seat-claim" style="display:none">
+          <h3>Available Seats</h3>
+          <div id="claim-grid" class="seat-grid"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== LOADING (Pyodide boot, host only) ===== -->
+  <div id="loading-screen" style="display:none">
+    <div class="lobby-container">
+      <h2>Loading Game Engine...</h2>
+      <div id="load-progress" class="hint">Initializing Pyodide...</div>
+    </div>
+  </div>
+
+  <!-- ===== GAME SCREEN ===== -->
+  <div id="game-screen" style="display:none">
+    <!-- Status Bar -->
+    <div id="status-bar">
+      <div class="status-cell"><span class="status-label">Round</span><span id="mp-round" class="status-value">-</span></div>
+      <div class="status-cell"><span class="status-label">Turn</span><span id="mp-turn" class="status-value">-</span></div>
+      <div class="status-cell"><span class="status-label">Active</span><span id="mp-active" class="status-value">-</span></div>
+      <div class="status-cell"><span class="status-label">Cards Left</span><span id="mp-cards-left" class="status-value">-</span></div>
+      <div id="turn-banner" class="turn-banner" style="display:none">YOUR TURN</div>
+    </div>
+
+    <!-- Main content: game + event feed sidebar -->
+    <div id="game-layout">
+      <!-- Left: game area -->
+      <div id="game-area">
+        <!-- Market -->
+        <section class="game-section">
+          <h3 class="section-title">Market</h3>
+          <div id="mp-market-grid" class="market-grid"></div>
+        </section>
+
+        <!-- Contracts -->
+        <section class="game-section">
+          <h3 class="section-title">Contracts</h3>
+          <div id="mp-contracts-grid" class="contracts-grid"></div>
+        </section>
+
+        <!-- Pool -->
+        <section class="game-section">
+          <h3 class="section-title">Building Pool</h3>
+          <div id="mp-pool-grid" class="pool-grid"></div>
+        </section>
+
+        <!-- Your Hand -->
+        <section id="hand-section" class="game-section">
+          <h3 class="section-title">Your Hand</h3>
+          <div id="mp-hand-grid" class="hand-grid"></div>
+          <div id="mp-build-estimate" class="build-estimate"></div>
+        </section>
+
+        <!-- Actions -->
+        <section id="action-section" class="game-section">
+          <div id="mp-action-bar" class="action-bar">
+            <button id="mp-build-btn" class="action-btn" disabled>Build</button>
+            <button id="mp-sell-btn" class="action-btn" disabled>Sell</button>
+            <button id="mp-contract-btn" class="action-btn" disabled>Contract</button>
+            <button id="mp-pass-btn" class="action-btn" disabled>End Turn</button>
+          </div>
+          <div id="mp-special-toggles"></div>
+          <div id="mp-patent-actions"></div>
+        </section>
+
+        <!-- Opponents -->
+        <section class="game-section">
+          <h3 class="section-title">Other Players</h3>
+          <div id="mp-opponents" class="opponents-strip"></div>
+        </section>
+
+        <!-- Your Stats (sticky bottom) -->
+        <div id="mp-your-stats" class="your-stats-bar"></div>
+      </div>
+
+      <!-- Right: event feed sidebar -->
+      <div id="event-feed">
+        <h3 class="section-title">Event Feed</h3>
+        <div id="feed-entries"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== PROMPT MODAL ===== -->
+  <div id="prompt-modal" class="modal-overlay" style="display:none">
+    <div class="modal-box">
+      <h2 id="prompt-title">Prompt</h2>
+      <div id="prompt-body"></div>
+      <button id="prompt-submit" class="lobby-btn primary">Submit</button>
+    </div>
+  </div>
+
+  <!-- ===== ENDGAME MODAL ===== -->
+  <div id="endgame-overlay" class="modal-overlay" style="display:none">
+    <div class="modal-box wide">
+      <h2>Game Over</h2>
+      <div id="endgame-rankings"></div>
+      <canvas id="endgame-nw-chart" height="200"></canvas>
+      <button id="btn-new-game" class="lobby-btn primary" style="margin-top:16px">Back to Lobby</button>
+    </div>
+  </div>
+
+  <script src="multiplayer.js"></script>
+</body>
+</html>
