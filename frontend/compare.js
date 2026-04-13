@@ -778,14 +778,41 @@ function wireMarketSpreadToggle() {
   };
 }
 
+function percentile(sorted, p) {
+  if (!sorted.length) return 0;
+  const idx = (p / 100) * (sorted.length - 1);
+  const lo = Math.floor(idx), hi = Math.ceil(idx);
+  return lo === hi ? sorted[lo] : sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
+}
+
 function buildMarketLegendTable(resources, stats) {
   const tbody = document.querySelector("#market-legend-table tbody");
   if (!tbody) return;
   const chart = chartRegistry["market-trajectory-chart"];
 
+  // Compute final-price percentiles from raw game data
+  const games = getGamesForCurrentScenario();
+  const finalPrices = {};
+  for (const r of resources) {
+    const prices = [];
+    for (const g of games) {
+      const fm = g.final_market || {};
+      if (fm[r] !== undefined) prices.push(fm[r]);
+    }
+    prices.sort((a, b) => a - b);
+    finalPrices[r] = {
+      p25: percentile(prices, 25).toFixed(0),
+      p50: percentile(prices, 50).toFixed(0),
+      p75: percentile(prices, 75).toFixed(0),
+      min: prices.length ? prices[0] : "?",
+      max: prices.length ? prices[prices.length - 1] : "?",
+    };
+  }
+
   tbody.innerHTML = resources.map((r) => {
     const color = RESOURCE_COLORS[r] || "#888";
     const s = stats[r] || {};
+    const fp = finalPrices[r] || {};
     return `
       <tr class="legend-row" data-resource="${r}" style="cursor:pointer; border-bottom:1px solid #21262d;">
         <td style="padding:4px;">
@@ -793,14 +820,14 @@ function buildMarketLegendTable(resources, stats) {
           <span style="color:${color}; font-weight:600;">${r}</span>
         </td>
         <td style="text-align:right; padding:4px; color:#c9d1d9;">$${s.avg}</td>
-        <td style="text-align:right; padding:4px; color:#8b949e;">$${s.std}</td>
-        <td style="text-align:right; padding:4px; color:#c9d1d9;">$${s.end}</td>
+        <td style="text-align:right; padding:4px; color:#8b949e;" title="25th / 50th / 75th percentile of final price">${fp.p25}-${fp.p50}-${fp.p75}</td>
+        <td style="text-align:right; padding:4px; color:#8b949e;" title="Min-Max final price">${fp.min}-${fp.max}</td>
       </tr>
     `;
   }).join("");
 
-  // Wire row clicks: click isolates that resource (hides all others).
-  // Click the already-isolated resource to show all again.
+  // Wire row clicks: click isolates that resource + shows its spread.
+  // Click again to restore all (spread hidden).
   let isolatedResource = null;
 
   tbody.querySelectorAll(".legend-row").forEach((row) => {
@@ -809,20 +836,24 @@ function buildMarketLegendTable(resources, stats) {
       const resource = row.dataset.resource;
 
       if (isolatedResource === resource) {
-        // Already isolated — show all
+        // Already isolated — show all, hide spread
         isolatedResource = null;
         chart.data.datasets.forEach((d, i) => {
           if (d._kind === "avg") chart.setDatasetVisibility(i, true);
-          if (d._kind === "spread") chart.setDatasetVisibility(i, mdShowSpread);
+          if (d._kind === "spread") chart.setDatasetVisibility(i, false);
         });
         tbody.querySelectorAll(".legend-row").forEach((r) => r.style.opacity = "1");
       } else {
-        // Isolate this resource — hide all others
+        // Isolate this resource + show its spread
         isolatedResource = resource;
+        // Ensure spread datasets exist
+        if (!chart.data.datasets.some((d) => d._kind === "spread")) {
+          buildSpreadDatasets(chart);
+        }
         chart.data.datasets.forEach((d, i) => {
           const match = d._resource === resource;
           if (d._kind === "avg") chart.setDatasetVisibility(i, match);
-          if (d._kind === "spread") chart.setDatasetVisibility(i, match && mdShowSpread);
+          if (d._kind === "spread") chart.setDatasetVisibility(i, match);
         });
         tbody.querySelectorAll(".legend-row").forEach((r) => {
           r.style.opacity = r.dataset.resource === resource ? "1" : "0.35";
