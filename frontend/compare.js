@@ -614,7 +614,12 @@ function sampleArray(arr, n) {
 
 // Mirrors analyze_market_dynamics: take one snapshot per distinct turn (the
 // first action_history entry per turn), then collect prices into per-resource
-// trajectories. Returns { resource: [trajectory, trajectory, ...] }.
+// trajectories. Prepends the initial price (Turn 0) so trajectories align
+// with the avg line. Returns { resource: [trajectory, trajectory, ...] }.
+const PRICE_TRACK = [1, 1, 1, 2, 2, 2, 3, 3, 4, 4, 5, 5, 6, 7, 8, 9, 10];
+const DEFAULT_MARKET_POS = 9;
+const INITIAL_PRICE = PRICE_TRACK[DEFAULT_MARKET_POS]; // $4
+
 function extractTrajectoriesFromGames(games) {
   const out = {};
   for (const game of games) {
@@ -631,7 +636,8 @@ function extractTrajectoriesFromGames(games) {
     }
     for (const r of Object.keys(perGame)) {
       if (!out[r]) out[r] = [];
-      out[r].push(perGame[r]);
+      // Prepend Turn 0 (initial price before any events)
+      out[r].push([INITIAL_PRICE, ...perGame[r]]);
     }
   }
   return out;
@@ -842,7 +848,7 @@ function renderMarketDynamics() {
   // see wireMarketSpreadToggle below.
   const resources = Object.keys(allResourcesData);
   const maxLen = Math.max(...resources.map((r) => (allResourcesData[r].avg_trajectory || []).length));
-  const labels = Array.from({ length: maxLen }, (_, i) => `Turn ${i + 1}`);
+  const labels = Array.from({ length: maxLen }, (_, i) => i === 0 ? "Start" : `Turn ${i}`);
 
   const datasets = resources.map((r) => ({
     label: r,

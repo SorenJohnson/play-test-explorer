@@ -301,10 +301,15 @@ def analyze_market_dynamics(sim_files: list[Path]) -> dict:
         | set(bills_units_owed)
         | set(futures_units_bought)
     )
+    # Compute initial price from config for Turn 0 anchor.
+    # All resources start at the same position on the price track.
+    from my_project.simulation import PRICE_TRACK, DEFAULT_MARKET_POS
+    initial_price = PRICE_TRACK[min(DEFAULT_MARKET_POS, len(PRICE_TRACK) - 1)]
+
     for r in sorted(all_resources):
-        # Compute avg trajectory
+        # Compute avg trajectory, prepending Turn 0 (initial price)
         trajectories = all_trajectories.get(r, [])
-        avg_traj: list[float] = []
+        avg_traj: list[float] = [float(initial_price)]  # Turn 0
         if trajectories:
             max_len = max(len(t) for t in trajectories)
             for turn in range(max_len):
