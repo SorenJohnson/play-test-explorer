@@ -230,8 +230,8 @@ if "power_bill_count" in _raw:
     _kw["power_bill_count"] = _coerce_count(_raw["power_bill_count"])
 if "debt_collection_count" in _raw:
     _kw["debt_collection_count"] = _coerce_count(_raw["debt_collection_count"])
-if "futures_settlement_count" in _raw:
-    _kw["futures_settlement_count"] = _coerce_count(_raw["futures_settlement_count"])
+if "futures_trading_count" in _raw:
+    _kw["futures_trading_count"] = _coerce_count(_raw["futures_trading_count"])
 if "news_count" in _raw:
     _kw["news_count"] = _coerce_count(_raw["news_count"])
 if "news_pool" in _raw:
@@ -383,7 +383,7 @@ function parseEventConfig(text) {
   const known = new Set([
     "power_bill_count",
     "debt_collection_count",
-    "futures_settlement_count",
+    "futures_trading_count",
     "news_count",
     "news_pool",
   ]);

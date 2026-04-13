@@ -46,6 +46,7 @@ PATENTS = [
     "Slant Drilling",
     "Thinking Machines",
     "Teleportation",
+    "Matter Replication",
 ]
 
 ALL_CARD_NAMES = SPECIAL_BUILDINGS + PATENTS

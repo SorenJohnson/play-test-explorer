@@ -12,4 +12,4 @@ Power Market Volatile,market_random_x2,PWR
 All Quiet,,
 Debt Collection,trigger,debt_collection
 Power Bill,trigger,power_bill
-Futures Settlement,trigger,futures_settlement
+Futures Trading,trigger,futures_trading

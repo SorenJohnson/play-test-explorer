@@ -53,7 +53,7 @@ MAX_ACTIONS_PER_TURN = 10  # safety limit — not a design parameter
 # Event deck composition (random within ranges)
 POWER_BILL_RANGE = (3, 4)
 DEBT_COLLECTION_RANGE = (2, 4)
-FUTURES_SETTLEMENT_RANGE = (3, 4)
+FUTURES_TRADING_RANGE = (3, 4)
 
 
 
@@ -230,7 +230,7 @@ class EventType(StrEnum):
     PWR_ADJUST = "pwr_adjust"
     POWER_BILL = "power_bill"
     DEBT_COLLECTION = "debt_collection"
-    FUTURES_SETTLEMENT = "futures_settlement"
+    FUTURES_TRADING = "futures_trading"
     # Direct news with payload-based market deltas (for ad-hoc JSON config).
     NEWS = "news"
     # Draws and resolves a card from the news deck (data-driven via Events.csv).
@@ -285,7 +285,7 @@ class NewsEffect:
       - "market_random": roll the d20 distribution N times for each listed
             resource. payload = {"resources": ["H2O", ...], "rolls": 1}
       - "trigger": re-fire one of the standard event types in-place.
-            payload = {"event": "power_bill"|"debt_collection"|"futures_settlement"}
+            payload = {"event": "power_bill"|"debt_collection"|"futures_trading"}
     """
     kind: str
     payload: dict
@@ -332,7 +332,7 @@ class EventDeckConfig:
     """
     power_bill_count: int | tuple[int, int] | None = None
     debt_collection_count: int | tuple[int, int] | None = None
-    futures_settlement_count: int | tuple[int, int] | None = None
+    futures_trading_count: int | tuple[int, int] | None = None
     news_bulletin_count: int | tuple[int, int] | None = None
     patent_auction_count: int | tuple[int, int] | None = None
     draw_building_count: int | tuple[int, int] | None = None
@@ -754,18 +754,21 @@ def compute_build_deficit(
 def compute_rate_time_value(resource: Resource, state: GameState) -> float:
     """Compute the time-dependent value of +1 rate of a resource.
 
-    END_GAME event fires both a power bill and a futures settlement, so
-    it counts toward both PWR and non-PWR collection totals.
+    END_GAME and END_ROUND events fire both a power bill and a futures
+    settlement, so they count toward both PWR and non-PWR collection
+    totals.  FUTURES_TRADING events only push prices (no debt).
     """
     remaining = state.remaining_events()
     price = state.market.price(resource)
     end_game = remaining.get(EventType.END_GAME, 0)
+    end_round = remaining.get(EventType.END_ROUND, 0)
 
     if resource == Resource.PWR:
-        collections = remaining.get(EventType.POWER_BILL, 0) + end_game
+        collections = remaining.get(EventType.POWER_BILL, 0) + end_round + end_game
         return price * collections
     else:
-        collections = remaining.get(EventType.FUTURES_SETTLEMENT, 0) + end_game
+        # Debt only at END_ROUND and END_GAME (not FUTURES_TRADING)
+        collections = end_round + end_game
         return price * collections
 
 
@@ -780,10 +783,10 @@ def execute_build(
     """Play one or more building cards.
 
     Returns ActionRecord on success, None if:
-      - the player has already built this turn (one build action per turn),
+      - the player has already built this turn (unless Matter Replication),
       - the build cards would exceed MAX_CARDS_PER_TURN.
     """
-    if player.has_built_this_turn:
+    if player.has_built_this_turn and not _player_owns_patent(player, "Matter Replication"):
         return None
 
     n_build_cards = len(build_indices)
@@ -1641,11 +1644,37 @@ def do_debt_collection(state: GameState) -> None:
             )
 
 
+def do_futures_trading(state: GameState) -> None:
+    """Negative rates push market prices up, but no debt is charged.
+
+    This fires on FUTURES_TRADING event cards. The market rises by the
+    total negative rates across all players for each non-PWR resource.
+    """
+    _record_event_line(state, kind="header", text="Futures Trading")
+    total_negatives: dict[Resource, int] = {
+        r: 0 for r in Resource if r != Resource.PWR
+    }
+    for player in state.players:
+        for r in total_negatives:
+            rate = player.rate(r)
+            if rate < 0:
+                total_negatives[r] += abs(rate)
+
+    for r, total in total_negatives.items():
+        if total > 0:
+            state.market.adjust(r, total)
+            _record_event_line(
+                state, kind="note",
+                text=f"{r.value} market +{total} (negative rates)",
+            )
+
+
 def do_futures_settlement(state: GameState) -> None:
     """Players with negative resources buy at market rate (as debt).
 
     All players pay the price at the start of settlement. Then the market
     rises by the total negative rates across all players for each resource.
+    Fires at END_ROUND and END_GAME only.
     """
     _record_event_line(state, kind="header", text="Futures Settlement")
     # Snapshot prices before any market shifts
@@ -1764,6 +1793,8 @@ def _apply_news_effect(state: GameState, effect: NewsEffect, active_player: Play
         if which == "debt_collection":
             do_debt_collection(state)
             return "→ debt collection"
+        if which == "futures_trading":
+            do_futures_trading(state)
         if which == "futures_settlement":
             do_futures_settlement(state)
             return "→ futures settlement"
@@ -2127,9 +2158,9 @@ def execute_event(state: GameState, event: EventCard, active_player: Player) -> 
         case EventType.DEBT_COLLECTION:
             do_debt_collection(state)
             detail = "debt collection"
-        case EventType.FUTURES_SETTLEMENT:
-            do_futures_settlement(state)
-            detail = "futures settlement"
+        case EventType.FUTURES_TRADING:
+            do_futures_trading(state)
+            detail = "futures trading"
         case EventType.NEWS:
             detail = do_news(state, event)
         case EventType.NEWS_BULLETIN:
@@ -2307,10 +2338,11 @@ def _rate_ongoing_value(
 ) -> float:
     """Value of +1 rate of a resource for the rest of the game.
 
-    PWR: earns automatically at power bills → avg_price × bills.
+    PWR: earns automatically at power bills → avg_price × bills,
+        plus OC fuel premium if player owns Optimization Center.
     Non-PWR with player: max of sell income vs futures cost, plus
-        patent synergies (Water Engine, OC conversion) and contract
-        proximity bonus.
+        Water Engine premium (H2O only), OC new-target bonus (rate
+        <= 0 only), and contract proximity bonus.
     Non-PWR without player: futures cost only.
     """
     remaining = state.remaining_events()
@@ -2318,10 +2350,24 @@ def _rate_ongoing_value(
     if resource == Resource.PWR:
         bills = (
             remaining.get(EventType.POWER_BILL, 0)
+            + remaining.get(EventType.END_ROUND, 0)
             + remaining.get(EventType.END_GAME, 0)
         )
         avg_price = _expected_price(resource, state)
-        return avg_price * bills
+        pwr_raw = avg_price * bills
+
+        # OC synergy: PWR is fuel for OC (-1 PWR → +1 best rate).
+        # Additive premium: how much more the best conversion output
+        # is worth compared to the raw PWR value itself.
+        if player and _count_buildings(player, "Optimization Center") > 0:
+            best_other = max(
+                (_rate_ongoing_value(r, state)  # no player → avoids recursion
+                 for r in Resource if r != Resource.PWR),
+                default=0,
+            )
+            pwr_raw += max(0, best_other - pwr_raw)
+
+        return pwr_raw
 
     # Non-PWR: max of sell income vs futures cost
     sell_value = 0.0
@@ -2335,32 +2381,29 @@ def _rate_ongoing_value(
         remaining.get(EventType.END_ROUND, 0)
         + remaining.get(EventType.END_GAME, 0)
     )
-    settlements = remaining.get(EventType.FUTURES_SETTLEMENT, 0) + end_events
+    # Debt only at END_ROUND and END_GAME (FUTURES_TRADING only pushes prices)
+    settlements = end_events
     futures_value = state.market.price(resource) * settlements
 
     base = max(sell_value, futures_value)
 
     # Patent synergies and contract bonus (only when player is known)
     if player:
-        # Water Engine: +1 H2O can become +2 PWR
+        # Water Engine: +1 H2O can become +2 PWR (free action).
+        # Additive premium: how much more 2×PWR is worth vs raw H2O.
         if resource == Resource.H2O and _player_owns_patent(player, "Water Engine"):
             pwr_value = _rate_ongoing_value(Resource.PWR, state, player) * 2
-            base = max(base, pwr_value)
+            base += max(0, pwr_value - base)
 
-        # OC: any positive non-PWR rate can become +1 of something better
+        # OC new-target synergy: if this resource has rate <= 0 and player
+        # has OC, gaining +1 here unlocks it as an OC conversion target.
+        # Premium = net conversion value (resource value minus PWR cost).
         if (
-            resource != Resource.PWR
-            and _count_buildings(player, "Optimization Center") > 0
+            _count_buildings(player, "Optimization Center") > 0
+            and player.rate(resource) <= 0
         ):
             pwr_cost = _rate_ongoing_value(Resource.PWR, state, player)
-            best_other = max(
-                (_rate_ongoing_value(r, state)  # no player → avoids recursion
-                 for r in Resource if r != Resource.PWR and r != resource),
-                default=0,
-            )
-            converted = best_other - pwr_cost
-            if converted > base:
-                base = converted
+            base += max(0, base - pwr_cost)
 
         # Contract proximity bonus
         from my_project.strategies import _contract_proximity_bonus
@@ -2444,21 +2487,20 @@ def _execute_free_actions(state: GameState, player: Player) -> list[str]:
                 player.has_used_teleportation_this_turn = True
                 fired.append(f"Teleportation: sold {rate} {best.value} for ${revenue}, -1 PWR (cost ${pwr_cost:.0f})")
 
-    # Nanotechnology: discard the least useful hand card if it's below
-    # the average value of cards remaining in the deck. The expected value
-    # of a random draw is the deck average — discard if worst < average.
+    # Nanotechnology: replace the least useful pool card with a deck draw
+    # if the worst pool card is below the average deck value.
     if (
         _player_owns_patent(player, "Nanotechnology")
         and not player.has_used_nanotechnology_this_turn
-        and player.hand
+        and state.pool
     ):
         from my_project.strategies import _card_value
 
         worst_idx = min(
-            range(len(player.hand)),
-            key=lambda i: _card_value(player.hand[i], player, state),
+            range(len(state.pool)),
+            key=lambda i: _card_value(state.pool[i], player, state),
         )
-        worst_val = _card_value(player.hand[worst_idx], player, state)
+        worst_val = _card_value(state.pool[worst_idx], player, state)
 
         # Compute average value of cards in the deck (what we'd expect to draw)
         deck_cards = state.deck.cards
@@ -2470,13 +2512,13 @@ def _execute_free_actions(state: GameState, player: Player) -> list[str]:
             avg_deck_val = 0.0
 
         if worst_val < avg_deck_val:
-            discarded = player.hand.pop(worst_idx)
+            discarded = state.pool.pop(worst_idx)
             state.deck.discard.append(discarded)
             drawn = state.deck.draw(1)
-            player.hand.extend(drawn)
+            state.pool.extend(drawn)
             player.has_used_nanotechnology_this_turn = True
             new_name = drawn[0].building if drawn else "(empty)"
-            fired.append(f"Nanotechnology: discarded {discarded.building}, drew {new_name}")
+            fired.append(f"Nanotechnology: replaced pool card {discarded.building} with {new_name}")
 
     return fired
 

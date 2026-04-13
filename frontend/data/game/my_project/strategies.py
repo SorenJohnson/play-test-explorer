@@ -19,6 +19,7 @@ from my_project.simulation import (
     GameState,
     Player,
     _count_buildings,
+    _player_owns_patent,
     compute_build_deficit,
     effective_contract_requirements,
     swap_pool_card,
@@ -138,7 +139,8 @@ def random_strategy(state: GameState, player: Player) -> Action:
     # Build: each card costs 1 AP, so requires has_cards. Random only proposes
     # single-card builds.
     cr = player.cards_remaining()
-    if has_cards and not player.has_built_this_turn:
+    can_build = not player.has_built_this_turn or _player_owns_patent(player, "Matter Replication")
+    if has_cards and can_build:
         for i, card in enumerate(player.hand):
             result = compute_build_deficit([card], player, state.market)
             if result is not None:
@@ -244,9 +246,10 @@ def greedy_strategy(state: GameState, player: Player) -> Action:
 
     # Score build options (subsets of current hand, capped at 2 cards AND
     # at the player's remaining action points).
-    # Rule: only one build action per turn. Skip entirely if already built.
+    # Rule: only one build action per turn (unless Matter Replication).
     cr = player.cards_remaining()
-    if has_cards and not player.has_built_this_turn:
+    can_build = not player.has_built_this_turn or _player_owns_patent(player, "Matter Replication")
+    if has_cards and can_build:
         max_build_size = min(cr, len(player.hand))
         for size in range(1, max_build_size + 1):
             for build_combo in combinations(hand_indices, size):
@@ -534,7 +537,7 @@ def _mechanical_building_value(card: Card, state: GameState, player: Player) -> 
                 "Superconductors", "Energy Vault", "Financial Instruments",
                 "Water Engine", "Nanotechnology", "Cold Fusion", "Virtual Reality",
                 "Perpetual Motion", "Carbon Scrubbing", "Slant Drilling",
-                "Thinking Machines", "Teleportation",
+                "Thinking Machines", "Teleportation", "Matter Replication",
             )],
             reverse=True,
         )
@@ -577,7 +580,8 @@ def _mechanical_building_value(card: Card, state: GameState, player: Player) -> 
             remaining.get(EventType.END_ROUND, 0)
             + remaining.get(EventType.END_GAME, 0)
         )
-        settlements = remaining.get(EventType.FUTURES_SETTLEMENT, 0) + end_events
+        # Debt only at END_ROUND and END_GAME (FUTURES_TRADING only pushes prices)
+        settlements = end_events
         for r in Resource:
             if r == Resource.PWR or player.rate(r) >= 0:
                 continue
@@ -599,6 +603,83 @@ def _mechanical_building_value(card: Card, state: GameState, player: Player) -> 
         )
         dome_bonus = PLEASURE_DOME_TIERS[0] if PLEASURE_DOME_TIERS else 20
         return dome_bonus * bills_left
+
+    # --- Build-hook patents: value = bonus_per_build × expected_tagged_builds ---
+    # Count tagged cards dynamically from hand + pool + deck (no hardcoded fractions).
+    import math
+    from my_project.simulation import building_tags
+    total_events = sum(remaining.values())
+    player_turns = total_events / max(len(state.players), 1)
+    available = player.hand + state.pool + state.deck.cards
+    n_players = max(len(state.players), 1)
+
+    if name == "Superconductors":
+        # +1 PWR on power-tagged builds
+        bonus = _rate_ongoing_value(Resource.PWR, state, player)
+        tagged = sum(1 for c in available if "power" in building_tags(c))
+        expected = tagged / n_players
+        return bonus * min(expected, math.sqrt(player_turns))
+
+    if name == "Cold Fusion":
+        # +1 PWR on water-tagged builds
+        bonus = _rate_ongoing_value(Resource.PWR, state, player)
+        tagged = sum(1 for c in available if "water" in building_tags(c))
+        expected = tagged / n_players
+        return bonus * min(expected, math.sqrt(player_turns))
+
+    if name == "Slant Drilling":
+        # +1 FE on iron builds, +1 SI on silicon builds
+        fe_val = _rate_ongoing_value(Resource.FE, state, player)
+        si_val = _rate_ongoing_value(Resource.SI, state, player)
+        fe_tagged = sum(1 for c in available if "iron" in building_tags(c))
+        si_tagged = sum(1 for c in available if "silicon" in building_tags(c))
+        fe_exp = fe_tagged / n_players
+        si_exp = si_tagged / n_players
+        cap = math.sqrt(player_turns)
+        return fe_val * min(fe_exp, cap) + si_val * min(si_exp, cap)
+
+    if name == "Perpetual Motion":
+        # Strips -PWR from H2O/FE/C/SI builds → saves PWR cost
+        pwr_val = _rate_ongoing_value(Resource.PWR, state, player)
+        tagged = sum(
+            1 for c in available
+            if building_tags(c) & {"water", "iron", "carbon", "silicon"}
+            and any(ra.resource == Resource.PWR and ra.amount < 0 for ra in c.rates)
+        )
+        expected = tagged / n_players
+        return pwr_val * min(expected, math.sqrt(player_turns))
+
+    if name == "Carbon Scrubbing":
+        # Strips -C and -O2 from all builds
+        c_val = _rate_ongoing_value(Resource.C, state, player)
+        o2_val = _rate_ongoing_value(Resource.O2, state, player)
+        c_tagged = sum(
+            1 for c in available
+            if any(ra.resource == Resource.C and ra.amount < 0 for ra in c.rates)
+        )
+        o2_tagged = sum(
+            1 for c in available
+            if any(ra.resource == Resource.O2 and ra.amount < 0 for ra in c.rates)
+        )
+        cap = math.sqrt(player_turns)
+        return c_val * min(c_tagged / n_players, cap) + o2_val * min(o2_tagged / n_players, cap)
+
+    if name == "Matter Replication":
+        # Allows multiple 1-card build actions per turn. Value = savings from
+        # splitting builds: rates can offset each card's costs independently.
+        # Estimate: avg build-cost savings × expected builds per turn × turns.
+        import math
+        total_events = sum(remaining.values())
+        player_turns = total_events / max(len(state.players), 1)
+        # Average rate value across player's positive rates (what rates save)
+        pos_rates = [r for r in Resource if player.rate(r) > 0]
+        if pos_rates:
+            avg_rate_val = sum(
+                _rate_ongoing_value(r, state, player) for r in pos_rates
+            ) / len(pos_rates)
+            # Each split build saves roughly one rate's worth of deficit cost
+            return avg_rate_val * math.sqrt(player_turns)
+        return 0.0
 
     return 0.0
 
@@ -872,9 +953,10 @@ def smart_greedy_strategy(state: GameState, player: Player) -> Action:
     hand_indices = list(range(len(player.hand)))
 
     # Score build options.
-    # Rule: only one build action per turn. Skip entirely if already built.
+    # Rule: only one build action per turn (unless Matter Replication).
     cr = player.cards_remaining()
-    if has_cards and not player.has_built_this_turn:
+    can_build = not player.has_built_this_turn or _player_owns_patent(player, "Matter Replication")
+    if has_cards and can_build:
         max_build_size = min(cr, len(player.hand))
         for size in range(1, max_build_size + 1):
             for build_combo in combinations(hand_indices, size):
@@ -1060,7 +1142,8 @@ def _enumerate_actions(
     cr = player.cards_remaining()
 
     # --- Builds (1-2 cards) ---
-    if not player.has_built_this_turn and cr >= 1:
+    can_build = not player.has_built_this_turn or _player_owns_patent(player, "Matter Replication")
+    if can_build and cr >= 1:
         max_build = min(cr, len(player.hand))
         for size in range(1, max_build + 1):
             for combo in combinations(hand_indices, size):
@@ -1203,8 +1286,9 @@ def optimal_strategy(state: GameState, player: Player) -> Action:
     if not actions or actions[0][0] <= 0:
         return Action(ActionType.PASS)
 
-    # If only 1 card remaining or already used build, just take the best
-    if player.cards_remaining() <= 1 or player.has_built_this_turn:
+    # If only 1 card remaining or already used build (and no MR), just take the best
+    built_locked = player.has_built_this_turn and not _player_owns_patent(player, "Matter Replication")
+    if player.cards_remaining() <= 1 or built_locked:
         return actions[0][1]
 
     # 2-action lookahead: try top actions as action1, simulate, score action2

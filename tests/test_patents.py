@@ -1,4 +1,4 @@
-"""Tests for the 12 patents from Patents.csv (Phase 2 patent system).
+"""Tests for the patents from Patents.csv (Phase 2 patent system).
 
 Each patent's mechanical effect is wired up via hooks in simulation.py
 keyed on the patent's name. These tests construct patents directly and
@@ -396,15 +396,14 @@ class TestPatentBuildHooksRegistry:
 
 
 class TestPatentsCsv:
-    def test_parses_all_12_patents(self):
+    def test_parses_all_patents(self):
         patents = parse_patents(DATA / "Patents.csv")
-        # The 12 patents from the user's authored CSV
         names = {p.building for p in patents}
         expected = {
             "Superconductors", "Energy Vault", "Financial Instruments",
             "Water Engine", "Nanotechnology", "Cold Fusion", "Virtual Reality",
             "Perpetual Motion", "Carbon Scrubbing", "Slant Drilling",
-            "Thinking Machines", "Teleportation",
+            "Thinking Machines", "Teleportation", "Matter Replication",
         }
         assert names == expected
 

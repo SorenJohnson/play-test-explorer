@@ -749,7 +749,7 @@ def compute_rate_value_curves(
         return sum(1 for ec in deck if ec.type == et)
     end_game = _count(EventType.END_GAME)
     total_power_bills = _count(EventType.POWER_BILL) + end_game
-    total_settlements = _count(EventType.FUTURES_SETTLEMENT) + end_game
+    total_settlements = _count(EventType.END_ROUND) + end_game
     base_price = PRICE_TRACK[min(market_start_pos, len(PRICE_TRACK) - 1)]
 
     curves = {}

@@ -279,7 +279,7 @@ def parse_event_counts(path: Path, num_players: int) -> dict[str, int]:
         "news_bulletin": 0,
         "debt_collection": 0,
         "power_bill": 0,
-        "futures_settlement": 0,
+        "futures_trading": 0,
         "patent_auction": 0,
         "draw_building": 0,
         "draw_building_redraw": 0,

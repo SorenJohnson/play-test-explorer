@@ -40,7 +40,7 @@ class TestEventDeckConfig:
         assert _count(deck, EventType.NEWS_BULLETIN) == 3
         assert _count(deck, EventType.DEBT_COLLECTION) == 2
         assert _count(deck, EventType.POWER_BILL) == 1
-        assert _count(deck, EventType.FUTURES_SETTLEMENT) == 1
+        assert _count(deck, EventType.FUTURES_TRADING) == 1
         assert _count(deck, EventType.PATENT_AUCTION) == 4
         assert _count(deck, EventType.END_GAME) == 1
 
@@ -49,12 +49,12 @@ class TestEventDeckConfig:
         cfg = EventDeckConfig(
             power_bill_count=5,
             debt_collection_count=0,
-            futures_settlement_count=3,
+            futures_trading_count=3,
         )
         deck = build_event_deck(3, cfg, num_rounds=1)
         assert _count(deck, EventType.POWER_BILL) == 5
         assert _count(deck, EventType.DEBT_COLLECTION) == 0
-        assert _count(deck, EventType.FUTURES_SETTLEMENT) == 3
+        assert _count(deck, EventType.FUTURES_TRADING) == 3
 
     def test_news_events_inserted(self):
         """When news_pool is provided and news_count > 0, news events appear in the deck."""

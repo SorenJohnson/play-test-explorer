@@ -439,7 +439,8 @@ class PlayableGame:
             return {"ok": True, "type": "pass", "detail": "Pass"}
 
         if atype == "build":
-            if player.has_built_this_turn:
+            from my_project.simulation import _player_owns_patent
+            if player.has_built_this_turn and not _player_owns_patent(player, "Matter Replication"):
                 return {"ok": False, "reason": "Already built this turn"}
             build_idx = list(action.get("build_cards") or [])
             if not build_idx:
@@ -1004,9 +1005,11 @@ class PlayableGame:
                 },
             }
         player = self.current_player()
+        from my_project.simulation import _player_owns_patent
         already_built = player.has_built_this_turn
+        has_mr = _player_owns_patent(player, "Matter Replication")
         cr = player.cards_remaining()
-        max_build_cards = 0 if already_built else min(cr, len(player.hand))
+        max_build_cards = 0 if (already_built and not has_mr) else min(cr, len(player.hand))
 
         from my_project.simulation import _count_buildings
 
@@ -1201,7 +1204,8 @@ class PlayableGame:
         if not self.is_human_turn():
             return {"ok": False, "reason": "Not your turn"}
         player = self.current_player()
-        if player.has_built_this_turn:
+        from my_project.simulation import _player_owns_patent
+        if player.has_built_this_turn and not _player_owns_patent(player, "Matter Replication"):
             return {"ok": False, "reason": "Already built this turn"}
         if not build_indices:
             return {"ok": False, "reason": "No cards selected"}
