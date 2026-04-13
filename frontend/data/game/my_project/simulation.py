@@ -2300,19 +2300,20 @@ def _execute_free_actions(state: GameState, player: Player) -> list[str]:
                 player.has_used_optimization_center_this_turn = True
                 fired.append(f"Optimization Center: -1 PWR, +1 {best.value} (gain ${gain:.0f} > cost ${pwr_cost:.0f})")
 
-    # Water Engine: -1 H2O, +2 PWR.
+    # Water Engine: -1 H2O, +2 PWR. Always fire when H2O >= 1.
+    # Trading 1 H2O for 2 PWR is almost always profitable (2:1 ratio
+    # into the most frequently collected resource). The AI now values
+    # H2O buildings higher via _effective_rate_value when it owns WE,
+    # so it will seek out H2O to convert.
     if (
         _player_owns_patent(player, "Water Engine")
         and not player.has_used_water_engine_this_turn
         and player.rate(Resource.H2O) >= 1
     ):
-        h2o_cost = _rate_ongoing_value(Resource.H2O, state)
-        pwr_gain = 2 * _rate_ongoing_value(Resource.PWR, state)
-        if pwr_gain > h2o_cost:
-            player.rates[Resource.H2O] = player.rate(Resource.H2O) - 1
-            player.rates[Resource.PWR] = player.rate(Resource.PWR) + 2
-            player.has_used_water_engine_this_turn = True
-            fired.append(f"Water Engine: -1 H2O, +2 PWR (gain ${pwr_gain:.0f} > cost ${h2o_cost:.0f})")
+        player.rates[Resource.H2O] = player.rate(Resource.H2O) - 1
+        player.rates[Resource.PWR] = player.rate(Resource.PWR) + 2
+        player.has_used_water_engine_this_turn = True
+        fired.append("Water Engine: -1 H2O, +2 PWR")
 
     # Teleportation: free sell (rate × price cash), -1 PWR permanent.
     if (

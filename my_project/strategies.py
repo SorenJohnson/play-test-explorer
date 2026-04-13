@@ -558,17 +558,19 @@ def _score_build_value(cards, state: GameState, player: Player) -> float:
     Applies patent build hooks to copies of the cards so the score
     reflects the ACTUAL rates after hooks fire (e.g. Perpetual Motion
     strips -PWR, Superconductors adds +1 PWR).
+
+    Uses _effective_rate_value for positive rates, which accounts for
+    conversion patents (Water Engine makes H2O worth max(H2O, 2×PWR)).
     """
     hooked_cards = _apply_hooks_to_copy(cards, player, state)
     value = 0.0
     for card in hooked_cards:
         for ra in card.rates:
-            price = state.market.price(ra.resource)
             if ra.amount > 0:
-                value += _rate_value(ra.resource, price) * ra.amount
+                value += _effective_rate_value(ra.resource, ra.amount, state, player)
             else:
+                price = state.market.price(ra.resource)
                 value -= _rate_value(ra.resource, price) * abs(ra.amount)
-        # Special buildings: estimate value from their mechanical effect
         value += _special_building_value(card, state, player)
     return value
 
@@ -576,6 +578,49 @@ def _score_build_value(cards, state: GameState, player: Player) -> float:
 def _rate_value(resource: Resource, market_price: int) -> float:
     """Estimate ongoing value of +1 rate."""
     return market_price * 3
+
+
+def _effective_rate_value(
+    resource: Resource, amount: int, state: GameState, player: Player,
+) -> float:
+    """Value a rate gain accounting for conversion patents the player owns.
+
+    With Water Engine: +1 H2O is worth max(1×H2O_value, 2×PWR_value)
+    since you'd convert it if PWR is more valuable.
+
+    With Optimization Center: any +1 positive non-PWR rate can be
+    converted to +1 of the most valuable resource (at -1 PWR cost).
+    So its effective value is max(own_value, best_other_value - PWR_value).
+    """
+    from my_project.simulation import _player_owns_patent, _count_buildings
+
+    base = state.market.price(resource) * 3 * abs(amount)
+    if amount <= 0:
+        return base  # conversions only apply to positive rates
+
+    # Water Engine: +1 H2O can become +2 PWR
+    if resource == Resource.H2O and _player_owns_patent(player, "Water Engine"):
+        pwr_value = state.market.price(Resource.PWR) * 3 * 2  # 2 PWR per H2O
+        base = max(base, pwr_value) * amount
+
+    # OC: any positive non-PWR rate can become +1 of something better
+    # (at -1 PWR cost). Only worth it if the best target > this + PWR cost.
+    if (
+        resource != Resource.PWR
+        and _count_buildings(player, "Optimization Center") > 0
+    ):
+        pwr_cost = state.market.price(Resource.PWR) * 3
+        best_other = max(
+            (state.market.price(r) * 3 for r in Resource if r != Resource.PWR and r != resource),
+            default=0,
+        )
+        # You could convert: gain best_other, lose this rate + PWR
+        # Only relevant if best_other - pwr_cost > base (otherwise just keep the rate)
+        converted_value = best_other - pwr_cost
+        if converted_value > base / amount:
+            base = converted_value * amount
+
+    return base
 
 
 def _score_sell(state: GameState, player: Player, card) -> float:
@@ -709,7 +754,8 @@ def _smart_score_build_value(cards, state: GameState, player: Player) -> float:
 
     Applies patent build hooks to copies so the score reflects actual
     rates after hooks (e.g. Perpetual Motion strips -PWR).
-    Positive rates valued by sell/power-bill potential.
+    Positive rates use _effective_rate_value (accounts for conversion
+    patents like Water Engine making H2O worth max(H2O, 2×PWR)).
     Negative rates valued by settlement/power-bill cost.
     Special buildings valued by empirical CardValues.csv data.
     """
@@ -718,7 +764,7 @@ def _smart_score_build_value(cards, state: GameState, player: Player) -> float:
     for card in hooked_cards:
         for ra in card.rates:
             if ra.amount > 0:
-                value += _positive_rate_value(ra.resource, state) * ra.amount
+                value += _effective_rate_value(ra.resource, ra.amount, state, player)
             else:
                 value -= _negative_rate_cost(ra.resource, state) * abs(ra.amount)
         value += _special_building_value(card, state, player)
