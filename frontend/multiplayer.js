@@ -1317,6 +1317,16 @@ function broadcastFeed(entry) {
   Object.values(connections).forEach(c => c.send(msg));
 }
 
+function formatFeedText(raw) {
+  // Clean up Python detail strings for display
+  if (!raw) return "";
+  return raw
+    .replace(/; /g, "<br>")          // separate actions onto lines
+    .replace(/\n/g, "<br>")          // newlines to breaks
+    .replace(/\| /g, "<br>")         // pipe-separated events
+    .replace(/\$(\d+)/g, '<span class="feed-money">$$$1</span>');  // highlight dollar amounts
+}
+
 function renderFeed() {
   const container = document.getElementById("feed-entries");
   if (!container) return;
@@ -1327,48 +1337,57 @@ function renderFeed() {
     // Build detail content for expandable section
     let detailHtml = "";
     if (e.details) {
-      detailHtml += `<div class="feed-detail-text">${e.details}</div>`;
+      detailHtml += `<div class="feed-detail-text">${formatFeedText(e.details)}</div>`;
     }
     if (e.event_lines && e.event_lines.length > 0) {
+      detailHtml += `<div class="feed-lines">`;
       detailHtml += e.event_lines.map(line => {
         if (line.kind === "header") return `<div class="feed-line-header">${line.text}</div>`;
         if (line.kind === "note") return `<div class="feed-line-note">${line.text}</div>`;
         if (line.kind === "player") {
-          const nw = line.net_worth_after !== undefined ? ` (NW: $${line.net_worth_after})` : '';
-          return `<div class="feed-line-player">${line.name || ''}: ${line.text}${nw}</div>`;
+          const nw = line.net_worth_after !== undefined ? `<span class="feed-nw-inline">NW $${line.net_worth_after}</span>` : '';
+          return `<div class="feed-line-player"><span class="feed-line-name">${line.name || ''}</span> ${line.text} ${nw}</div>`;
         }
         return `<div class="feed-line-note">${line.text || ''}</div>`;
       }).join("");
+      detailHtml += `</div>`;
     }
     if (e.player_snapshots && e.player_snapshots.length > 0) {
       detailHtml += `<div class="feed-impact">${e.player_snapshots.map(p => {
         const cls = p.net_worth >= 0 ? "positive" : "negative";
-        return `<span class="feed-nw-chip ${cls}">${p.name}: $${p.net_worth}</span>`;
+        return `<span class="feed-nw-chip ${cls}">${p.name} $${p.net_worth}</span>`;
       }).join("")}</div>`;
     }
+
+    // Main text: split action text from event text for cleaner display
+    const mainText = formatFeedText(e.text || "");
+    const eventText = e.event ? formatFeedText(e.event) : "";
 
     if (hasDetails) {
       return `
         <details class="feed-entry ${kindClass}">
-          <summary>
+          <summary class="feed-summary">
             <span class="feed-time">${e.time || ''}</span>
-            <span class="feed-text">${e.text || ''}</span>
-            ${e.event ? `<span class="feed-event-label">${e.event}</span>` : ''}
+            <span class="feed-text">${mainText}</span>
           </summary>
-          <div class="feed-detail-body">${detailHtml}</div>
+          <div class="feed-detail-body">
+            ${eventText ? `<div class="feed-event-text">${eventText}</div>` : ''}
+            ${detailHtml}
+          </div>
         </details>
       `;
     }
     return `
       <div class="feed-entry ${kindClass}">
-        <div class="feed-time">${e.time || ''}</div>
-        <div class="feed-text">${e.text || ''}</div>
-        ${e.event ? `<div class="feed-event-label">${e.event}</div>` : ''}
+        <div class="feed-header-row">
+          <span class="feed-time">${e.time || ''}</span>
+          <span class="feed-text">${mainText}</span>
+        </div>
+        ${eventText ? `<div class="feed-event-text">${eventText}</div>` : ''}
       </div>
     `;
   }).join("");
   container.innerHTML = html;
-  // Auto-scroll to top (newest first)
   container.scrollTop = 0;
 }
 

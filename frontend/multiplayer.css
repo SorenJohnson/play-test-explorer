@@ -480,22 +480,35 @@ body {
 /* Unaffordable hand cards */
 .hand-card.unaffordable { opacity: 0.45; }
 
-/* ===== Feed Detail Styles ===== */
-details.feed-entry { cursor: pointer; }
-details.feed-entry summary { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
-details.feed-entry summary .feed-time { flex-shrink: 0; }
+/* ===== Feed Entry Styles ===== */
+.feed-entry { line-height: 1.4; }
+.feed-header-row { display: flex; gap: 6px; align-items: baseline; }
+.feed-summary { display: flex; gap: 6px; align-items: baseline; cursor: pointer; }
+.feed-summary::-webkit-details-marker { color: #6e7681; }
+.feed-time { color: #6e7681; font-size: 0.65rem; flex-shrink: 0; min-width: 55px; }
+.feed-text { color: #c9d1d9; }
+.feed-money { color: #3fb950; font-weight: 600; }
+.feed-event-text {
+  color: #f0883e;
+  font-size: 0.75rem;
+  margin: 3px 0;
+  padding-left: 8px;
+  border-left: 2px solid #f0883e33;
+}
 .feed-detail-body {
-  margin-top: 6px;
+  margin-top: 4px;
   padding: 6px 8px;
   background: #0d1117;
   border-radius: 4px;
   font-size: 0.75rem;
 }
-.feed-line-header { color: #58a6ff; font-weight: 600; margin: 4px 0 2px; }
-.feed-line-note { color: #8b949e; margin: 1px 0; }
-.feed-line-player { color: #c9d1d9; margin: 1px 0; }
-.feed-event-label { color: #f0883e; font-size: 0.75rem; }
-.feed-detail-text { color: #8b949e; margin-bottom: 4px; }
+.feed-detail-text { color: #8b949e; margin-bottom: 4px; line-height: 1.5; }
+.feed-lines { margin: 4px 0; }
+.feed-line-header { color: #58a6ff; font-weight: 600; margin: 6px 0 2px; font-size: 0.8em; text-transform: uppercase; }
+.feed-line-note { color: #8b949e; margin: 1px 0; padding-left: 8px; }
+.feed-line-player { color: #c9d1d9; margin: 2px 0; padding-left: 8px; }
+.feed-line-name { color: #58a6ff; font-weight: 500; }
+.feed-nw-inline { color: #8b949e; font-size: 0.85em; margin-left: 4px; }
 
 /* ===== Patent Actions ===== */
 .patent-action-row {
