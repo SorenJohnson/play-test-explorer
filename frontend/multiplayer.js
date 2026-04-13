@@ -1508,45 +1508,46 @@ function formatActionSummary(a) {
 
 function formatEventTitle(raw) {
   if (!raw) return "";
-  // Split on " + " to separate the primary event from modifiers (PWR adjust)
-  const parts = raw.split(/\s*\+\s*/);
-  let mainEvent = "";
+  // Extract PWR adjust from anywhere in the string first
   let pwrAdj = "";
-
-  for (const part of parts) {
-    const p = part.trim();
-    if (!p) continue;
-
-    if (p.match(/^PWR adjust/i)) {
-      const adj = p.match(/\(([^)]+)\)/);
-      if (adj) {
-        const val = adj[1].replace(/[^0-9+-]/g, "");
-        pwrAdj = parseInt(val) >= 0 ? `\u2191${val}` : `\u2193${val.replace("-", "")}`;
-      }
-      continue;
-    }
-    // Draw building card — just the card name, no "replaced" in title
-    if (p.startsWith("draw building card")) {
-      const match = p.match(/→\s*(.+?)(\s*\(replaced .+\))?$/);
-      mainEvent = match ? `Draw: ${match[1].trim()}` : "Draw Building Card";
-      continue;
-    }
-    if (p.startsWith("patent auction")) {
-      const match = p.match(/patent auction:\s*(.+)/i);
-      mainEvent = match ? `Patent Auction: ${match[1].trim()}` : "Patent Auction";
-      continue;
-    }
-    if (p.startsWith("futures trading")) { mainEvent = "Futures Trading"; continue; }
-    if (p.startsWith("futures settlement")) { mainEvent = "Futures Settlement"; continue; }
-    if (p.startsWith("power bill")) { mainEvent = "Power Bill"; continue; }
-    if (p.startsWith("debt collection")) { mainEvent = "Debt Collection"; continue; }
-    if (p.startsWith("END")) { mainEvent = p; continue; }
-    if (p.startsWith("awaiting prompt")) continue;
-    if (p.startsWith("Prompt resolved")) continue;
-    mainEvent = p.charAt(0).toUpperCase() + p.slice(1);
+  const pwrMatch = raw.match(/PWR adjust\s*\(([^)]+)\)/i);
+  if (pwrMatch) {
+    const val = pwrMatch[1].replace(/[^0-9+-]/g, "");
+    const num = parseInt(val);
+    if (!isNaN(num)) pwrAdj = num >= 0 ? `\u2191${num}` : `\u2193${Math.abs(num)}`;
   }
 
-  // Combine: "⚡ ↓1 Draw: Glass Factory" or "⚡ Power Bill"
+  // Strip the PWR adjust portion from the string for main event parsing
+  let clean = raw.replace(/\s*\+?\s*PWR adjust\s*\([^)]*\)/gi, "").trim();
+
+  // Parse main event
+  let mainEvent = "";
+  if (clean.match(/^draw building card/i)) {
+    const match = clean.match(/→\s*(.+?)(\s*\(replaced .+\))?$/);
+    mainEvent = match ? `Draw: ${match[1].trim()}` : "Draw Building Card";
+  } else if (clean.match(/^patent auction/i)) {
+    const match = clean.match(/patent auction:\s*(.+)/i);
+    mainEvent = match ? `Patent Auction: ${match[1].trim()}` : "Patent Auction";
+  } else if (clean.match(/^futures trading/i)) {
+    mainEvent = "Futures Trading";
+  } else if (clean.match(/^futures settlement/i)) {
+    mainEvent = "Futures Settlement";
+  } else if (clean.match(/^power bill/i)) {
+    mainEvent = "Power Bill";
+  } else if (clean.match(/^debt collection/i)) {
+    mainEvent = "Debt Collection";
+  } else if (clean.match(/^NEWS/i)) {
+    // "NEWS: Wage Increases (All -1 GLS, All -1 ELX)" → "News: Wage Increases"
+    const newsMatch = clean.match(/^NEWS:\s*(.+?)(\s*\(.*\))?$/i);
+    mainEvent = newsMatch ? `News: ${newsMatch[1].trim()}` : clean;
+  } else if (clean.match(/^END/)) {
+    mainEvent = clean;
+  } else if (clean.match(/^awaiting prompt|^Prompt resolved/i)) {
+    mainEvent = "";
+  } else {
+    mainEvent = clean.charAt(0).toUpperCase() + clean.slice(1);
+  }
+
   return pwrAdj ? `${pwrAdj} ${mainEvent}` : mainEvent;
 }
 
@@ -1835,11 +1836,15 @@ function wireGameButtons() {
     if (role === "host") {
       const result = game.end_human_turn().toJs({dict_converter: Object.fromEntries});
       const snapAfter = game.state_dict().toJs({dict_converter: Object.fromEntries});
+
+      // Emit event feed entries for the turn's event
       addEventFeedEntries(
         result.detail || "Turn ended",
         (result.lines || snapAfter.last_event_lines || []).map(l => Object.assign({}, l)),
         snapAfter.players.map(p => ({name: p.name, money: p.money, debt: p.debt, net_worth: p.net_worth})),
       );
+      humanTurnActions = [];
+
       if (result.awaiting_prompt) {
         hostRefreshState();
         handleHostPrompt(currentState.pending_prompt);
@@ -1853,12 +1858,19 @@ function wireGameButtons() {
   });
 }
 
+// Accumulate human actions during their turn for a grouped feed entry
+let humanTurnActions = [];
+
 function sendAction(action) {
   if (role === "host") {
     const result = game.apply_human_action(pyodide.toPy(action)).toJs({dict_converter: Object.fromEntries});
     if (result.ok) {
-      addFeedEntry({kind: "action", text: `You: ${result.detail}`});
-      broadcastFeed({kind: "action", text: `${currentState.players[mySeat]?.name}: ${result.detail}`});
+      humanTurnActions.push(result);
+      const playerName = currentState?.players[mySeat]?.name || "You";
+      const title = formatActionSummary(result);
+      // Show individual action in feed (concise)
+      addFeedEntry({kind: "action", text: `${playerName}: ${title}`});
+      broadcastFeed({kind: "action", text: `${playerName}: ${title}`});
     } else {
       alert(result.reason || "Action failed");
     }
