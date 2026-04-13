@@ -76,8 +76,11 @@
       <div id="game-area">
         <!-- Market -->
         <section class="game-section">
-          <h3 class="section-title">Market</h3>
+          <h3 class="section-title" style="cursor:pointer" id="market-toggle">Market <span style="font-size:0.7rem">(click for chart)</span></h3>
           <div id="mp-market-grid" class="market-grid"></div>
+          <div id="market-chart-wrap" style="display:none;margin-top:8px">
+            <canvas id="mp-market-chart" height="180"></canvas>
+          </div>
         </section>
 
         <!-- Contracts -->

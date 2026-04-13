@@ -29,7 +29,9 @@ let currentState = null;
 let currentLegal = null;
 let selectedCards = new Set();
 let selectedContract = -1;
+let pendingPoolSwap = -1;  // pool card index awaiting hand card click
 let feedEntries = [];
+let marketChart = null;
 
 // ===== Lobby =====
 
@@ -686,6 +688,43 @@ function renderMarket(s) {
       <div class="res-price">$${s.market[r] || 0}</div>
     </div>
   `).join("");
+  renderMarketChart(s);
+}
+
+function renderMarketChart(s) {
+  const history = s.market_history || [];
+  if (history.length < 2) return;
+  const canvas = document.getElementById("mp-market-chart");
+  if (!canvas) return;
+  const labels = history.map(h => h.turn);
+  const datasets = RESOURCE_ORDER.map(r => ({
+    label: r,
+    data: history.map(h => h.market?.[r] || 0),
+    borderColor: RESOURCE_COLORS[r],
+    backgroundColor: "transparent",
+    borderWidth: 1.5,
+    pointRadius: 0,
+    tension: 0.3,
+  }));
+  if (marketChart) {
+    marketChart.data.labels = labels;
+    marketChart.data.datasets = datasets;
+    marketChart.update("none");
+  } else {
+    marketChart = new Chart(canvas, {
+      type: "line",
+      data: {labels, datasets},
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {legend: {labels: {boxWidth: 10, font: {size: 10}, color: "#8b949e"}}},
+        scales: {
+          x: {display: true, ticks: {color: "#8b949e", font: {size: 9}}, grid: {color: "#21262d"}},
+          y: {display: true, ticks: {color: "#8b949e", font: {size: 9}, callback: v => "$" + v}, grid: {color: "#21262d"}},
+        },
+      },
+    });
+  }
 }
 
 function renderContracts(s) {
@@ -716,12 +755,26 @@ function renderContracts(s) {
 
 function renderPool(s) {
   const grid = document.getElementById("mp-pool-grid");
-  grid.innerHTML = (s.pool || []).map((c, i) => `
-    <div class="pool-card" data-pi="${i}">
-      <div class="card-name">${c.building}</div>
-      ${renderCardDetails(c)}
-    </div>
-  `).join("");
+  const myTurn = isMyTurn(s);
+  grid.innerHTML = (s.pool || []).map((c, i) => {
+    const pending = pendingPoolSwap === i ? "selected" : "";
+    return `
+      <div class="pool-card ${pending}" data-pi="${i}">
+        <div class="card-name">${c.building}</div>
+        ${renderCardDetails(c)}
+      </div>
+    `;
+  }).join("");
+  if (myTurn && s.can_pool_swap) {
+    grid.querySelectorAll(".pool-card").forEach(el => {
+      el.addEventListener("click", () => {
+        const pi = parseInt(el.dataset.pi);
+        pendingPoolSwap = pendingPoolSwap === pi ? -1 : pi;
+        renderPool(s);
+        renderHand(s);
+      });
+    });
+  }
 }
 
 function renderHand(s) {
@@ -735,27 +788,51 @@ function renderHand(s) {
     return;
   }
 
+  const swapping = pendingPoolSwap >= 0;
   grid.innerHTML = hand.map((c, i) => {
     const sel = selectedCards.has(i) ? "selected" : "";
     const dis = !myTurn ? "disabled" : "";
+    const swapHint = swapping ? "swap-target" : "";
     return `
-      <div class="hand-card ${sel} ${dis}" data-hi="${i}">
+      <div class="hand-card ${sel} ${dis} ${swapHint}" data-hi="${i}">
         <div class="card-name">${c.building}</div>
         ${renderCardDetails(c)}
       </div>
     `;
   }).join("");
 
+  if (swapping) {
+    document.getElementById("mp-build-estimate").textContent = "Click a hand card to swap with the selected pool card";
+  } else {
+    document.getElementById("mp-build-estimate").textContent = "";
+  }
+
   if (myTurn) {
     grid.querySelectorAll(".hand-card").forEach(el => {
       el.addEventListener("click", () => {
         const hi = parseInt(el.dataset.hi);
+        // Pool swap mode
+        if (pendingPoolSwap >= 0) {
+          executePoolSwap(hi, pendingPoolSwap);
+          pendingPoolSwap = -1;
+          return;
+        }
+        // Normal card selection
         if (selectedCards.has(hi)) selectedCards.delete(hi);
         else selectedCards.add(hi);
         renderHand(s);
         renderActions(s);
       });
     });
+  }
+}
+
+function executePoolSwap(handIdx, poolIdx) {
+  if (role === "host") {
+    game.human_pool_swap(handIdx, poolIdx);
+    hostRefreshState();
+  } else {
+    hostConn.send(JSON.stringify({type: "pool_swap", hand_idx: handIdx, pool_idx: poolIdx}));
   }
 }
 
@@ -784,6 +861,150 @@ function renderActions(s) {
   sellBtn.disabled = !myTurn || selectedCards.size !== 1;
   contractBtn.disabled = !myTurn || selectedContract < 0;
   passBtn.disabled = !myTurn;
+
+  renderPatentActions(s);
+  renderSpecialToggles(s);
+}
+
+function renderPatentActions(s) {
+  const host = document.getElementById("mp-patent-actions");
+  if (!host) return;
+  const myTurn = isMyTurn(s);
+  const pa = currentLegal?.patent_actions || {};
+  const parts = [];
+
+  if (pa.optimization_center?.owned) {
+    const status = pa.optimization_center;
+    const opts = (status.valid_resources || []).map(r => `<option value="${r}">${r}</option>`).join("");
+    const canUse = myTurn && status.available && opts;
+    parts.push(`
+      <div class="patent-action-row">
+        <strong>Optimization Center</strong> &mdash; -1 PWR, +1 to a positive rate.
+        <select id="pa-oc-resource" class="toggle-select" ${canUse ? "" : "disabled"}>
+          ${opts || '<option value="">none</option>'}
+        </select>
+        <button id="pa-oc-btn" class="action-btn" ${canUse ? "" : "disabled"}>Use OC</button>
+      </div>
+    `);
+  }
+  if (pa.water_engine?.owned) {
+    const status = pa.water_engine;
+    const canUse = myTurn && status.available;
+    parts.push(`
+      <div class="patent-action-row">
+        <strong>Water Engine</strong> &mdash; -1 H2O, +2 PWR.
+        <button id="pa-we-btn" class="action-btn" ${canUse ? "" : "disabled"}>Use WE</button>
+      </div>
+    `);
+  }
+  if (pa.nanotechnology?.owned) {
+    const status = pa.nanotechnology;
+    const pool = s.pool || [];
+    const poolOpts = pool.map((c, i) => `<option value="${i}">${i + 1}: ${c.building}</option>`).join("");
+    const canUse = myTurn && status.available && pool.length > 0;
+    parts.push(`
+      <div class="patent-action-row">
+        <strong>Nanotechnology</strong> &mdash; replace a pool card with a deck draw.
+        <select id="pa-nano-card" class="toggle-select" ${canUse ? "" : "disabled"}>
+          ${poolOpts || '<option value="">empty</option>'}
+        </select>
+        <button id="pa-nano-btn" class="action-btn" ${canUse ? "" : "disabled"}>Replace</button>
+      </div>
+    `);
+  }
+  if (pa.teleportation?.owned) {
+    const status = pa.teleportation;
+    const opts = (status.valid_resources || []).map(r => `<option value="${r}">${r}</option>`).join("");
+    const canUse = myTurn && status.available && opts;
+    parts.push(`
+      <div class="patent-action-row">
+        <strong>Teleportation</strong> &mdash; sell any resource, -1 PWR.
+        <select id="pa-tele-resource" class="toggle-select" ${canUse ? "" : "disabled"}>
+          ${opts || '<option value="">none</option>'}
+        </select>
+        <button id="pa-tele-btn" class="action-btn" ${canUse ? "" : "disabled"}>Sell</button>
+      </div>
+    `);
+  }
+
+  host.innerHTML = parts.length ? `<h4 style="color:#8b949e;font-size:0.75rem;margin:8px 0 4px">Patent Actions</h4>${parts.join("")}` : "";
+
+  // Wire buttons
+  document.getElementById("pa-oc-btn")?.addEventListener("click", () => {
+    const r = document.getElementById("pa-oc-resource")?.value;
+    if (!r) return;
+    sendPatentAction("oc", {resource: r});
+  });
+  document.getElementById("pa-we-btn")?.addEventListener("click", () => {
+    sendPatentAction("water_engine", {});
+  });
+  document.getElementById("pa-nano-btn")?.addEventListener("click", () => {
+    const idx = parseInt(document.getElementById("pa-nano-card")?.value);
+    if (isNaN(idx)) return;
+    sendPatentAction("nanotech", {pool_idx: idx});
+  });
+  document.getElementById("pa-tele-btn")?.addEventListener("click", () => {
+    const r = document.getElementById("pa-tele-resource")?.value;
+    if (!r) return;
+    sendPatentAction("teleport", {resource: r});
+  });
+}
+
+function sendPatentAction(action, params) {
+  if (role === "host") {
+    let result;
+    switch (action) {
+      case "water_engine":
+        result = game.use_water_engine(mySeat).toJs({dict_converter: Object.fromEntries});
+        break;
+      case "nanotech":
+        result = game.use_nanotechnology(mySeat, params.pool_idx).toJs({dict_converter: Object.fromEntries});
+        break;
+      case "oc":
+        result = game.use_optimization_center(mySeat, params.resource).toJs({dict_converter: Object.fromEntries});
+        break;
+      case "teleport":
+        result = game.use_teleportation(mySeat, params.resource).toJs({dict_converter: Object.fromEntries});
+        break;
+    }
+    if (result?.ok) {
+      addFeedEntry({kind: "free-action", text: `You: ${result.detail}`});
+      broadcastFeed({kind: "free-action", text: `${currentState.players[mySeat]?.name}: ${result.detail}`});
+    } else if (result) {
+      alert(result.reason || "Patent action failed");
+    }
+    hostRefreshState();
+  } else {
+    hostConn.send(JSON.stringify({type: "patent_action", action, ...params}));
+  }
+}
+
+function renderSpecialToggles(s) {
+  const host = document.getElementById("mp-special-toggles");
+  if (!host) return;
+  const myTurn = isMyTurn(s);
+  if (!myTurn || !currentLegal) { host.innerHTML = ""; return; }
+
+  const parts = [];
+  const se = currentLegal.space_elevator_status;
+  if (se?.owned) {
+    parts.push(`
+      <label class="toggle-label">
+        <input type="checkbox" id="toggle-se" ${se.available ? "" : "disabled"}>
+        Space Elevator (reduce 1 contract req)
+      </label>
+    `);
+  }
+  const lp = currentLegal.launch_pad_status;
+  if (lp?.owned) {
+    parts.push(`
+      <label class="toggle-label">
+        <input type="checkbox" id="toggle-lp" ${lp.available ? "" : "disabled"}>
+        Launch Pad (free contract, no card cost)
+      </label>
+    `);
+  }
+  host.innerHTML = parts.join("");
 }
 
 function renderOpponents(s) {
@@ -926,6 +1147,12 @@ function showEndgame() {
 // ===== Action Wiring =====
 
 function wireGameButtons() {
+  // Market chart toggle
+  document.getElementById("market-toggle")?.addEventListener("click", () => {
+    const wrap = document.getElementById("market-chart-wrap");
+    if (wrap) wrap.style.display = wrap.style.display === "none" ? "block" : "none";
+  });
+
   document.getElementById("mp-build-btn").addEventListener("click", () => {
     if (selectedCards.size === 0) return;
     sendAction({type: "build", build_cards: [...selectedCards]});
@@ -933,13 +1160,37 @@ function wireGameButtons() {
   });
   document.getElementById("mp-sell-btn").addEventListener("click", () => {
     if (selectedCards.size !== 1) return;
-    sendAction({type: "sell", sell_card: [...selectedCards][0]});
+    const cardIdx = [...selectedCards][0];
+    const me = currentState?.players[mySeat];
+    const card = me?.hand?.[cardIdx];
+    // If card has multiple sell options, pick the one with highest rate
+    let sellRes = null;
+    if (card?.can_sell?.length > 1) {
+      const best = card.can_sell.reduce((a, b) => {
+        const rateA = me.rates?.[a] || 0;
+        const rateB = me.rates?.[b] || 0;
+        return rateA * (currentState.market[a] || 0) >= rateB * (currentState.market[b] || 0) ? a : b;
+      });
+      sellRes = best;
+    }
+    const action = {type: "sell", sell_card: cardIdx};
+    if (sellRes) action.sell_resource = sellRes;
+    sendAction(action);
     selectedCards.clear();
   });
   document.getElementById("mp-contract-btn").addEventListener("click", () => {
     if (selectedContract < 0) return;
     const cardIdx = selectedCards.size === 1 ? [...selectedCards][0] : -1;
-    sendAction({type: "contract", contract_idx: selectedContract, card_idx: cardIdx});
+    const useSE = document.getElementById("toggle-se")?.checked || false;
+    const useLP = document.getElementById("toggle-lp")?.checked || false;
+    const action = {type: "contract", contract_idx: selectedContract};
+    if (useLP) {
+      action.use_launch_pad = true;
+    } else if (cardIdx >= 0) {
+      action.card_idx = cardIdx;
+    }
+    if (useSE) action.use_space_elevator = true;
+    sendAction(action);
     selectedCards.clear();
     selectedContract = -1;
   });
