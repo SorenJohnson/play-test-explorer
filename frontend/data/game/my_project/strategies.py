@@ -588,6 +588,18 @@ def _mechanical_building_value(card: Card, state: GameState, player: Player) -> 
 
         return sell_boost + futures_relief
 
+    if name == "Virtual Reality":
+        # Doubles Pleasure Dome bonus. Value = PD's ongoing value
+        # (what PD would earn over remaining power bills).
+        # Worth the same whether the player already has PD or might build it.
+        bills_left = (
+            remaining.get(EventType.POWER_BILL, 0)
+            + remaining.get(EventType.END_ROUND, 0)
+            + remaining.get(EventType.END_GAME, 0)
+        )
+        dome_bonus = PLEASURE_DOME_TIERS[0] if PLEASURE_DOME_TIERS else 20
+        return dome_bonus * bills_left
+
     return 0.0
 
 
