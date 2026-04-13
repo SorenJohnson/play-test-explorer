@@ -2283,6 +2283,9 @@ def _execute_free_actions(state: GameState, player: Player) -> list[str]:
     pwr_cost = _rate_ongoing_value(Resource.PWR, state)
 
     # Optimization Center: -1 PWR, +1 any positive non-PWR rate.
+    # Evaluate like a free building with -1 PWR and +1 target rate:
+    # fire when the expected return of +1 target over remaining events
+    # exceeds the loss of -1 PWR.
     if (
         _count_buildings(player, "Optimization Center") > 0
         and not player.has_used_optimization_center_this_turn
@@ -2294,26 +2297,28 @@ def _execute_free_actions(state: GameState, player: Player) -> list[str]:
         if candidates:
             best = max(candidates, key=lambda r: _rate_ongoing_value(r, state))
             gain = _rate_ongoing_value(best, state)
-            if gain > pwr_cost:
+            loss = _rate_ongoing_value(Resource.PWR, state)
+            if gain > loss:
                 player.rates[Resource.PWR] = player.rate(Resource.PWR) - 1
                 player.rates[best] = player.rate(best) + 1
                 player.has_used_optimization_center_this_turn = True
-                fired.append(f"Optimization Center: -1 PWR, +1 {best.value} (gain ${gain:.0f} > cost ${pwr_cost:.0f})")
+                fired.append(f"Optimization Center: -1 PWR, +1 {best.value} (return ${gain:.0f} > cost ${loss:.0f})")
 
-    # Water Engine: -1 H2O, +2 PWR. Always fire when H2O >= 1.
-    # Trading 1 H2O for 2 PWR is almost always profitable (2:1 ratio
-    # into the most frequently collected resource). The AI now values
-    # H2O buildings higher via _effective_rate_value when it owns WE,
-    # so it will seek out H2O to convert.
+    # Water Engine: -1 H2O, +2 PWR. Evaluate like a free building with
+    # -1 H2O rate and +2 PWR rate: fire when the expected return of
+    # +2 PWR over remaining events exceeds the loss of -1 H2O.
     if (
         _player_owns_patent(player, "Water Engine")
         and not player.has_used_water_engine_this_turn
         and player.rate(Resource.H2O) >= 1
     ):
-        player.rates[Resource.H2O] = player.rate(Resource.H2O) - 1
-        player.rates[Resource.PWR] = player.rate(Resource.PWR) + 2
-        player.has_used_water_engine_this_turn = True
-        fired.append("Water Engine: -1 H2O, +2 PWR")
+        gain = 2 * _rate_ongoing_value(Resource.PWR, state)
+        loss = _rate_ongoing_value(Resource.H2O, state)
+        if gain > loss:
+            player.rates[Resource.H2O] = player.rate(Resource.H2O) - 1
+            player.rates[Resource.PWR] = player.rate(Resource.PWR) + 2
+            player.has_used_water_engine_this_turn = True
+            fired.append(f"Water Engine: -1 H2O, +2 PWR (return ${gain:.0f} > cost ${loss:.0f})")
 
     # Teleportation: free sell (rate × price cash), -1 PWR permanent.
     if (
