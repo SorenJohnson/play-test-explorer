@@ -641,25 +641,22 @@ function extractTrajectoriesFromGames(games) {
   return out;
 }
 
-// Compute per-turn mean and standard deviation from trajectories.
-function computeBandStats(trajectories) {
+// Compute per-turn percentiles from trajectories for confidence bands.
+function computeBandPercentiles(trajectories) {
   const maxLen = Math.max(0, ...trajectories.map((t) => t.length));
-  const mean = [];
-  const std = [];
+  const p25 = [], p75 = [], p10 = [], p90 = [];
   for (let i = 0; i < maxLen; i++) {
-    const vals = trajectories.filter((t) => i < t.length).map((t) => t[i]);
-    if (vals.length === 0) { mean.push(0); std.push(0); continue; }
-    const m = vals.reduce((a, b) => a + b, 0) / vals.length;
-    const variance = vals.reduce((a, v) => a + (v - m) ** 2, 0) / vals.length;
-    mean.push(m);
-    std.push(Math.sqrt(variance));
+    const vals = trajectories.filter((t) => i < t.length).map((t) => t[i]).sort((a, b) => a - b);
+    if (vals.length === 0) { p25.push(0); p75.push(0); p10.push(0); p90.push(0); continue; }
+    p25.push(percentile(vals, 25));
+    p75.push(percentile(vals, 75));
+    p10.push(percentile(vals, 10));
+    p90.push(percentile(vals, 90));
   }
-  return { mean, std };
+  return { p10, p25, p75, p90 };
 }
 
-// Build confidence band datasets (1σ at 30% opacity, 2σ at 10% opacity).
-// Uses Chart.js fill plugin: each band is a pair of upper/lower datasets
-// with fill targeting each other.
+// Build percentile band datasets (P25-P75 at 25% opacity, P10-P90 at 10% opacity).
 function buildSpreadDatasets(chart) {
   const games = getGamesForCurrentScenario();
   const sampled = sampleArray(games, SPREAD_SAMPLE_SIZE);
@@ -677,68 +674,50 @@ function buildSpreadDatasets(chart) {
   }
 
   for (const [r, trajs] of Object.entries(byResource)) {
-    if (trajs.length < 3) continue; // need enough games for meaningful stats
+    if (trajs.length < 3) continue;
     const color = RESOURCE_COLORS[r] || "#888";
     const avgIdx = chart.data.datasets.findIndex(
       (d) => d._kind === "avg" && d._resource === r
     );
     const avgVisible = avgIdx >= 0 ? chart.isDatasetVisible(avgIdx) : true;
-    const { mean, std } = computeBandStats(trajs);
+    const { p10, p25, p75, p90 } = computeBandPercentiles(trajs);
 
-    // 2σ band (95% coverage, very faint)
-    const upper2 = mean.map((m, i) => Math.min(m + 2 * std[i], 15));
-    const lower2 = mean.map((m, i) => Math.max(m - 2 * std[i], 0));
+    // P10-P90 band (80% of games, faint)
     chart.data.datasets.push({
-      label: `${r}__band2_upper`,
-      data: upper2,
-      borderWidth: 0,
-      pointRadius: 0,
-      tension: 0.3,
+      label: `${r}__p90`,
+      data: p90,
+      borderWidth: 0, pointRadius: 0, tension: 0.3,
       fill: "+1",
       backgroundColor: hexToRgba(color, 0.08),
       hidden: !avgVisible,
-      _resource: r,
-      _kind: "spread",
+      _resource: r, _kind: "spread",
     });
     chart.data.datasets.push({
-      label: `${r}__band2_lower`,
-      data: lower2,
-      borderWidth: 0,
-      pointRadius: 0,
-      tension: 0.3,
-      fill: false,
-      backgroundColor: "transparent",
+      label: `${r}__p10`,
+      data: p10,
+      borderWidth: 0, pointRadius: 0, tension: 0.3,
+      fill: false, backgroundColor: "transparent",
       hidden: !avgVisible,
-      _resource: r,
-      _kind: "spread",
+      _resource: r, _kind: "spread",
     });
 
-    // 1σ band (68% coverage, more visible)
-    const upper1 = mean.map((m, i) => Math.min(m + std[i], 15));
-    const lower1 = mean.map((m, i) => Math.max(m - std[i], 0));
+    // P25-P75 band (50% of games, more visible)
     chart.data.datasets.push({
-      label: `${r}__band1_upper`,
-      data: upper1,
-      borderWidth: 0,
-      pointRadius: 0,
-      tension: 0.3,
+      label: `${r}__p75`,
+      data: p75,
+      borderWidth: 0, pointRadius: 0, tension: 0.3,
       fill: "+1",
-      backgroundColor: hexToRgba(color, 0.20),
+      backgroundColor: hexToRgba(color, 0.22),
       hidden: !avgVisible,
-      _resource: r,
-      _kind: "spread",
+      _resource: r, _kind: "spread",
     });
     chart.data.datasets.push({
-      label: `${r}__band1_lower`,
-      data: lower1,
-      borderWidth: 0,
-      pointRadius: 0,
-      tension: 0.3,
-      fill: false,
-      backgroundColor: "transparent",
+      label: `${r}__p25`,
+      data: p25,
+      borderWidth: 0, pointRadius: 0, tension: 0.3,
+      fill: false, backgroundColor: "transparent",
       hidden: !avgVisible,
-      _resource: r,
-      _kind: "spread",
+      _resource: r, _kind: "spread",
     });
   }
 }
@@ -790,29 +769,26 @@ function buildMarketLegendTable(resources, stats) {
   if (!tbody) return;
   const chart = chartRegistry["market-trajectory-chart"];
 
-  // Compute final-price percentiles from raw game data
+  // Compute volatility (avg absolute turn-to-turn price change) from raw games
   const games = getGamesForCurrentScenario();
-  const finalPrices = {};
+  const byResource = extractTrajectoriesFromGames(games);
+  const volatility = {};
   for (const r of resources) {
-    const prices = [];
-    for (const g of games) {
-      const fm = g.final_market || {};
-      if (fm[r] !== undefined) prices.push(fm[r]);
+    const trajs = byResource[r] || [];
+    let totalDelta = 0, totalSteps = 0;
+    for (const traj of trajs) {
+      for (let i = 1; i < traj.length; i++) {
+        totalDelta += Math.abs(traj[i] - traj[i - 1]);
+        totalSteps++;
+      }
     }
-    prices.sort((a, b) => a - b);
-    finalPrices[r] = {
-      p25: percentile(prices, 25).toFixed(0),
-      p50: percentile(prices, 50).toFixed(0),
-      p75: percentile(prices, 75).toFixed(0),
-      min: prices.length ? prices[0] : "?",
-      max: prices.length ? prices[prices.length - 1] : "?",
-    };
+    volatility[r] = totalSteps > 0 ? (totalDelta / totalSteps).toFixed(2) : "?";
   }
 
   tbody.innerHTML = resources.map((r) => {
     const color = RESOURCE_COLORS[r] || "#888";
     const s = stats[r] || {};
-    const fp = finalPrices[r] || {};
+    const vol = volatility[r];
     return `
       <tr class="legend-row" data-resource="${r}" style="cursor:pointer; border-bottom:1px solid #21262d;">
         <td style="padding:4px;">
@@ -820,8 +796,8 @@ function buildMarketLegendTable(resources, stats) {
           <span style="color:${color}; font-weight:600;">${r}</span>
         </td>
         <td style="text-align:right; padding:4px; color:#c9d1d9;">$${s.avg}</td>
-        <td style="text-align:right; padding:4px; color:#8b949e;" title="25th / 50th / 75th percentile of final price">${fp.p25}-${fp.p50}-${fp.p75}</td>
-        <td style="text-align:right; padding:4px; color:#8b949e;" title="Min-Max final price">${fp.min}-${fp.max}</td>
+        <td style="text-align:right; padding:4px; color:#c9d1d9;">$${s.end}</td>
+        <td style="text-align:right; padding:4px; color:#8b949e;" title="Avg absolute price change per turn (volatility)">$${vol}</td>
       </tr>
     `;
   }).join("");
