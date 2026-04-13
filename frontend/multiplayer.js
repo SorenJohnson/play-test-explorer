@@ -290,7 +290,7 @@ function handleClientMessage(msg) {
       break;
     case "feed":
       addFeedEntry(msg.entry);
-      if (msg.entry.kind === "event") showEventBanner(msg.entry.text || "Event");
+      if (msg.entry.kind === "event") showEventBanner(formatEventTitle(msg.entry.text || "Event"));
       break;
     case "game_over":
       currentState = msg.state;
@@ -511,17 +511,14 @@ function hostAdvanceStep() {
 
   const aiActions = result.actions || [];
   const playerName = stateSnap.players[result.player_index]?.name || "AI";
-  const actionSummary = aiActions.map(a => a.detail || a.type).join("; ") || "Pass";
+  const actionSummary = aiActions.map(a => formatActionSummary(a)).join("; ") || "Pass";
   const eventDetail = result.event?.detail || "";
 
   // Step 1: Show AI actions + update board
   const actionEntry = {
     kind: "turn",
     text: `${playerName}: ${actionSummary}`,
-    details: aiActions.length > 0 ? aiActions.map(a => {
-      const nw = a.net_worth_after !== undefined ? ` (NW: $${a.net_worth_after})` : "";
-      return `${a.detail || a.type}${nw}`;
-    }).join("\n") : null,
+    actions: aiActions,
   };
   addFeedEntry(actionEntry);
   broadcastFeed(actionEntry);
@@ -538,7 +535,7 @@ function hostAdvanceStep() {
       };
       addFeedEntry(eventEntry);
       broadcastFeed(eventEntry);
-      showEventBanner(eventDetail);
+      showEventBanner(formatEventTitle(eventDetail));
       hostRefreshState();
     }
 
@@ -1376,6 +1373,67 @@ function fmtMoney(text) {
   return text.replace(/\$(\d+)/g, '<span class="feed-money">$$$1</span>');
 }
 
+function formatRates(rates) {
+  // {FE: 1, PWR: -1} → "+1 FE -1 PWR"
+  if (!rates || typeof rates !== "object") return "";
+  return Object.entries(rates)
+    .filter(([, v]) => v !== 0)
+    .map(([r, v]) => `<span class="${v > 0 ? 'rate-pos' : 'rate-neg'}">${v > 0 ? '+' : ''}${v} ${r}</span>`)
+    .join(" ");
+}
+
+function formatActionSummary(a) {
+  // Build a concise one-line summary with rates
+  if (a.type === "build") {
+    const names = (a.buildings || []).join(", ");
+    const cost = a.build_money_spent > 0 ? ` ($${a.build_money_spent})` : "";
+    const rates = formatRates(a.rates_gained);
+    return `Built ${names}${cost}${rates ? " " + rates : ""}`;
+  }
+  if (a.type === "sell") {
+    return `Sold ${a.sell_amount || ""} ${a.sell_resource || ""} for $${a.sell_revenue || 0}`;
+  }
+  if (a.type === "contract") {
+    return `Contract ${a.contract_label || ""} for $${a.contract_reward || 0}`;
+  }
+  if (a.type === "free_action") {
+    return a.detail || "Free action";
+  }
+  return a.detail || a.type || "?";
+}
+
+function formatEventTitle(raw) {
+  // "draw building card → Electronics Plant (replaced Glass Kiln) + PWR adjust (+5)"
+  // → "Draw Building Card · PWR Adjust +5"  (clean, capitalized, details in expand)
+  if (!raw) return "";
+  return raw
+    .split(" | ").map(part => {
+      // Extract the event type and clean it up
+      part = part.trim();
+      // Capitalize first letter of each word for the title
+      if (part.startsWith("draw building card")) {
+        const match = part.match(/→ (.+?)( \(replaced .+\))?$/);
+        const cardName = match ? match[1] : "";
+        const replaced = match && match[2] ? match[2] : "";
+        return `Draw Building Card: ${cardName}${replaced}`;
+      }
+      if (part.startsWith("futures trading")) return "Futures Trading";
+      if (part.startsWith("futures settlement")) return "Futures Settlement";
+      if (part.startsWith("power bill")) return "Power Bill";
+      if (part.startsWith("debt collection")) return "Debt Collection";
+      if (part.startsWith("patent auction")) {
+        return part.charAt(0).toUpperCase() + part.slice(1);
+      }
+      if (part.match(/^PWR adjust/i)) {
+        const adj = part.match(/\(([^)]+)\)/);
+        return `PWR Adjust ${adj ? adj[1] : ""}`;
+      }
+      if (part.startsWith("END")) return part;
+      // Default: capitalize
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    }).join(" · ");
+}
+
 function renderFeedEntry(e) {
   if (e.kind === "turn-start") {
     // Game kickoff or round marker
@@ -1394,18 +1452,22 @@ function renderFeedEntry(e) {
     const playerName = colonIdx > 0 ? e.text.substring(0, colonIdx) : "";
     const playerIdx = currentState?.players?.findIndex(p => p.name === playerName) ?? -1;
     const color = playerIdx >= 0 ? PLAYER_COLORS[playerIdx % PLAYER_COLORS.length] : "#8b949e";
-
-    // Action lines from the detail (each action on its own line)
-    const actions = (e.details || e.text || "").split("\n").filter(Boolean);
     const title = playerName || "Turn";
     const summary = colonIdx > 0 ? e.text.substring(colonIdx + 1).trim() : e.text;
 
-    // Only expandable if there are multiple actions
-    if (actions.length > 1) {
-      const actionHtml = actions.map(a => `<div class="feed-action-line">${fmtMoney(a)}</div>`).join("");
+    // Build detailed action lines with rates for the expandable section
+    const actionList = e.actions || [];
+    const hasDetailedActions = actionList.length > 0;
+
+    if (hasDetailedActions) {
+      const actionHtml = actionList.map(a => {
+        const rates = formatRates(a.rates_gained);
+        const nw = a.net_worth_after !== undefined ? `<span class="feed-nw-inline">NW $${a.net_worth_after}</span>` : "";
+        return `<div class="feed-action-line">${fmtMoney(a.detail || a.type)}${rates ? " " + rates : ""} ${nw}</div>`;
+      }).join("");
       return `
         <details class="feed-group turn" style="border-left-color:${color}">
-          <summary class="feed-group-title"><span class="feed-player-name" style="color:${color}">${title}</span> <span class="feed-time">${e.time}</span></summary>
+          <summary class="feed-group-title"><span class="feed-player-name" style="color:${color}">${title}</span> ${fmtMoney(summary)} <span class="feed-time">${e.time}</span></summary>
           <div class="feed-group-body">${actionHtml}</div>
         </details>
       `;
@@ -1418,14 +1480,16 @@ function renderFeedEntry(e) {
   }
 
   if (e.kind === "event") {
-    // Game event — expandable with event lines + player snapshots
+    // Game event — format title cleanly, expandable for per-player details
+    const eventTitle = formatEventTitle(e.text || "");
+
     let detailHtml = "";
     if (e.event_lines && e.event_lines.length > 0) {
       detailHtml += e.event_lines.map(line => {
         if (line.kind === "header") return `<div class="feed-line-header">${line.text}</div>`;
         if (line.kind === "note") return `<div class="feed-line-note">${fmtMoney(line.text)}</div>`;
         if (line.kind === "player") {
-          const nw = line.net_worth_after !== undefined ? `<span class="feed-nw-inline">NW ${fmtMoney("$" + line.net_worth_after)}</span>` : '';
+          const nw = line.net_worth_after !== undefined ? `<span class="feed-nw-inline">NW $${line.net_worth_after}</span>` : '';
           return `<div class="feed-line-player"><span class="feed-line-name">${line.name || ''}</span> ${fmtMoney(line.text)} ${nw}</div>`;
         }
         return `<div class="feed-line-note">${fmtMoney(line.text || '')}</div>`;
@@ -1438,20 +1502,17 @@ function renderFeedEntry(e) {
       }).join("")}</div>`;
     }
 
-    // Clean up the title: split piped events into a short label
-    const titleText = (e.text || "").split(" | ")[0].split(" + ")[0];
-
     if (detailHtml) {
       return `
         <details class="feed-group event">
-          <summary class="feed-group-title"><span class="feed-event-icon">&#9889;</span> ${fmtMoney(titleText)} <span class="feed-time">${e.time}</span></summary>
+          <summary class="feed-group-title"><span class="feed-event-icon">&#9889;</span> ${fmtMoney(eventTitle)} <span class="feed-time">${e.time}</span></summary>
           <div class="feed-group-body">${detailHtml}</div>
         </details>
       `;
     }
     return `
       <div class="feed-group event">
-        <div class="feed-group-title"><span class="feed-event-icon">&#9889;</span> ${fmtMoney(e.text)} <span class="feed-time">${e.time}</span></div>
+        <div class="feed-group-title"><span class="feed-event-icon">&#9889;</span> ${fmtMoney(eventTitle)} <span class="feed-time">${e.time}</span></div>
       </div>
     `;
   }
@@ -1641,7 +1702,7 @@ function wireGameButtons() {
       };
       addFeedEntry(turnEntry);
       broadcastFeed(turnEntry);
-      showEventBanner(result.detail || "Event");
+      showEventBanner(formatEventTitle(result.detail || "Event"));
       if (result.awaiting_prompt) {
         hostRefreshState();
         handleHostPrompt(currentState.pending_prompt);
