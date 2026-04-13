@@ -769,13 +769,13 @@ function renderMarket(s) {
     const pos = positions[r] ?? 9;
     const stepsDown = stepsToChange(pos, -1);
     const stepsUp = stepsToChange(pos, 1);
-    const dotsLeft = stepsDown > 0 ? "○".repeat(Math.min(stepsDown, 4)) : "—";
-    const dotsRight = stepsUp > 0 ? "○".repeat(Math.min(stepsUp, 4)) : "—";
+    const dotsLeft = stepsDown > 0 ? "○".repeat(Math.min(stepsDown, 4)) : "";
+    const dotsRight = stepsUp > 0 ? "○".repeat(Math.min(stepsUp, 4)) : "";
     const isExpanded = expandedMarketResource === r;
     return `
       <div class="market-cell ${isExpanded ? 'expanded' : ''}" data-res="${r}">
         <div class="res-name" style="color:${RESOURCE_COLORS[r]}">${r}</div>
-        <div class="res-price-row">
+        <div class="res-price-wrap">
           <span class="dots-down" title="${stepsDown} step${stepsDown !== 1 ? 's' : ''} down">${dotsLeft}</span>
           <span class="res-price">$${price}</span>
           <span class="dots-up" title="${stepsUp} step${stepsUp !== 1 ? 's' : ''} up">${dotsRight}</span>
@@ -822,7 +822,7 @@ function renderMarketRuler(s) {
         const resHere = resourcesAtPos[i] || [];
         const dots = resHere.map(r => {
           const isSelected = r === selectedRes;
-          return `<span class="ruler-res-dot ${isSelected ? 'selected' : ''}" style="border-color:${RESOURCE_COLORS[r]}" title="${r}"></span>`;
+          return `<span class="ruler-res-dot ${isSelected ? 'selected' : ''}" style="background:${RESOURCE_COLORS[r]}" title="${r}"></span>`;
         }).join("");
         return `<span class="ruler-pip ${isCurrent ? 'current' : ''}" style="${isCurrent ? 'border-color:' + selectedColor : ''}">
           <span class="ruler-dots-row">${dots}</span>
