@@ -1377,22 +1377,40 @@ function renderPlayerPanel(s) {
 
 function renderOpponents(s) {
   const strip = document.getElementById("mp-opponents");
-  strip.innerHTML = s.players.filter((_, i) => i !== mySeat).map((p, oi) => {
+  strip.innerHTML = s.players.filter((_, i) => i !== mySeat).map(p => {
     const realIdx = s.players.indexOf(p);
     const isActive = realIdx === s.current_player_index;
     const color = PLAYER_COLORS[realIdx % PLAYER_COLORS.length];
-    const rates = RESOURCE_ORDER.map(r => {
+
+    // Same rate-chip grid as player panel, slightly smaller
+    const ratesGrid = RESOURCE_ORDER.map(r => {
       const v = p.rates?.[r] || 0;
-      if (v === 0) return '';
-      return `<span style="color:${v > 0 ? '#3fb950' : '#f85149'}">${v > 0 ? '+' : ''}${v}${r}</span>`;
-    }).filter(Boolean).join(" ");
-    const buildings = (p.buildings_played || []).join(", ") || "none";
+      const cls = v > 0 ? "rate-pos" : v < 0 ? "rate-neg" : "rate-zero";
+      return `<div class="rate-chip sm ${cls}"><span class="rate-res" style="color:${RESOURCE_COLORS[r]}">${r}</span><span class="rate-val">${v > 0 ? "+" : ""}${v}</span></div>`;
+    }).join("");
+
+    // Buildings split into regular + specials + patents
+    const builtCards = p.built_cards || [];
+    const buildings = builtCards.filter(c => !c.effect && c.slot !== 5).map(c => c.building);
+    const specials = builtCards.filter(c => c.effect && c.slot !== 5);
+    const patents = builtCards.filter(c => c.slot === 5);
+    const buildingList = buildings.length ? buildings.join(", ") : "none";
+    const specialList = specials.map(c => `<span class="opp-special">${c.building}</span>`).join(" ");
+    const patentList = patents.map(c => `<span class="opp-patent">${c.building}</span>`).join(" ");
+
     return `
       <div class="opponent-card ${isActive ? 'active-turn' : ''}" style="border-left:3px solid ${color}">
-        <div class="opponent-name" style="color:${color}">${p.name}${p.is_human ? '' : ' (AI)'}</div>
-        <div class="opponent-stats">$${p.money}${p.debt > 0 ? ` | Debt: $${p.debt}` : ''} | NW: $${p.net_worth}</div>
-        <div class="opponent-rates">${rates || 'no rates'}</div>
-        <div class="opponent-buildings">${buildings}</div>
+        <div class="opponent-header">
+          <span class="opponent-name" style="color:${color}">${p.name}${p.is_human ? '' : ' (AI)'}</span>
+          <span class="opponent-nw" style="color:${p.net_worth >= 0 ? '#3fb950' : '#f85149'}">NW $${p.net_worth}</span>
+        </div>
+        <div class="opponent-money">
+          $${p.money}${p.debt > 0 ? ` <span style="color:#f85149">Debt $${p.debt}</span>` : ''}${p.credit > 0 ? ` <span style="color:#d29922">Credit $${p.credit}</span>` : ''} | ${p.contracts_fulfilled || 0} contracts
+        </div>
+        <div class="opponent-rates-grid">${ratesGrid}</div>
+        <div class="opponent-buildings">${buildingList}</div>
+        ${specialList ? `<div class="opponent-specials">${specialList}</div>` : ''}
+        ${patentList ? `<div class="opponent-specials">${patentList}</div>` : ''}
       </div>
     `;
   }).join("");

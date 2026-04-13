@@ -447,10 +447,23 @@ body {
   font-size: 0.8rem;
 }
 .opponent-card.active-turn { border-color: #f0883e; }
-.opponent-name { font-weight: 600; margin-bottom: 4px; }
-.opponent-stats { color: #8b949e; }
-.opponent-rates { font-size: 0.75rem; margin-top: 4px; }
-.opponent-buildings { font-size: 0.7rem; color: #8b949e; margin-top: 4px; }
+.opponent-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 2px; }
+.opponent-name { font-weight: 600; }
+.opponent-nw { font-weight: 600; font-size: 0.8rem; }
+.opponent-money { color: #8b949e; font-size: 0.75rem; margin-bottom: 4px; }
+.opponent-rates-grid {
+  display: grid;
+  grid-template-columns: repeat(9, 1fr);
+  gap: 2px;
+  margin-bottom: 4px;
+}
+.rate-chip.sm { padding: 2px 1px; font-size: 0.65rem; }
+.rate-chip.sm .rate-res { font-size: 0.5rem; }
+.rate-chip.sm .rate-val { font-size: 0.65rem; }
+.opponent-buildings { font-size: 0.65rem; color: #8b949e; }
+.opponent-specials { font-size: 0.65rem; margin-top: 2px; }
+.opp-special { color: #a371f7; margin-right: 6px; }
+.opp-patent { color: #d2a8ff; margin-right: 6px; }
 
 /* ===== Your Stats Bar ===== */
 .your-stats-bar {
