@@ -495,17 +495,26 @@ function hostAdvanceGame() {
 
     // AI turn
     const result = game.step_ai_turn().toJs({dict_converter: Object.fromEntries});
-    // Capture event lines for structured feed
     const stateSnap = game.state_dict().toJs({dict_converter: Object.fromEntries});
     const eventLines = (stateSnap.last_event_lines || []).map(l => Object.assign({}, l));
     const playerSnaps = stateSnap.players.map(p => ({name: p.name, money: p.money, debt: p.debt, net_worth: p.net_worth}));
+
+    // Build readable action summary from structured action list
+    const aiActions = result.actions || [];
+    const playerName = stateSnap.players[result.player_index]?.name || "AI";
+    const actionSummary = aiActions.map(a => a.detail || a.type).join("; ") || "Pass";
+    const eventDetail = result.event?.detail || "";
+
     const aiEntry = {
       kind: "turn",
-      text: `${result.player || 'AI'}: ${result.detail || 'took actions'}`,
-      event: result.event_detail,
+      text: `${playerName}: ${actionSummary}`,
+      event: eventDetail,
       event_lines: eventLines,
       player_snapshots: playerSnaps,
-      details: result.free_actions ? `Free actions: ${result.free_actions}` : null,
+      details: aiActions.length > 0 ? aiActions.map(a => {
+        const nw = a.net_worth_after !== undefined ? ` (NW: $${a.net_worth_after})` : "";
+        return `${a.detail || a.type}${nw}`;
+      }).join("\n") : null,
     };
     addFeedEntry(aiEntry);
     broadcastFeed(aiEntry);
