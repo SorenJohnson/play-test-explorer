@@ -152,9 +152,6 @@ async function loadPythonSources() {
 // `news_pool` is empty by default; populating it and bumping `news_count`
 // turns on news events.
 const DEFAULT_EVENT_CONFIG = {
-  power_bill_count: [3, 4],
-  debt_collection_count: [2, 4],
-  futures_settlement_count: [3, 4],
   news_count: 0,
   news_pool: [],
 };
