@@ -799,26 +799,36 @@ function buildMarketLegendTable(resources, stats) {
     `;
   }).join("");
 
-  // Wire row clicks to toggle chart visibility
+  // Wire row clicks: click isolates that resource (hides all others).
+  // Click the already-isolated resource to show all again.
+  let isolatedResource = null;
+
   tbody.querySelectorAll(".legend-row").forEach((row) => {
     row.addEventListener("click", () => {
       if (!chart) return;
       const resource = row.dataset.resource;
-      const avgIdx = chart.data.datasets.findIndex(
-        (d) => d._kind === "avg" && d._resource === resource
-      );
-      if (avgIdx < 0) return;
-      const willHide = chart.isDatasetVisible(avgIdx);
-      chart.setDatasetVisibility(avgIdx, !willHide);
-      // Also toggle spread bands for this resource
-      chart.data.datasets.forEach((d, i) => {
-        if (d._kind === "spread" && d._resource === resource) {
-          chart.setDatasetVisibility(i, !willHide && mdShowSpread);
-        }
-      });
+
+      if (isolatedResource === resource) {
+        // Already isolated — show all
+        isolatedResource = null;
+        chart.data.datasets.forEach((d, i) => {
+          if (d._kind === "avg") chart.setDatasetVisibility(i, true);
+          if (d._kind === "spread") chart.setDatasetVisibility(i, mdShowSpread);
+        });
+        tbody.querySelectorAll(".legend-row").forEach((r) => r.style.opacity = "1");
+      } else {
+        // Isolate this resource — hide all others
+        isolatedResource = resource;
+        chart.data.datasets.forEach((d, i) => {
+          const match = d._resource === resource;
+          if (d._kind === "avg") chart.setDatasetVisibility(i, match);
+          if (d._kind === "spread") chart.setDatasetVisibility(i, match && mdShowSpread);
+        });
+        tbody.querySelectorAll(".legend-row").forEach((r) => {
+          r.style.opacity = r.dataset.resource === resource ? "1" : "0.35";
+        });
+      }
       chart.update();
-      // Dim the row visually
-      row.style.opacity = willHide ? "0.35" : "1";
     });
   });
 }
