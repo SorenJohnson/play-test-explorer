@@ -1451,38 +1451,16 @@ function broadcastFeed(entry) {
   Object.values(connections).forEach(c => c.send(msg));
 }
 
-function addEventFeedEntries(eventDetail, eventLines, playerSnaps, eventData) {
-  // If we have structured event data, use it directly
-  if (eventData && eventData.event_type) {
-    const entry = {
-      kind: "event",
-      eventData: eventData,
-      event_lines: eventLines,
-      player_snapshots: eventData.player_snapshots || playerSnaps,
-    };
-    addFeedEntry(entry);
-    broadcastFeed(entry);
-    showEventBanner(buildEventTitle(eventData));
-    return;
-  }
-  // Fallback: split on "|" for legacy string-based events
-  if (!eventDetail) return;
-  const parts = eventDetail.split(/\s*\|\s*/);
-  for (let i = 0; i < parts.length; i++) {
-    const part = parts[i];
-    const title = formatEventTitle(part);
-    if (!title) continue;
-    const entry = {
-      kind: "event",
-      text: part,
-      event_lines: eventLines,
-      player_snapshots: i === parts.length - 1 ? playerSnaps : [],
-    };
-    addFeedEntry(entry);
-    broadcastFeed(entry);
-  }
-  const lastTitle = formatEventTitle(parts[parts.length - 1]);
-  if (lastTitle) showEventBanner(lastTitle);
+function addEventFeedEntries(_eventDetail, eventLines, playerSnaps, eventData) {
+  const entry = {
+    kind: "event",
+    eventData: eventData || {},
+    event_lines: eventLines,
+    player_snapshots: (eventData && eventData.player_snapshots) || playerSnaps,
+  };
+  addFeedEntry(entry);
+  broadcastFeed(entry);
+  showEventBanner(buildEventTitle(eventData || {}));
 }
 
 function buildEventTitle(ed) {
@@ -1554,50 +1532,7 @@ function formatActionSummary(a) {
   return a.detail || a.type || "?";
 }
 
-function formatEventTitle(raw) {
-  if (!raw) return "";
-  // Extract PWR adjust from anywhere in the string first
-  let pwrAdj = "";
-  const pwrMatch = raw.match(/PWR adjust\s*\(([^)]+)\)/i);
-  if (pwrMatch) {
-    const val = pwrMatch[1].replace(/[^0-9+-]/g, "");
-    const num = parseInt(val);
-    if (!isNaN(num)) pwrAdj = num >= 0 ? `\u2191${num}` : `\u2193${Math.abs(num)}`;
-  }
-
-  // Strip the PWR adjust portion from the string for main event parsing
-  let clean = raw.replace(/\s*\+?\s*PWR adjust\s*\([^)]*\)/gi, "").trim();
-
-  // Parse main event
-  let mainEvent = "";
-  if (clean.match(/^draw building card/i)) {
-    const match = clean.match(/→\s*(.+?)(\s*\(replaced .+\))?$/);
-    mainEvent = match ? `Draw: ${match[1].trim()}` : "Draw Building Card";
-  } else if (clean.match(/^patent auction/i)) {
-    const match = clean.match(/patent auction:\s*(.+)/i);
-    mainEvent = match ? `Patent Auction: ${match[1].trim()}` : "Patent Auction";
-  } else if (clean.match(/^futures trading/i)) {
-    mainEvent = "Futures Trading";
-  } else if (clean.match(/^futures settlement/i)) {
-    mainEvent = "Futures Settlement";
-  } else if (clean.match(/^power bill/i)) {
-    mainEvent = "Power Bill";
-  } else if (clean.match(/^debt collection/i)) {
-    mainEvent = "Debt Collection";
-  } else if (clean.match(/^NEWS/i)) {
-    // "NEWS: Wage Increases (All -1 GLS, All -1 ELX)" → "News: Wage Increases"
-    const newsMatch = clean.match(/^NEWS:\s*(.+?)(\s*\(.*\))?$/i);
-    mainEvent = newsMatch ? `News: ${newsMatch[1].trim()}` : clean;
-  } else if (clean.match(/^END/)) {
-    mainEvent = clean;
-  } else if (clean.match(/^awaiting prompt|^Prompt resolved/i)) {
-    mainEvent = "";
-  } else {
-    mainEvent = clean.charAt(0).toUpperCase() + clean.slice(1);
-  }
-
-  return pwrAdj ? `${pwrAdj} ${mainEvent}` : mainEvent;
-}
+// formatEventTitle removed — all events now use structured data via buildEventTitle()
 
 function renderFeedEntry(e) {
   if (e.kind === "turn-start") {
@@ -1667,8 +1602,7 @@ function renderFeedEntry(e) {
   }
 
   if (e.kind === "event") {
-    // Use structured data if available, fall back to string parsing
-    const eventTitle = e.eventData ? buildEventTitle(e.eventData) : formatEventTitle(e.text || "");
+    const eventTitle = buildEventTitle(e.eventData || {});
 
     let detailHtml = "";
     if (e.event_lines && e.event_lines.length > 0) {
