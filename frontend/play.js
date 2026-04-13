@@ -1297,7 +1297,7 @@ function renderPromptModal(prompt) {
             <div class="prompt-row">
               <label>${player.name}: $${d.debt} debt, $${d.money} cash</label>
               <input type="number" class="prompt-paydown-input" data-seat-idx="${d.seat}"
-                     min="0" max="${Math.min(d.debt, d.money)}" step="1" value="${Math.min(d.debt, d.money)}">
+                     min="0" max="${Math.min(d.debt, d.money)}" step="10" value="${Math.floor(Math.min(d.debt, d.money) / 10) * 10}">
               <span style="color:#8b949e; font-size:0.75rem;">$ to pay</span>
             </div>
           `;

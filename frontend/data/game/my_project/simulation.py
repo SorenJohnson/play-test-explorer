@@ -1601,10 +1601,14 @@ def do_power_bill(state: GameState) -> None:
 
 
 def _ai_debt_paydown(state: GameState, player: Player) -> int:
-    """AI heuristic: pay down debt with cash, keeping a reserve for builds."""
+    """AI heuristic: pay down debt with cash, keeping a reserve for builds.
+
+    Paydowns are in $10 increments (rounded down).
+    """
     reserve = 10  # minimum cash to keep for buying resources
     available = max(0, player.money - reserve)
-    return min(player.debt, available)
+    paydown = min(player.debt, available)
+    return (paydown // 10) * 10  # round down to $10 increments
 
 
 def do_debt_collection(state: GameState) -> None:
@@ -1627,7 +1631,8 @@ def do_debt_collection(state: GameState) -> None:
         if player.debt <= 0 or player.money <= 0:
             continue
         if idx in state.pending_debt_paydowns:
-            paydown = min(state.pending_debt_paydowns[idx], player.debt, player.money)
+            raw = min(state.pending_debt_paydowns[idx], player.debt, player.money)
+            paydown = (raw // 10) * 10  # round down to $10 increments
         else:
             paydown = _ai_debt_paydown(state, player)
         if paydown > 0:
