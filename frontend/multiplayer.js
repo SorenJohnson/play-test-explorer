@@ -1440,41 +1440,46 @@ function formatActionSummary(a) {
 
 function formatEventTitle(raw) {
   if (!raw) return "";
-  // Split on " | " (redraw chains) and " + " (modifiers like PWR adjust)
-  const parts = raw.split(/\s*\|\s*/).flatMap(p => p.split(/\s*\+\s*/));
-  const formatted = parts.map(part => {
-    part = part.trim();
-    if (!part) return "";
+  // Split on " + " to separate the primary event from modifiers (PWR adjust)
+  const parts = raw.split(/\s*\+\s*/);
+  let mainEvent = "";
+  let pwrAdj = "";
 
-    // Draw building card
-    if (part.startsWith("draw building card")) {
-      const match = part.match(/→\s*(.+?)(\s*\(replaced .+\))?$/);
-      const card = match ? match[1].trim() : "";
-      const replaced = match && match[2] ? match[2].trim() : "";
-      return `Draw Building Card: ${card}${replaced ? " " + replaced : ""}`;
-    }
-    // Patent auction
-    if (part.startsWith("patent auction")) {
-      const match = part.match(/patent auction:\s*(.+)/i);
-      return match ? `Patent Auction: ${match[1]}` : "Patent Auction";
-    }
-    // PWR adjust
-    if (part.match(/^PWR adjust/i)) {
-      const adj = part.match(/\(([^)]+)\)/);
-      return `PWR Adjust ${adj ? adj[1] : ""}`.trim();
-    }
-    // Known events
-    if (part.startsWith("futures trading")) return "Futures Trading";
-    if (part.startsWith("futures settlement")) return "Futures Settlement";
-    if (part.startsWith("power bill")) return "Power Bill";
-    if (part.startsWith("debt collection")) return "Debt Collection";
-    if (part.startsWith("END")) return part;
-    if (part.startsWith("awaiting prompt")) return "";
-    // Default: capitalize first letter
-    return part.charAt(0).toUpperCase() + part.slice(1);
-  }).filter(Boolean);
+  for (const part of parts) {
+    const p = part.trim();
+    if (!p) continue;
 
-  return formatted.join(" · ");
+    if (p.match(/^PWR adjust/i)) {
+      const adj = p.match(/\(([^)]+)\)/);
+      if (adj) {
+        const val = adj[1].replace(/[^0-9+-]/g, "");
+        pwrAdj = parseInt(val) >= 0 ? `\u2191${val}` : `\u2193${val.replace("-", "")}`;
+      }
+      continue;
+    }
+    // Draw building card — just the card name, no "replaced" in title
+    if (p.startsWith("draw building card")) {
+      const match = p.match(/→\s*(.+?)(\s*\(replaced .+\))?$/);
+      mainEvent = match ? `Draw: ${match[1].trim()}` : "Draw Building Card";
+      continue;
+    }
+    if (p.startsWith("patent auction")) {
+      const match = p.match(/patent auction:\s*(.+)/i);
+      mainEvent = match ? `Patent Auction: ${match[1].trim()}` : "Patent Auction";
+      continue;
+    }
+    if (p.startsWith("futures trading")) { mainEvent = "Futures Trading"; continue; }
+    if (p.startsWith("futures settlement")) { mainEvent = "Futures Settlement"; continue; }
+    if (p.startsWith("power bill")) { mainEvent = "Power Bill"; continue; }
+    if (p.startsWith("debt collection")) { mainEvent = "Debt Collection"; continue; }
+    if (p.startsWith("END")) { mainEvent = p; continue; }
+    if (p.startsWith("awaiting prompt")) continue;
+    if (p.startsWith("Prompt resolved")) continue;
+    mainEvent = p.charAt(0).toUpperCase() + p.slice(1);
+  }
+
+  // Combine: "⚡ ↓1 Draw: Glass Factory" or "⚡ Power Bill"
+  return pwrAdj ? `${pwrAdj} ${mainEvent}` : mainEvent;
 }
 
 function renderFeedEntry(e) {
