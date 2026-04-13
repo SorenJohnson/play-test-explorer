@@ -1936,7 +1936,7 @@ function wireGameButtons() {
     }).filter(Boolean);
     const destRect = document.getElementById("mp-your-stats")?.getBoundingClientRect();
 
-    sendAction({type: "build", build_cards: [...selectedCards]});
+    sendAction({type: "build", build_cards: [...selectedCards].map(Number)});
     clearSelection();
 
     // Animate cards flying to buildings area
@@ -1948,7 +1948,7 @@ function wireGameButtons() {
   });
   document.getElementById("mp-sell-btn").addEventListener("click", () => {
     if (selectedCards.size !== 1) return;
-    const cardIdx = [...selectedCards][0];
+    const cardIdx = Number([...selectedCards][0]);
     // Capture card rect
     const el = document.querySelectorAll("#mp-hand-grid .hand-card")[cardIdx];
     const cardRect = el?.getBoundingClientRect();
@@ -1971,7 +1971,7 @@ function wireGameButtons() {
   });
   document.getElementById("mp-contract-btn").addEventListener("click", () => {
     if (selectedContract < 0) return;
-    const cardIdx = selectedCards.size === 1 ? [...selectedCards][0] : -1;
+    const cardIdx = selectedCards.size === 1 ? Number([...selectedCards][0]) : -1;
     // Capture card rect
     const el = cardIdx >= 0 ? document.querySelectorAll("#mp-hand-grid .hand-card")[cardIdx] : null;
     const cardRect = el?.getBoundingClientRect();
