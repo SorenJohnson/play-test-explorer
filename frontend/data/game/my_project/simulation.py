@@ -1708,18 +1708,14 @@ def do_futures_trading(state: GameState) -> None:
 
 
 def do_futures_settlement(state: GameState) -> None:
-    """Players with negative resources buy at market rate (as debt).
+    """Players with negative non-PWR rates pay debt at current market price.
 
-    All players pay the price at the start of settlement. Then the market
-    rises by the total negative rates across all players for each resource.
-    Fires at END_ROUND and END_GAME only.
+    Fires at END_ROUND and END_GAME only. Does NOT move market prices —
+    price movement happens only during do_futures_trading() mid-round.
     """
     _record_event_line(state, kind="header", text="Futures Settlement")
-    # Snapshot prices before any market shifts
     starting_prices = {r: state.market.price(r) for r in Resource if r != Resource.PWR}
-    total_negatives: dict[Resource, int] = {r: 0 for r in starting_prices}
 
-    # All players pay debt at the snapshot price
     for player in state.players:
         per_resource_parts: list[str] = []
         total_cost = 0
@@ -1733,7 +1729,6 @@ def do_futures_settlement(state: GameState) -> None:
                 state.futures_units_bought[r] += shortage
                 state.futures_debt_per_resource[r] += cost
                 player.ledger.record_event_cost(r, cost, rate)
-                total_negatives[r] += shortage
                 # Per-player futures tracking
                 player.flow_futures_units[r] += shortage
                 player.flow_futures_cost[r] += cost
@@ -1748,11 +1743,6 @@ def do_futures_settlement(state: GameState) -> None:
                 player=player,
                 text=f"−${total_cost} (settled " + ", ".join(per_resource_parts) + ")",
             )
-
-    # Market rises by total negative rates per resource (no buying, just adjust)
-    for r, total in total_negatives.items():
-        if total > 0:
-            state.market.adjust(r, total)
 
 
 def do_news(state: GameState, event: EventCard) -> str:
