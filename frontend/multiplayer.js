@@ -478,7 +478,7 @@ function hostAdvanceGame() {
     const result = game.step_ai_turn().toJs({dict_converter: Object.fromEntries});
     // Capture event lines for structured feed
     const stateSnap = game.state_dict().toJs({dict_converter: Object.fromEntries});
-    const eventLines = (stateSnap.last_event_lines || []).map(l => ({...l}));
+    const eventLines = (stateSnap.last_event_lines || []).map(l => Object.assign({}, l));
     const playerSnaps = stateSnap.players.map(p => ({name: p.name, money: p.money, debt: p.debt, net_worth: p.net_worth}));
     const aiEntry = {
       kind: "turn",
@@ -654,7 +654,7 @@ function tryResolvePrompt() {
   const promptEntry = {
     kind: "event",
     text: result.detail || "Prompt resolved",
-    event_lines: (snapAfter.last_event_lines || []).map(l => ({...l})),
+    event_lines: (snapAfter.last_event_lines || []).map(l => Object.assign({}, l)),
     player_snapshots: snapAfter.players.map(p => ({name: p.name, money: p.money, debt: p.debt, net_worth: p.net_worth})),
   };
   addFeedEntry(promptEntry);
@@ -1437,7 +1437,7 @@ function wireGameButtons() {
       const turnEntry = {
         kind: "event",
         text: result.detail || "Turn ended",
-        event_lines: (result.lines || snapAfter.last_event_lines || []).map(l => ({...l})),
+        event_lines: (result.lines || snapAfter.last_event_lines || []).map(l => Object.assign({}, l)),
         player_snapshots: snapAfter.players.map(p => ({name: p.name, money: p.money, debt: p.debt, net_worth: p.net_worth})),
       };
       addFeedEntry(turnEntry);
