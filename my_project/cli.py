@@ -26,11 +26,8 @@ PUBLISH_DIR = Path("frontend/data")
 
 SCENARIOS = [
     {"name": "sim_3random", "strategies": ["random", "random", "random"]},
-    {"name": "sim_3smart", "strategies": ["smart", "smart", "smart"]},
     {"name": "sim_3optimal", "strategies": ["optimal", "optimal", "optimal"]},
     {"name": "sim_optimal_smart_random", "strategies": ["optimal", "smart", "random"]},
-    {"name": "sim_optimal_vs_smart", "strategies": ["optimal", "smart", "smart"]},
-    {"name": "sim_1optimal_2random", "strategies": ["optimal", "random", "random"]},
 ]
 
 
@@ -83,29 +80,39 @@ def cmd_simulate(args: argparse.Namespace) -> None:
         print(f"    {name:25s} {count:4d}x ({count/config.num_simulations:.1f}/game)")
 
 
-def cmd_simulate_all(args: argparse.Namespace) -> None:
-    """Run all standard scenarios and save full results."""
+def _run_one_scenario(scenario: dict, num_runs: int) -> tuple[str, float, float]:
+    """Run a single scenario — top-level function for ProcessPoolExecutor."""
     cards = parse_cards(DATA_DIR / "Cards.csv")
     contracts = parse_contracts(DATA_DIR / "Contracts.csv")
+    config = SimulationConfig(
+        num_simulations=num_runs,
+        num_players=DEFAULT_NUM_PLAYERS,
+        randomize_market=True,
+        strategy="greedy",
+        player_strategies=scenario["strategies"],
+    )
+    results = run_monte_carlo(cards, contracts, config)
+    output = FULL_DIR / f"{scenario['name']}.json"
+    FULL_DIR.mkdir(parents=True, exist_ok=True)
+    export_results(results, output)
+    return scenario["name"], results.avg_net_worth, results.avg_contracts
+
+
+def cmd_simulate_all(args: argparse.Namespace) -> None:
+    """Run all standard scenarios in parallel and save full results."""
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+
     FULL_DIR.mkdir(parents=True, exist_ok=True)
 
-    for scenario in SCENARIOS:
-        config = SimulationConfig(
-            num_simulations=args.runs,
-            num_players=DEFAULT_NUM_PLAYERS,
-            randomize_market=True,
-            strategy="greedy",
-            player_strategies=scenario["strategies"],
-        )
-
-        strat_desc = ", ".join(scenario["strategies"])
-        print(f"Running {scenario['name']} ({strat_desc})...")
-
-        results = run_monte_carlo(cards, contracts, config)
-        output = FULL_DIR / f"{scenario['name']}.json"
-        export_results(results, output)
-
-        print(f"  → {output} | avg NW: ${results.avg_net_worth:.0f}, contracts: {results.avg_contracts:.1f}")
+    print(f"Running {len(SCENARIOS)} scenarios in parallel ({args.runs} games each)...")
+    with ProcessPoolExecutor() as pool:
+        futures = {
+            pool.submit(_run_one_scenario, s, args.runs): s["name"]
+            for s in SCENARIOS
+        }
+        for future in as_completed(futures):
+            name, avg_nw, avg_c = future.result()
+            print(f"  ✓ {name} | avg NW: ${avg_nw:.0f}, contracts: {avg_c:.1f}")
 
     print(f"\nAll scenarios complete. Full data in {FULL_DIR}/")
     print("Run 'analyze' to generate analysis, then 'publish' to create trimmed files.")
