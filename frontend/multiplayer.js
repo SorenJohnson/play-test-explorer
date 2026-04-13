@@ -290,6 +290,7 @@ function handleClientMessage(msg) {
       break;
     case "feed":
       addFeedEntry(msg.entry);
+      if (msg.entry.kind === "event") showEventBanner(msg.entry.text || "Event");
       break;
     case "game_over":
       currentState = msg.state;
@@ -499,25 +500,35 @@ function hostAdvanceGame() {
     const eventLines = (stateSnap.last_event_lines || []).map(l => Object.assign({}, l));
     const playerSnaps = stateSnap.players.map(p => ({name: p.name, money: p.money, debt: p.debt, net_worth: p.net_worth}));
 
-    // Build readable action summary from structured action list
     const aiActions = result.actions || [];
     const playerName = stateSnap.players[result.player_index]?.name || "AI";
     const actionSummary = aiActions.map(a => a.detail || a.type).join("; ") || "Pass";
     const eventDetail = result.event?.detail || "";
 
-    const aiEntry = {
+    // Feed entry 1: AI actions
+    const actionEntry = {
       kind: "turn",
       text: `${playerName}: ${actionSummary}`,
-      event: eventDetail,
-      event_lines: eventLines,
-      player_snapshots: playerSnaps,
       details: aiActions.length > 0 ? aiActions.map(a => {
         const nw = a.net_worth_after !== undefined ? ` (NW: $${a.net_worth_after})` : "";
         return `${a.detail || a.type}${nw}`;
       }).join("\n") : null,
     };
-    addFeedEntry(aiEntry);
-    broadcastFeed(aiEntry);
+    addFeedEntry(actionEntry);
+    broadcastFeed(actionEntry);
+
+    // Feed entry 2: Event (separate, with banner)
+    if (eventDetail) {
+      const eventEntry = {
+        kind: "event",
+        text: eventDetail,
+        event_lines: eventLines,
+        player_snapshots: playerSnaps,
+      };
+      addFeedEntry(eventEntry);
+      broadcastFeed(eventEntry);
+      showEventBanner(eventDetail);
+    }
 
     if (result.awaiting_prompt) {
       hostRefreshState();
@@ -695,6 +706,22 @@ function tryResolvePrompt() {
   }
   hostRefreshState();
   hostAdvanceGame();
+}
+
+// ===== Event banner =====
+
+let eventBannerTimer = null;
+function showEventBanner(text) {
+  const el = document.getElementById("event-banner");
+  if (!el) return;
+  el.textContent = text;
+  el.style.display = "block";
+  // Re-trigger animation
+  el.style.animation = "none";
+  el.offsetHeight; // force reflow
+  el.style.animation = "";
+  clearTimeout(eventBannerTimer);
+  eventBannerTimer = setTimeout(() => { el.style.display = "none"; }, 3000);
 }
 
 // ===== Selection helpers =====
@@ -1570,6 +1597,7 @@ function wireGameButtons() {
       };
       addFeedEntry(turnEntry);
       broadcastFeed(turnEntry);
+      showEventBanner(result.detail || "Event");
       if (result.awaiting_prompt) {
         hostRefreshState();
         handleHostPrompt(currentState.pending_prompt);

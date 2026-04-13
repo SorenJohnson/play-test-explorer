@@ -1858,13 +1858,16 @@ def do_draw_building_card(state: GameState) -> str:
         _record_event_line(state, kind="header", text="Draw Building Card (deck empty)")
         return "draw building card (deck empty)"
     new_card = drawn[0]
+    evicted_name = None
     if state.pool:
         # FIFO: evict the oldest pool slot back to the discard pile.
         evicted = state.pool.pop(0)
         state.deck.discard.append(evicted)
+        evicted_name = evicted.building
     state.pool.append(new_card)
-    _record_event_line(state, kind="header", text=f"Drew {new_card.building} into pool")
-    return f"draw building card → {new_card.building}"
+    evict_text = f" (replaced {evicted_name})" if evicted_name else ""
+    _record_event_line(state, kind="header", text=f"Drew {new_card.building} into pool{evict_text}")
+    return f"draw building card → {new_card.building}{evict_text}"
 
 
 def _draw_patent(state: GameState) -> Card | None:
@@ -2684,6 +2687,8 @@ def run_game(
         num_rounds=num_rounds,
         patent_pile=patent_pile,
     )
+    # Snapshot initial market before any events (for analytics Turn 0)
+    state._initial_market = state.market.snapshot()
 
     # Build per-player strategy list
     if strategies is not None:
