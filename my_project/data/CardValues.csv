@@ -1,13 +1,13 @@
 Card,Type,Learned_Value,Std_Error,Early_Bonus,Mid_Bonus,Late_Bonus
-Superconductors,patent,22.6,0.0,22.2,23.0,0
-Energy Vault,patent,41.0,0.0,41.1,40.9,0
-Financial Instruments,patent,20.1,0.0,-7.6,47.7,0
-Water Engine,patent,-20.0,0.0,-25.6,-14.4,0
-Nanotechnology,patent,25.4,0.0,3.1,47.6,0
-Cold Fusion,patent,2.2,0.0,-17.9,22.3,0
-Virtual Reality,patent,43.2,0.0,60.2,26.3,0
-Perpetual Motion,patent,13.2,0.0,13.5,12.8,0
-Carbon Scrubbing,patent,10.6,0.0,16.9,4.3,0
-Slant Drilling,patent,11.8,0.0,4.1,19.4,0
-Thinking Machines,patent,-3.1,0.0,-7.8,1.6,0
-Teleportation,patent,58.6,0.0,54.3,63.0,0
+Superconductors,patent,29.1,0.0,17.2,41.1,0
+Energy Vault,patent,72.0,0.0,73.7,70.3,0
+Financial Instruments,patent,-42.9,0.0,-14.5,-71.3,0
+Water Engine,patent,-75.7,0.0,-48.1,-103.3,0
+Nanotechnology,patent,-0.5,0.0,22.4,-23.4,0
+Cold Fusion,patent,-11.1,0.0,32.0,-54.2,0
+Virtual Reality,patent,-45.8,0.0,-60.6,-30.9,0
+Perpetual Motion,patent,42.8,0.0,63.7,21.9,0
+Carbon Scrubbing,patent,13.2,0.0,-3.5,29.8,0
+Slant Drilling,patent,-27.9,0.0,-18.0,-37.8,0
+Thinking Machines,patent,-64.8,0.0,-60.6,-68.9,0
+Teleportation,patent,47.0,0.0,43.7,50.3,0
