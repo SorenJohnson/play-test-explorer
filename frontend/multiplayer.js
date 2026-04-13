@@ -929,7 +929,8 @@ function renderActions(s) {
   }
 
   // Sell: need exactly 1 card selected and it must be sellable
-  const sellCard = selectedCards.size === 1 ? s.players[mySeat]?.hand?.[...selectedCards][0] : null;
+  const sellCardIdx = selectedCards.size === 1 ? Array.from(selectedCards)[0] : -1;
+  const sellCard = sellCardIdx >= 0 ? (s.players[mySeat]?.hand || [])[sellCardIdx] : null;
   const canSell = myTurn && sellCard?.can_sell?.length > 0 && cr >= 1;
   sellBtn.disabled = !canSell;
 
