@@ -734,6 +734,70 @@ function tryResolvePrompt() {
   hostAdvanceGame();
 }
 
+// ===== Card Animations =====
+
+const ANIM_FLIGHT = 400;
+const ANIM_FADE = 300;
+
+function animateCard(sourceRect, destRect, html, opts = {}) {
+  const clone = document.createElement("div");
+  clone.className = "flying-card";
+  clone.innerHTML = html;
+  Object.assign(clone.style, {
+    position: "fixed",
+    left: sourceRect.left + "px",
+    top: sourceRect.top + "px",
+    width: sourceRect.width + "px",
+    zIndex: "200",
+    transition: `all ${ANIM_FLIGHT}ms cubic-bezier(0.4, 0, 0.2, 1)`,
+    pointerEvents: "none",
+    overflow: "hidden",
+  });
+  document.body.appendChild(clone);
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      clone.style.left = destRect.left + "px";
+      clone.style.top = destRect.top + "px";
+      clone.style.width = destRect.width + "px";
+      if (opts.fadeOut) clone.style.opacity = "0";
+    });
+  });
+  const cleanup = () => { if (clone.parentNode) clone.remove(); };
+  clone.addEventListener("transitionend", cleanup, {once: true});
+  setTimeout(cleanup, ANIM_FLIGHT + 100);
+}
+
+function animateFadeOut(rect, html) {
+  if (!rect) return;
+  const clone = document.createElement("div");
+  clone.className = "flying-card card-fade-out";
+  clone.innerHTML = html || "";
+  Object.assign(clone.style, {
+    position: "fixed",
+    left: rect.left + "px",
+    top: rect.top + "px",
+    width: rect.width + "px",
+    zIndex: "200",
+    pointerEvents: "none",
+  });
+  document.body.appendChild(clone);
+  setTimeout(() => { if (clone.parentNode) clone.remove(); }, ANIM_FADE + 100);
+}
+
+function animateReward(rect, text) {
+  const el = document.createElement("div");
+  el.className = "reward-popup";
+  el.textContent = text;
+  Object.assign(el.style, {
+    position: "fixed",
+    left: (rect.left + rect.width / 2) + "px",
+    top: rect.top + "px",
+    zIndex: "201",
+  });
+  document.body.appendChild(el);
+  setTimeout(() => { if (el.parentNode) el.remove(); }, 900);
+}
+
 // ===== Deck viewer =====
 
 let deckViewerOpen = false;
@@ -1101,11 +1165,25 @@ function renderHand(s) {
 }
 
 function executePoolSwap(handIdx, poolIdx) {
+  // Capture positions before swap
+  const handEl = document.querySelectorAll("#mp-hand-grid .hand-card")[handIdx];
+  const poolEl = document.querySelectorAll("#mp-pool-grid .pool-card")[poolIdx];
+  const handRect = handEl?.getBoundingClientRect();
+  const poolRect = poolEl?.getBoundingClientRect();
+  const handHtml = handEl?.innerHTML || "";
+  const poolHtml = poolEl?.innerHTML || "";
+
   if (role === "host") {
     game.human_pool_swap(handIdx, poolIdx);
     hostRefreshState();
   } else {
     hostConn.send(JSON.stringify({type: "pool_swap", hand_idx: handIdx, pool_idx: poolIdx}));
+  }
+
+  // Cross-swap animation
+  if (handRect && poolRect) {
+    animateCard(handRect, poolRect, handHtml);
+    animateCard(poolRect, handRect, poolHtml);
   }
 }
 
@@ -1469,6 +1547,22 @@ function addEventFeedEntries(_eventDetail, eventLines, playerSnaps, eventData) {
   addFeedEntry(entry);
   broadcastFeed(entry);
   showEventBanner(buildEventTitle(eventData || {}));
+
+  // Animate draw building card: card slides into pool
+  if (eventData?.event_type === "draw_building_card" && eventData.card_drawn) {
+    const poolCards = document.querySelectorAll("#mp-pool-grid .pool-card");
+    const destEl = poolCards[poolCards.length - 1]; // new card is last in pool
+    if (destEl) {
+      const destRect = destEl.getBoundingClientRect();
+      const statusBar = document.getElementById("status-bar");
+      const sourceRect = statusBar ? statusBar.getBoundingClientRect() : {left: destRect.left, top: 0, width: destRect.width, height: 30};
+      animateCard(
+        {left: sourceRect.left + sourceRect.width / 2 - 80, top: sourceRect.bottom, width: 160, height: 30},
+        destRect,
+        `<div class="card-name">${eventData.card_drawn}</div>`
+      );
+    }
+  }
 }
 
 function buildEventTitle(ed) {
@@ -1835,17 +1929,34 @@ function wireGameButtons() {
 
   document.getElementById("mp-build-btn").addEventListener("click", () => {
     if (selectedCards.size === 0) return;
+    // Capture card rects before action
+    const cardRects = [...selectedCards].map(i => {
+      const el = document.querySelectorAll("#mp-hand-grid .hand-card")[i];
+      return el ? {rect: el.getBoundingClientRect(), html: el.innerHTML} : null;
+    }).filter(Boolean);
+    const destRect = document.getElementById("mp-your-stats")?.getBoundingClientRect();
+
     sendAction({type: "build", build_cards: [...selectedCards]});
     clearSelection();
+
+    // Animate cards flying to buildings area
+    if (destRect) {
+      cardRects.forEach((c, i) => {
+        setTimeout(() => animateCard(c.rect, destRect, c.html), i * 80);
+      });
+    }
   });
   document.getElementById("mp-sell-btn").addEventListener("click", () => {
     if (selectedCards.size !== 1) return;
     const cardIdx = [...selectedCards][0];
+    // Capture card rect
+    const el = document.querySelectorAll("#mp-hand-grid .hand-card")[cardIdx];
+    const cardRect = el?.getBoundingClientRect();
+    const cardHtml = el?.innerHTML || "";
+
     const action = {type: "sell", sell_card: cardIdx};
-    // Use resource picker if present
     const resSel = document.getElementById("mp-sell-resource");
     if (resSel?.value) action.sell_resource = resSel.value;
-    // Hacker Array target
     const hTarget = document.getElementById("mp-hacker-target");
     const hDir = document.getElementById("mp-hacker-dir");
     if (hTarget?.value) {
@@ -1854,10 +1965,18 @@ function wireGameButtons() {
     }
     sendAction(action);
     clearSelection();
+
+    // Animate fade out
+    if (cardRect) animateFadeOut(cardRect, cardHtml);
   });
   document.getElementById("mp-contract-btn").addEventListener("click", () => {
     if (selectedContract < 0) return;
     const cardIdx = selectedCards.size === 1 ? [...selectedCards][0] : -1;
+    // Capture card rect
+    const el = cardIdx >= 0 ? document.querySelectorAll("#mp-hand-grid .hand-card")[cardIdx] : null;
+    const cardRect = el?.getBoundingClientRect();
+    const cardHtml = el?.innerHTML || "";
+
     const useSE = document.getElementById("toggle-se")?.checked || false;
     const useLP = document.getElementById("toggle-lp")?.checked || false;
     const action = {type: "contract", contract_idx: selectedContract};
@@ -1869,6 +1988,13 @@ function wireGameButtons() {
     if (useSE) action.use_space_elevator = true;
     sendAction(action);
     clearSelection();
+
+    // Animate fade + reward
+    if (cardRect) {
+      animateFadeOut(cardRect, cardHtml);
+      const contract = currentState?.available_contracts?.[selectedContract];
+      if (contract) animateReward(cardRect, `+$${contract.reward}`);
+    }
   });
   document.getElementById("mp-pass-btn").addEventListener("click", () => {
     clearSelection();

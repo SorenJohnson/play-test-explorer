@@ -663,6 +663,37 @@ details.feed-group > summary.feed-group-title::-webkit-details-marker { color: #
 .hand-card.swap-target { border-color: #d29922; }
 .hand-card.swap-target:hover { background: #2a2000; }
 
+/* ===== Card Animations ===== */
+.flying-card {
+  background: #161b22;
+  border: 1px solid #58a6ff;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 0.75rem;
+  color: #c9d1d9;
+  box-shadow: 0 4px 20px rgba(88, 166, 255, 0.3);
+}
+.card-fade-out {
+  animation: fadeSlideDown 0.3s ease-out forwards;
+}
+@keyframes fadeSlideDown {
+  to { opacity: 0; transform: translateY(20px); }
+}
+.reward-popup {
+  position: fixed;
+  color: #3fb950;
+  font-weight: bold;
+  font-size: 1.2rem;
+  animation: floatUp 0.8s ease-out forwards;
+  pointer-events: none;
+  z-index: 201;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.5);
+}
+@keyframes floatUp {
+  0% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-30px); }
+}
+
 /* ===== Responsive ===== */
 @media (max-width: 900px) {
   #game-layout {
