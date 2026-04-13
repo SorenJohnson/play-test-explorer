@@ -524,8 +524,16 @@ function hostAdvanceStep() {
   broadcastFeed(actionEntry);
   hostRefreshState();
 
-  // Step 2: After a pause, show the event
+  // Step 2: After a pause, show the event (or handle prompt)
   setTimeout(() => {
+    // If awaiting prompt (e.g. patent auction), don't add event entry yet —
+    // the prompt resolution will add the complete event.
+    if (result.awaiting_prompt) {
+      hostRefreshState();
+      handleHostPrompt(currentState.pending_prompt);
+      return;
+    }
+
     if (eventDetail) {
       const eventEntry = {
         kind: "event",
@@ -537,12 +545,6 @@ function hostAdvanceStep() {
       broadcastFeed(eventEntry);
       showEventBanner(formatEventTitle(eventDetail));
       hostRefreshState();
-    }
-
-    if (result.awaiting_prompt) {
-      hostRefreshState();
-      handleHostPrompt(currentState.pending_prompt);
-      return;
     }
 
     // Step 3: After event display, advance to next turn
@@ -709,6 +711,7 @@ function tryResolvePrompt() {
   };
   addFeedEntry(promptEntry);
   broadcastFeed(promptEntry);
+  showEventBanner(formatEventTitle(result.detail || "Event"));
 
   if (result.awaiting_prompt) {
     hostRefreshState();
@@ -1403,35 +1406,42 @@ function formatActionSummary(a) {
 }
 
 function formatEventTitle(raw) {
-  // "draw building card → Electronics Plant (replaced Glass Kiln) + PWR adjust (+5)"
-  // → "Draw Building Card · PWR Adjust +5"  (clean, capitalized, details in expand)
   if (!raw) return "";
-  return raw
-    .split(" | ").map(part => {
-      // Extract the event type and clean it up
-      part = part.trim();
-      // Capitalize first letter of each word for the title
-      if (part.startsWith("draw building card")) {
-        const match = part.match(/→ (.+?)( \(replaced .+\))?$/);
-        const cardName = match ? match[1] : "";
-        const replaced = match && match[2] ? match[2] : "";
-        return `Draw Building Card: ${cardName}${replaced}`;
-      }
-      if (part.startsWith("futures trading")) return "Futures Trading";
-      if (part.startsWith("futures settlement")) return "Futures Settlement";
-      if (part.startsWith("power bill")) return "Power Bill";
-      if (part.startsWith("debt collection")) return "Debt Collection";
-      if (part.startsWith("patent auction")) {
-        return part.charAt(0).toUpperCase() + part.slice(1);
-      }
-      if (part.match(/^PWR adjust/i)) {
-        const adj = part.match(/\(([^)]+)\)/);
-        return `PWR Adjust ${adj ? adj[1] : ""}`;
-      }
-      if (part.startsWith("END")) return part;
-      // Default: capitalize
-      return part.charAt(0).toUpperCase() + part.slice(1);
-    }).join(" · ");
+  // Split on " | " (redraw chains) and " + " (modifiers like PWR adjust)
+  const parts = raw.split(/\s*\|\s*/).flatMap(p => p.split(/\s*\+\s*/));
+  const formatted = parts.map(part => {
+    part = part.trim();
+    if (!part) return "";
+
+    // Draw building card
+    if (part.startsWith("draw building card")) {
+      const match = part.match(/→\s*(.+?)(\s*\(replaced .+\))?$/);
+      const card = match ? match[1].trim() : "";
+      const replaced = match && match[2] ? match[2].trim() : "";
+      return `Draw Building Card: ${card}${replaced ? " " + replaced : ""}`;
+    }
+    // Patent auction
+    if (part.startsWith("patent auction")) {
+      const match = part.match(/patent auction:\s*(.+)/i);
+      return match ? `Patent Auction: ${match[1]}` : "Patent Auction";
+    }
+    // PWR adjust
+    if (part.match(/^PWR adjust/i)) {
+      const adj = part.match(/\(([^)]+)\)/);
+      return `PWR Adjust ${adj ? adj[1] : ""}`.trim();
+    }
+    // Known events
+    if (part.startsWith("futures trading")) return "Futures Trading";
+    if (part.startsWith("futures settlement")) return "Futures Settlement";
+    if (part.startsWith("power bill")) return "Power Bill";
+    if (part.startsWith("debt collection")) return "Debt Collection";
+    if (part.startsWith("END")) return part;
+    if (part.startsWith("awaiting prompt")) return "";
+    // Default: capitalize first letter
+    return part.charAt(0).toUpperCase() + part.slice(1);
+  }).filter(Boolean);
+
+  return formatted.join(" · ");
 }
 
 function renderFeedEntry(e) {
