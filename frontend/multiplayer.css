@@ -505,33 +505,51 @@ body {
 .hand-card.unaffordable { opacity: 0.45; }
 
 /* ===== Feed Entry Styles ===== */
-.feed-entry { line-height: 1.4; }
-.feed-header-row { display: flex; gap: 6px; align-items: baseline; }
-.feed-summary { display: flex; gap: 6px; align-items: baseline; cursor: pointer; }
-.feed-summary::-webkit-details-marker { color: #6e7681; }
-.feed-time { color: #6e7681; font-size: 0.65rem; flex-shrink: 0; min-width: 55px; }
-.feed-text { color: #c9d1d9; }
-.feed-money { color: #3fb950; font-weight: 600; }
-.feed-event-text {
-  color: #f0883e;
-  font-size: 0.75rem;
-  margin: 3px 0;
-  padding-left: 8px;
-  border-left: 2px solid #f0883e33;
-}
-.feed-detail-body {
-  margin-top: 4px;
-  padding: 6px 8px;
-  background: #0d1117;
+
+/* Feed groups — each turn or event is a group */
+.feed-group {
   border-radius: 4px;
+  padding: 4px 8px;
+  margin-bottom: 3px;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  background: #0d1117;
+  border-left: 3px solid #30363d;
+}
+.feed-group.turn { border-left-width: 3px; }
+.feed-group.event { border-left-color: #f0883e; background: #1a1200; }
+.feed-group.kickoff { border-left-color: #3fb950; background: #0d1a0d; }
+.feed-group.action { border-left-color: #58a6ff; }
+.feed-group.free-action { border-left-color: #a371f7; }
+
+.feed-group-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+  cursor: default;
+}
+details.feed-group > summary.feed-group-title { cursor: pointer; }
+details.feed-group > summary.feed-group-title::-webkit-details-marker { color: #6e7681; font-size: 0.7rem; }
+
+.feed-player-name { font-weight: 600; }
+.feed-event-icon { font-size: 0.7rem; }
+.feed-time { color: #6e7681; font-size: 0.6rem; margin-left: auto; flex-shrink: 0; }
+.feed-money { color: #3fb950; font-weight: 600; }
+
+.feed-group-body {
+  margin-top: 4px;
+  padding: 4px 8px;
+  background: #161b22;
+  border-radius: 3px;
   font-size: 0.75rem;
 }
-.feed-detail-text { color: #8b949e; margin-bottom: 4px; line-height: 1.5; }
-.feed-lines { margin: 4px 0; }
-.feed-line-header { color: #58a6ff; font-weight: 600; margin: 6px 0 2px; font-size: 0.8em; text-transform: uppercase; }
+
+.feed-action-line { color: #c9d1d9; padding: 1px 0; }
+.feed-line-header { color: #58a6ff; font-weight: 600; margin: 4px 0 2px; font-size: 0.8em; text-transform: uppercase; }
 .feed-line-note { color: #8b949e; margin: 1px 0; padding-left: 8px; }
 .feed-line-player { color: #c9d1d9; margin: 2px 0; padding-left: 8px; }
-.feed-line-name { color: #58a6ff; font-weight: 500; }
+.feed-line-name { color: #58a6ff; font-weight: 500; margin-right: 4px; }
 .feed-nw-inline { color: #8b949e; font-size: 0.85em; margin-left: 4px; }
 
 /* ===== Patent Actions ===== */

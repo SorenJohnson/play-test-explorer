@@ -1371,40 +1371,65 @@ function broadcastFeed(entry) {
   Object.values(connections).forEach(c => c.send(msg));
 }
 
-function formatFeedText(raw) {
-  // Clean up Python detail strings for display
-  if (!raw) return "";
-  return raw
-    .replace(/; /g, "<br>")          // separate actions onto lines
-    .replace(/\n/g, "<br>")          // newlines to breaks
-    .replace(/\| /g, "<br>")         // pipe-separated events
-    .replace(/\$(\d+)/g, '<span class="feed-money">$$$1</span>');  // highlight dollar amounts
+function fmtMoney(text) {
+  if (!text) return "";
+  return text.replace(/\$(\d+)/g, '<span class="feed-money">$$$1</span>');
 }
 
-function renderFeed() {
-  const container = document.getElementById("feed-entries");
-  if (!container) return;
-  const html = feedEntries.slice(-80).reverse().map(e => {
-    const kindClass = e.kind || '';
-    const hasDetails = e.details || e.event_lines || e.player_snapshots;
+function renderFeedEntry(e) {
+  if (e.kind === "turn-start") {
+    // Game kickoff or round marker
+    const detailLines = (e.details || "").split("\n").map(l => `<div>${fmtMoney(l)}</div>`).join("");
+    return `
+      <details class="feed-group kickoff">
+        <summary class="feed-group-title">${e.text}</summary>
+        <div class="feed-group-body">${detailLines}</div>
+      </details>
+    `;
+  }
 
-    // Build detail content for expandable section
-    let detailHtml = "";
-    if (e.details) {
-      detailHtml += `<div class="feed-detail-text">${formatFeedText(e.details)}</div>`;
+  if (e.kind === "turn") {
+    // Player/AI actions — extract player name for coloring
+    const colonIdx = (e.text || "").indexOf(":");
+    const playerName = colonIdx > 0 ? e.text.substring(0, colonIdx) : "";
+    const playerIdx = currentState?.players?.findIndex(p => p.name === playerName) ?? -1;
+    const color = playerIdx >= 0 ? PLAYER_COLORS[playerIdx % PLAYER_COLORS.length] : "#8b949e";
+
+    // Action lines from the detail (each action on its own line)
+    const actions = (e.details || e.text || "").split("\n").filter(Boolean);
+    const title = playerName || "Turn";
+    const summary = colonIdx > 0 ? e.text.substring(colonIdx + 1).trim() : e.text;
+
+    // Only expandable if there are multiple actions
+    if (actions.length > 1) {
+      const actionHtml = actions.map(a => `<div class="feed-action-line">${fmtMoney(a)}</div>`).join("");
+      return `
+        <details class="feed-group turn" style="border-left-color:${color}">
+          <summary class="feed-group-title"><span class="feed-player-name" style="color:${color}">${title}</span> <span class="feed-time">${e.time}</span></summary>
+          <div class="feed-group-body">${actionHtml}</div>
+        </details>
+      `;
     }
+    return `
+      <div class="feed-group turn" style="border-left-color:${color}">
+        <div class="feed-group-title"><span class="feed-player-name" style="color:${color}">${title}</span> ${fmtMoney(summary)} <span class="feed-time">${e.time}</span></div>
+      </div>
+    `;
+  }
+
+  if (e.kind === "event") {
+    // Game event — expandable with event lines + player snapshots
+    let detailHtml = "";
     if (e.event_lines && e.event_lines.length > 0) {
-      detailHtml += `<div class="feed-lines">`;
       detailHtml += e.event_lines.map(line => {
         if (line.kind === "header") return `<div class="feed-line-header">${line.text}</div>`;
-        if (line.kind === "note") return `<div class="feed-line-note">${line.text}</div>`;
+        if (line.kind === "note") return `<div class="feed-line-note">${fmtMoney(line.text)}</div>`;
         if (line.kind === "player") {
-          const nw = line.net_worth_after !== undefined ? `<span class="feed-nw-inline">NW $${line.net_worth_after}</span>` : '';
-          return `<div class="feed-line-player"><span class="feed-line-name">${line.name || ''}</span> ${line.text} ${nw}</div>`;
+          const nw = line.net_worth_after !== undefined ? `<span class="feed-nw-inline">NW ${fmtMoney("$" + line.net_worth_after)}</span>` : '';
+          return `<div class="feed-line-player"><span class="feed-line-name">${line.name || ''}</span> ${fmtMoney(line.text)} ${nw}</div>`;
         }
-        return `<div class="feed-line-note">${line.text || ''}</div>`;
+        return `<div class="feed-line-note">${fmtMoney(line.text || '')}</div>`;
       }).join("");
-      detailHtml += `</div>`;
     }
     if (e.player_snapshots && e.player_snapshots.length > 0) {
       detailHtml += `<div class="feed-impact">${e.player_snapshots.map(p => {
@@ -1413,35 +1438,40 @@ function renderFeed() {
       }).join("")}</div>`;
     }
 
-    // Main text: split action text from event text for cleaner display
-    const mainText = formatFeedText(e.text || "");
-    const eventText = e.event ? formatFeedText(e.event) : "";
+    // Clean up the title: split piped events into a short label
+    const titleText = (e.text || "").split(" | ")[0].split(" + ")[0];
 
-    if (hasDetails) {
+    if (detailHtml) {
       return `
-        <details class="feed-entry ${kindClass}">
-          <summary class="feed-summary">
-            <span class="feed-time">${e.time || ''}</span>
-            <span class="feed-text">${mainText}</span>
-          </summary>
-          <div class="feed-detail-body">
-            ${eventText ? `<div class="feed-event-text">${eventText}</div>` : ''}
-            ${detailHtml}
-          </div>
+        <details class="feed-group event">
+          <summary class="feed-group-title"><span class="feed-event-icon">&#9889;</span> ${fmtMoney(titleText)} <span class="feed-time">${e.time}</span></summary>
+          <div class="feed-group-body">${detailHtml}</div>
         </details>
       `;
     }
     return `
-      <div class="feed-entry ${kindClass}">
-        <div class="feed-header-row">
-          <span class="feed-time">${e.time || ''}</span>
-          <span class="feed-text">${mainText}</span>
-        </div>
-        ${eventText ? `<div class="feed-event-text">${eventText}</div>` : ''}
+      <div class="feed-group event">
+        <div class="feed-group-title"><span class="feed-event-icon">&#9889;</span> ${fmtMoney(e.text)} <span class="feed-time">${e.time}</span></div>
       </div>
     `;
-  }).join("");
-  container.innerHTML = html;
+  }
+
+  if (e.kind === "action" || e.kind === "free-action") {
+    return `
+      <div class="feed-group ${e.kind}">
+        <div class="feed-group-title">${fmtMoney(e.text)} <span class="feed-time">${e.time}</span></div>
+      </div>
+    `;
+  }
+
+  // Fallback
+  return `<div class="feed-group"><div class="feed-group-title">${fmtMoney(e.text || '')} <span class="feed-time">${e.time || ''}</span></div></div>`;
+}
+
+function renderFeed() {
+  const container = document.getElementById("feed-entries");
+  if (!container) return;
+  container.innerHTML = feedEntries.slice(-80).reverse().map(renderFeedEntry).join("");
   container.scrollTop = 0;
 }
 
