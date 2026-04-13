@@ -1316,11 +1316,15 @@ function submitPromptAnswer() {
     return;
   }
   hidePromptModal();
-  // If the event ended a turn, fall back to the AI advance loop.
-  if (!game.is_human_turn() && !game.is_over()) {
-    advanceUntilHuman();
-  } else if (game.is_over()) {
+  // After resolving the prompt, advance AI turns or start the human's next turn.
+  if (game.is_over()) {
     showEndgame();
+  } else if (!game.is_human_turn()) {
+    advanceUntilHuman();
+  } else {
+    // It's the human's turn — begin it so flags are reset and actions are enabled.
+    game.begin_human_turn();
+    refreshState();
   }
 }
 
