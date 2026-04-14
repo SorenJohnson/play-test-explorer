@@ -196,8 +196,6 @@ body {
   background: #161b22;
   border-bottom: 1px solid #30363d;
   padding: 8px 16px;
-  max-width: 1400px;
-  margin: 0 auto;
 }
 .deck-viewer-header {
   display: flex;
