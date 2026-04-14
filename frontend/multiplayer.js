@@ -559,15 +559,16 @@ function hostAdvanceStep() {
     if (eventDetail) {
       const evData = result.event?.structured || stateSnap.last_event_data || {};
       addEventFeedEntries(eventDetail, eventLines, playerSnaps, evData);
-      logGameStep("event", playerName, playerIdx, buildEventTitle(evData), evData);
+      logGameStep("event", playerName, playerIdx, buildEventTitle(evData), Object.assign({}, evData, {event_lines: eventLines}));
 
       // Render chained (redraw) events as separate feed entries
       const chained = result.chained_events || [];
       for (const ce of chained) {
         const ceData = ce.structured || {};
         ceData._is_redraw = true;
-        addEventFeedEntries(ce.detail, ce.lines || [], playerSnaps, ceData);
-        logGameStep("event", playerName, playerIdx, buildEventTitle(ceData), ceData);
+        const ceLines = ce.lines || [];
+        addEventFeedEntries(ce.detail, ceLines, playerSnaps, ceData);
+        logGameStep("event", playerName, playerIdx, buildEventTitle(ceData), Object.assign({}, ceData, {event_lines: ceLines}));
       }
       hostRefreshState();
     }
@@ -734,13 +735,17 @@ function tryResolvePrompt() {
   const result = game.resolve_pending_prompt(pyodide.toPy(merged)).toJs({dict_converter: Object.fromEntries});
   const snapAfter = game.state_dict().toJs({dict_converter: Object.fromEntries});
   const promptEvData = snapAfter.last_event_data || {};
+  const promptLines = (snapAfter.last_event_lines || []).map(l => Object.assign({}, l));
   addEventFeedEntries(
     result.detail || "Prompt resolved",
-    (snapAfter.last_event_lines || []).map(l => Object.assign({}, l)),
+    promptLines,
     snapAfter.players.map(p => ({name: p.name, money: p.money, debt: p.debt, net_worth: p.net_worth})),
     promptEvData,
   );
-  logGameStep("prompt", "", -1, result.detail || "Prompt resolved", promptEvData);
+  // Include event_lines in the log detail so bids/debt details are captured
+  const logDetail = Object.assign({}, promptEvData, {event_lines: promptLines});
+  const logSummary = buildEventTitle(promptEvData) || result.detail || "Prompt resolved";
+  logGameStep("event", "", -1, logSummary, logDetail);
 
   if (result.awaiting_prompt) {
     hostRefreshState();
@@ -2242,14 +2247,16 @@ function wireGameButtons() {
         evData,
       );
       const pName = currentState?.players[mySeat]?.name || "You";
-      logGameStep("event", pName, mySeat, buildEventTitle(evData), evData);
+      const humanEventLines = (result.lines || snapAfter.last_event_lines || []).map(l => Object.assign({}, l));
+      logGameStep("event", pName, mySeat, buildEventTitle(evData), Object.assign({}, evData, {event_lines: humanEventLines}));
       // Render chained (redraw) events as separate feed entries
       const chained = result.chained_events || [];
       for (const ce of chained) {
         const ceData = ce.structured || {};
         ceData._is_redraw = true;
-        addEventFeedEntries(ce.detail, ce.lines || [], playerSnapsAfter, ceData);
-        logGameStep("event", pName, mySeat, buildEventTitle(ceData), ceData);
+        const ceLines = ce.lines || [];
+        addEventFeedEntries(ce.detail, ceLines, playerSnapsAfter, ceData);
+        logGameStep("event", pName, mySeat, buildEventTitle(ceData), Object.assign({}, ceData, {event_lines: ceLines}));
       }
       hostRefreshState();
       hostAdvanceGame();
@@ -2422,7 +2429,15 @@ function updateDebugPanel() {
         if (a.net_worth_after !== undefined) lines.push(`    NW after: $${a.net_worth_after}`);
       }
     }
-    // Event lines from backend
+    // Event lines from backend (auction bids, power bill per-player, debt details)
+    if (d.event_lines?.length) {
+      lines.push("Event lines:");
+      for (const line of d.event_lines) {
+        if (line.kind === "header") lines.push(`  [${line.text}]`);
+        else if (line.kind === "player") lines.push(`  ${line.name || ""}: ${line.text}${line.net_worth_after !== undefined ? ` (NW: $${line.net_worth_after})` : ""}`);
+        else lines.push(`  ${line.text || ""}`);
+      }
+    }
     if (d.player_snapshots?.length) {
       lines.push("Player snapshots:");
       for (const p of d.player_snapshots) {
