@@ -426,6 +426,16 @@ class PlayableGame:
         self.human_turn_in_progress = False
         self._active_player_idx = -1
         self._snapshot_market(turn=self.state.turn)
+
+        # If the event was END_ROUND, reshuffle the deck for the next round
+        from my_project.simulation import EventType as _ET
+        if event.type == _ET.END_ROUND:
+            from my_project.simulation import reshuffle_for_next_round
+            current_round = self.deck_round_number()
+            reshuffle_for_next_round(
+                self.state, self.num_players,
+                current_round, self.num_rounds,
+            )
         return {
             "type": event.type.value,
             "detail": event_detail,
@@ -906,6 +916,16 @@ class PlayableGame:
         self._active_player_idx = -1
         self._snapshot_market(turn=self.state.turn)
         self._suspended_ai_turn = None
+
+        # If the event was END_ROUND, reshuffle the deck for the next round
+        from my_project.simulation import EventType as _ET
+        if event.type == _ET.END_ROUND:
+            from my_project.simulation import reshuffle_for_next_round
+            current_round = self.deck_round_number()
+            reshuffle_for_next_round(
+                self.state, self.num_players,
+                current_round, self.num_rounds,
+            )
         return {
             "ok": True,
             "player_index": acting_player_idx,
