@@ -1222,9 +1222,10 @@ function renderPool(s) {
   const grid = document.getElementById("mp-pool-grid");
   const myTurn = isMyTurn(s);
   const canSwap = myTurn && s.can_pool_swap && selectedCards.size === 1;
+  const poolInactive = myTurn && !canSwap ? "inactive" : "";
   grid.innerHTML = (s.pool || []).map((c, i) => {
     const swappable = canSwap ? "swap-target" : "";
-    return `<div class="pool-card ${swappable}" data-pi="${i}">${renderCard(c)}</div>`;
+    return `<div class="pool-card ${swappable} ${poolInactive}" data-pi="${i}">${renderCard(c)}</div>`;
   }).join("");
   if (canSwap) {
     grid.querySelectorAll(".pool-card").forEach(el => {
@@ -1675,20 +1676,24 @@ function addEventFeedEntries(_eventDetail, eventLines, playerSnaps, eventData) {
   broadcastFeed(entry);
   showEventBanner(buildEventCardLabel(eventData || {}));
 
-  // Animate draw building card: card slides into pool
+  // Animate draw building card: new card flies from event deck to pool
   if (eventData?.event_type === "draw_building_card" && eventData.card_drawn) {
-    const poolCards = document.querySelectorAll("#mp-pool-grid .pool-card");
-    const destEl = poolCards[poolCards.length - 1]; // new card is last in pool
-    if (destEl) {
-      const destRect = destEl.getBoundingClientRect();
-      const statusBar = document.getElementById("status-bar");
-      const sourceRect = statusBar ? statusBar.getBoundingClientRect() : {left: destRect.left, top: 0, width: destRect.width, height: 30};
-      animateCard(
-        {left: sourceRect.left + sourceRect.width / 2 - 80, top: sourceRect.bottom, width: 160, height: 30},
-        destRect,
-        `<div class="card-name">${eventData.card_drawn}</div>`
-      );
-    }
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const poolCards = document.querySelectorAll("#mp-pool-grid .pool-card");
+        const destEl = poolCards[poolCards.length - 1]; // new card is last in pool
+        const deckEl = document.getElementById("event-deck-card");
+        if (destEl && deckEl) {
+          const destRect = destEl.getBoundingClientRect();
+          const deckRect = deckEl.getBoundingClientRect();
+          animateCard(
+            deckRect,
+            destRect,
+            `<div class="card-name">${eventData.card_drawn}</div>`
+          );
+        }
+      });
+    });
   }
 }
 

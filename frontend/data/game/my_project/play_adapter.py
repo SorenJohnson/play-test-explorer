@@ -224,11 +224,18 @@ class PlayableGame:
         return self._active_player_idx >= 0
 
     def is_over(self) -> bool:
-        # Game ends when the event deck is exhausted. The deck defines the
-        # game length — not a hardcoded turn count.
+        # Game ends when the event deck is exhausted AND no more rounds remain.
+        # After END_ROUND the deck gets reshuffled, so being at the end of
+        # round 1's deck is NOT game over.
         if self._turn_in_progress():
             return False
-        return self.state.event_idx >= len(self.state.event_deck)
+        if self.state.event_idx < len(self.state.event_deck):
+            return False
+        # Deck exhausted — check if there's a pending reshuffle (END_ROUND
+        # was the last card but more rounds remain)
+        if self.deck_round_number() < self.num_rounds:
+            return False
+        return True
 
     def current_player_index(self) -> int:
         """Index of the player whose turn is now active (0-based).
