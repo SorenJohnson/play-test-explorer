@@ -1971,7 +1971,7 @@ function renderFeedEntry(e) {
     // Always expandable for events
     return `
       <details class="feed-group event">
-        <summary class="feed-group-title"><span class="feed-event-icon">&#9889;</span> ${eventTitle} ${redrawIcon} <span class="feed-time">${e.time}</span></summary>
+        <summary class="feed-group-title">${ed.pwr_adjust ? '<span class="feed-event-icon">&#9889;</span> ' : ''}${eventTitle} ${redrawIcon} <span class="feed-time">${e.time}</span></summary>
         <div class="feed-group-body">${detailHtml || '<div class="feed-line-note">No additional details</div>'}</div>
       </details>
     `;
