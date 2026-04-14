@@ -1103,12 +1103,32 @@ function renderMarket(s) {
     `;
   }).join("");
 
-  // Wire click to expand ruler
+  // Wire click to expand ruler + toggle chart line
   grid.querySelectorAll(".market-cell").forEach(el => {
     el.addEventListener("click", () => {
       const r = el.dataset.res;
-      expandedMarketResource = expandedMarketResource === r ? null : r;
+      const wasSelected = expandedMarketResource === r;
+      expandedMarketResource = wasSelected ? null : r;
       renderMarketRuler(s);
+      // Toggle chart visibility: isolate clicked resource or show all
+      if (marketChart) {
+        RESOURCE_ORDER.forEach((res, i) => {
+          if (wasSelected) {
+            marketChart.setDatasetVisibility(i, true);
+          } else {
+            marketChart.setDatasetVisibility(i, res === r);
+          }
+        });
+        marketChart.update();
+      }
+      // Dim/undim market cells
+      grid.querySelectorAll(".market-cell").forEach(cell => {
+        if (wasSelected) {
+          cell.style.opacity = "1";
+        } else {
+          cell.style.opacity = cell.dataset.res === r ? "1" : "0.4";
+        }
+      });
     });
   });
 
@@ -1182,7 +1202,7 @@ function renderMarketChart(s) {
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        plugins: {legend: {labels: {boxWidth: 10, font: {size: 10}, color: "#8b949e"}}},
+        plugins: {legend: {display: false}},
         scales: {
           x: {display: true, ticks: {color: "#8b949e", font: {size: 9}}, grid: {color: "#21262d"}},
           y: {display: true, ticks: {color: "#8b949e", font: {size: 9}, callback: v => "$" + v}, grid: {color: "#21262d"}},
