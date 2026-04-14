@@ -428,20 +428,23 @@ def build_event_deck(
 ) -> list[EventCard]:
     """Build a shuffled event deck for a multi-round game.
 
-    The deck is built from Events.csv. Patent auction cards are consumed
-    (removed) after firing. When the deck runs out:
-      - Rounds 1..N-1: fire END_ROUND (PB + Futures), reshuffle the
-        remaining events (minus consumed patent auctions), continue.
-      - Round N: fire END_GAME (PB + Futures), game over.
+    IMPORTANT — TURN COUNTING:
+    Every card in the deck is a player turn, INCLUDING END_ROUND and
+    END_GAME. A player takes their actions, then draws and fires the
+    event card as THEIR event for that turn. END_ROUND/END_GAME are
+    not special "cleanup" cards — they are the last player's event.
 
-    The deck returned here is the FULL pre-built deck for all rounds.
-    Patent auctions appear only in round 1; subsequent rounds have
-    them removed. No terminal cards are in the deck — the engine
-    handles end-of-round/game transitions when the deck pointer passes
-    a round boundary.
+    Cards with redraws=True chain: they fire, then ALSO draw and fire
+    the next card. This consumes 2 deck slots for 1 player turn.
+    So: player_turns = total_cards - redraw_cards.
 
-    Round boundaries are marked by inserting a sentinel END_ROUND /
-    END_GAME card at the end of each round's shuffled segment.
+    The deck is the same composition played twice (2 rounds). In
+    round 2, patent auctions convert to draw_building_card (all
+    patents have a Round2_Event conversion). The total card count
+    per round should be the same.
+
+    Round boundaries are marked by inserting END_ROUND / END_GAME
+    as the last card of each round's shuffled segment.
     """
     cfg = config or EventDeckConfig()
     pool = _build_event_pool(num_players, cfg)
