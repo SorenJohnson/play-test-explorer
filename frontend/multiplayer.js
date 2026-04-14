@@ -1215,6 +1215,7 @@ function renderMarketChart(s) {
 function renderContracts(s) {
   const grid = document.getElementById("mp-contracts-grid");
   const me = s.players[mySeat];
+  const myTurn = isMyTurn(s);
   grid.innerHTML = (s.available_contracts || []).map((c, ci) => {
     const reqs = (c.requirements || []).map(r => {
       const have = me?.rates?.[r.resource] || 0;
@@ -1222,20 +1223,23 @@ function renderContracts(s) {
       return `<span class="contract-req ${met ? 'met' : 'unmet'}">${r.amount} ${r.resource}</span>`;
     }).join(", ");
     const sel = ci === selectedContract ? "selected" : "";
+    const inactive = !myTurn ? "inactive" : "";
     return `
-      <div class="contract-card ${sel}" data-ci="${ci}">
+      <div class="contract-card ${sel} ${inactive}" data-ci="${ci}">
         <div class="contract-reward">$${c.reward}</div>
         <div>${reqs}</div>
       </div>
     `;
   }).join("");
-  grid.querySelectorAll(".contract-card").forEach(el => {
-    el.addEventListener("click", () => {
-      const ci = parseInt(el.dataset.ci);
-      selectedContract = selectedContract === ci ? -1 : ci;
-      renderContracts(s);
+  if (myTurn) {
+    grid.querySelectorAll(".contract-card").forEach(el => {
+      el.addEventListener("click", () => {
+        const ci = parseInt(el.dataset.ci);
+        selectedContract = selectedContract === ci ? -1 : ci;
+        renderContracts(s);
+      });
     });
-  });
+  }
 }
 
 function renderPool(s) {
