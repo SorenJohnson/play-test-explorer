@@ -254,47 +254,7 @@ class PlayableGame:
         return self.current_player_index() in self._human_indices
 
     # Terminal event results queued for the frontend to pick up and log.
-    # Each entry is a dict like the event portion of step_ai_turn's return.
     pending_terminal_results: list[dict] = field(default_factory=list, init=False)
-
-    def _consume_terminal_events(self) -> None:
-        """Auto-fire any terminal events (END_ROUND / END_GAME) at the current
-        deck position. Called before beginning any player's turn so terminals
-        fire as cleanup between rounds, not as a player's turn.
-
-        Results are stashed in `pending_terminal_results` so the frontend
-        can log them (the PB + Futures per-player breakdown).
-        """
-        from my_project.simulation import EventType as _ET, execute_event as _exec
-        while (
-            self.state.event_idx < len(self.state.event_deck)
-            and self.state.event_deck[self.state.event_idx].type
-            in (_ET.END_ROUND, _ET.END_GAME)
-        ):
-            terminal = self.state.event_deck[self.state.event_idx]
-            self.state.event_idx += 1
-            active = (
-                self.state.players[self._active_player_idx]
-                if self._active_player_idx >= 0
-                else self.state.players[0]
-            )
-            self.state.last_event_lines = []
-            detail = _exec(self.state, terminal, active)
-            self.last_event = detail
-            self._snapshot_market(turn=self.state.turn)
-            self.pending_terminal_results.append({
-                "type": terminal.type.value,
-                "detail": detail,
-                "lines": list(self.state.last_event_lines),
-            })
-            # Reshuffle deck for next round when END_ROUND fires
-            if terminal.type == _ET.END_ROUND:
-                from my_project.simulation import reshuffle_for_next_round
-                current_round = self.deck_round_number()
-                reshuffle_for_next_round(
-                    self.state, self.num_players,
-                    current_round, self.num_rounds,
-                )
 
     def _total_player_turns(self) -> int:
         """Total player turns across ALL rounds (not just the current deck).

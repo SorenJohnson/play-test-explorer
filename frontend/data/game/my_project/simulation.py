@@ -373,13 +373,12 @@ def _build_event_pool(
     num_players: int,
     config: EventDeckConfig,
 ) -> list[EventCard]:
-    """Build the initial event pool from Events.csv.
+    """Build the event pool from Events.csv (without the round-end card).
 
-    Returns an unshuffled list of EventCards. No terminal cards — the
-    engine handles END_ROUND / END_GAME when the pool is exhausted.
-
-    Patent auction cards are included in the initial pool but are removed
-    (not reshuffled back) after they fire during the game.
+    The round-end card (END_ROUND or END_GAME) is added by
+    build_event_deck / reshuffle_for_next_round as the last card
+    in the shuffled deck. It IS part of the deck — a player draws
+    it as their event on the last turn of the round.
     """
     from my_project.parsing import parse_event_rows
     data_dir = Path(__file__).parent / "data"
@@ -443,16 +442,17 @@ def build_event_deck(
     patents have a Round2_Event conversion). The total card count
     per round should be the same.
 
-    Round boundaries are marked by inserting END_ROUND / END_GAME
-    as the last card of each round's shuffled segment.
+    END_ROUND / END_GAME is placed as the last card of each round's
+    shuffled deck. It is part of the deck — not an extra card.
     """
     cfg = config or EventDeckConfig()
     pool = _build_event_pool(num_players, cfg)
 
-    # Build round 1 only. Round 2+ are built by reshuffle_for_next_round().
+    # Build round 1. END_ROUND/END_GAME is part of the deck (last card).
     round_events = list(pool)
     random.shuffle(round_events)
 
+    # Add the round-end card as the last card in the deck
     terminal = EventType.END_GAME if num_rounds <= 1 else EventType.END_ROUND
     round_events.append(_ec(terminal))
     return round_events
@@ -468,14 +468,14 @@ def reshuffle_for_next_round(
 
     Called when END_ROUND fires. Converts patent auctions to their
     round-2 replacements (all patents have a Round2_Event conversion),
-    reshuffles, and appends the appropriate terminal card.
+    reshuffles, and places the round-end card (END_GAME or END_ROUND)
+    at the bottom of the deck. The round-end card is part of the deck —
+    a player draws it as their event on the last turn.
     """
     _type_map = {e.value: e for e in EventType}
     from my_project.parsing import _condition_matches
 
-    # The pool is everything that was in this round's deck minus the
-    # END_ROUND terminal (which was the last card consumed).
-    # We stored the original pool on state at creation time.
+    # The base pool (without the round-end card) was stored at game creation.
     pool = list(state._event_pool)
 
     # Convert events for round 2+
