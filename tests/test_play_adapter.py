@@ -323,12 +323,12 @@ def test_strategy_cannot_see_current_event_in_ai_turn():
         pa_mod.smart_greedy_strategy = original
 
     assert "remaining" in observed, "Strategy was not called — can't verify"
-    # The strategy's view should exclude the current turn's event: one fewer
-    # of this event type than the raw count-from-current-index.
+    # The strategy sees the full remaining deck (including the card that will
+    # fire at the end of this turn). It knows event TYPE counts but not order.
     seen = observed["remaining"].get(current_type, 0)
-    assert seen == count_including - 1, (
-        f"Strategy saw {seen} of {current_type.value}, expected {count_including - 1} "
-        f"(current turn's event should be hidden). event_idx={observed['event_idx']}."
+    assert seen == count_including, (
+        f"Strategy saw {seen} of {current_type.value}, expected {count_including}. "
+        f"event_idx={observed['event_idx']}."
     )
 
 

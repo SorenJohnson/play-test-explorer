@@ -800,8 +800,6 @@ class PlayableGame:
         self._active_player_idx = acting_player_idx
         self._turn_count += 1
         player = self.state.players[acting_player_idx]
-        event = self.state.event_deck[self.state.event_idx]
-        self.state.event_idx += 1
 
         reset_per_turn_flags(player)
 
@@ -861,8 +859,11 @@ class PlayableGame:
         if needed > 0:
             player.hand.extend(self.state.deck.draw(needed))
 
-        # Event. Check for prompt before firing (e.g. patent auction).
+        # Draw the event card from the deck and advance the index.
+        event = self.state.event_deck[self.state.event_idx]
+        self.state.event_idx += 1
         self.state.last_event_lines = []
+        # Check for prompt before firing (e.g. patent auction).
         from my_project.simulation import _event_needs_prompt, _has_human_player
         prompt = _event_needs_prompt(self.state, event)
         if prompt is not None and _has_human_player(self.state):
