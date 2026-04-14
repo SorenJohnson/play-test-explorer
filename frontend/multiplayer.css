@@ -121,6 +121,56 @@ body {
 .status-label { font-size: 0.7rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; }
 .status-value { font-size: 1.1rem; font-weight: 600; }
 
+/* ===== Event Deck + Discard ===== */
+#event-deck-area {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-left: auto;
+}
+.event-card-back {
+  width: 60px;
+  height: 40px;
+  background: linear-gradient(135deg, #1a3a5c, #0d2137);
+  border: 2px solid #2c5f8a;
+  border-radius: 5px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  position: relative;
+  box-shadow: 2px 2px 0 #0d1117, 4px 4px 0 #161b22;
+}
+.event-card-back:hover { border-color: #58a6ff; }
+.deck-count { font-size: 1rem; font-weight: bold; color: #58a6ff; }
+.deck-label { font-size: 0.45rem; text-transform: uppercase; letter-spacing: 1px; color: #8b949e; }
+.event-card-face {
+  min-width: 180px;
+  max-width: 280px;
+  height: 40px;
+  background: #161b22;
+  border: 1px solid #f0883e;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  font-size: 0.75rem;
+  color: #c9d1d9;
+  overflow: hidden;
+  transition: border-color 0.3s;
+}
+.event-card-face.fresh {
+  border-color: #f0883e;
+  box-shadow: 0 0 8px rgba(240, 136, 62, 0.4);
+  animation: eventGlow 0.6s ease-out;
+}
+@keyframes eventGlow {
+  0% { box-shadow: 0 0 15px rgba(240, 136, 62, 0.6); }
+  100% { box-shadow: 0 0 8px rgba(240, 136, 62, 0.2); }
+}
+#event-discard-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 .turn-banner {
   background: #238636;
   color: #fff;
@@ -135,20 +185,7 @@ body {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.6; }
 }
-.event-banner {
-  background: #f0883e;
-  color: #000;
-  padding: 4px 16px;
-  border-radius: 4px;
-  font-weight: bold;
-  font-size: 0.8rem;
-  margin-left: auto;
-  animation: eventSlide 0.3s ease-out;
-}
-@keyframes eventSlide {
-  from { opacity: 0; transform: translateY(-8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
+/* event-banner removed — replaced by deck/discard animation */
 
 /* ===== Deck Viewer ===== */
 #deck-viewer {

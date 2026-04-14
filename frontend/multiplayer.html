@@ -66,10 +66,17 @@
       <div class="status-cell"><span class="status-label">Round</span><span id="mp-round" class="status-value">-</span></div>
       <div class="status-cell"><span class="status-label">Turn</span><span id="mp-turn" class="status-value">-</span></div>
       <div class="status-cell"><span class="status-label">Active</span><span id="mp-active" class="status-value">-</span></div>
-      <div class="status-cell" id="deck-viewer-toggle" style="cursor:pointer" title="Click to view remaining deck"><span class="status-label">Deck</span><span id="mp-cards-left" class="status-value">-</span></div>
       <div class="status-cell"><span class="status-label">AP</span><span id="mp-ap-display" class="status-value">-</span></div>
       <div id="turn-banner" class="turn-banner" style="display:none">YOUR TURN</div>
-      <div id="event-banner" class="event-banner" style="display:none"></div>
+      <div id="event-deck-area">
+        <div id="event-deck-card" class="event-card-back" title="Click to view remaining deck">
+          <span class="deck-count" id="mp-cards-left">-</span>
+          <span class="deck-label">EVENTS</span>
+        </div>
+        <div id="event-discard" class="event-card-face">
+          <span id="event-discard-text">No events yet</span>
+        </div>
+      </div>
     </div>
 
     <!-- Deck viewer (hidden by default, toggle via status bar click) -->

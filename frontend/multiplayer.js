@@ -912,20 +912,56 @@ function renderDeckViewer() {
   `;
 }
 
-// ===== Event banner =====
+// ===== Event Deck/Discard =====
 
-let eventBannerTimer = null;
-function showEventBanner(text) {
-  const el = document.getElementById("event-banner");
-  if (!el) return;
-  el.textContent = text;
-  el.style.display = "block";
-  // Re-trigger animation
-  el.style.animation = "none";
-  el.offsetHeight; // force reflow
-  el.style.animation = "";
-  clearTimeout(eventBannerTimer);
-  eventBannerTimer = setTimeout(() => { el.style.display = "none"; }, 3000);
+function showEventBanner(titleHtml) {
+  // Animate card from deck to discard
+  const deckEl = document.getElementById("event-deck-card");
+  const discardEl = document.getElementById("event-discard");
+  const textEl = document.getElementById("event-discard-text");
+  if (!deckEl || !discardEl || !textEl) return;
+
+  const deckRect = deckEl.getBoundingClientRect();
+  const discardRect = discardEl.getBoundingClientRect();
+
+  // Create a flying card clone
+  const flyCard = document.createElement("div");
+  flyCard.className = "flying-card";
+  flyCard.innerHTML = `<span style="font-size:0.7rem">&#9889; ${titleHtml}</span>`;
+  Object.assign(flyCard.style, {
+    position: "fixed",
+    left: deckRect.left + "px",
+    top: deckRect.top + "px",
+    width: deckRect.width + "px",
+    height: deckRect.height + "px",
+    zIndex: "200",
+    transition: `all ${ANIM_FLIGHT}ms cubic-bezier(0.4, 0, 0.2, 1)`,
+    pointerEvents: "none",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    borderColor: "#f0883e",
+  });
+  document.body.appendChild(flyCard);
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      flyCard.style.left = discardRect.left + "px";
+      flyCard.style.top = discardRect.top + "px";
+      flyCard.style.width = discardRect.width + "px";
+      flyCard.style.height = discardRect.height + "px";
+    });
+  });
+
+  flyCard.addEventListener("transitionend", () => {
+    flyCard.remove();
+    // Update discard face
+    textEl.innerHTML = `&#9889; ${titleHtml}`;
+    discardEl.classList.remove("fresh");
+    void discardEl.offsetHeight; // reflow
+    discardEl.classList.add("fresh");
+  }, {once: true});
+  setTimeout(() => { if (flyCard.parentNode) flyCard.remove(); }, ANIM_FLIGHT + 100);
 }
 
 // ===== Selection helpers =====
@@ -1965,8 +2001,8 @@ function renderEndgameChart() {
 // ===== Action Wiring =====
 
 function wireGameButtons() {
-  // Deck viewer toggle
-  document.getElementById("deck-viewer-toggle")?.addEventListener("click", toggleDeckViewer);
+  // Deck viewer toggle (click the deck card back)
+  document.getElementById("event-deck-card")?.addEventListener("click", toggleDeckViewer);
 
   // Market chart toggle
   document.getElementById("market-toggle")?.addEventListener("click", () => {
