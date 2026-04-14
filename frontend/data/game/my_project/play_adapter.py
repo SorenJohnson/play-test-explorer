@@ -360,28 +360,36 @@ class PlayableGame:
         # Execute the event, then chain redraws.
         event_detail = execute_event(self.state, event, player)
         if self.state.pending_prompt is not None:
+            primary_data = getattr(self.state, "_last_event_data", None)
             self.last_event = event_detail
             return {
                 "type": event.type.value,
                 "detail": event_detail,
                 "lines": list(self.state.last_event_lines),
+                "structured": dict(primary_data) if primary_data else {},
                 "awaiting_prompt": True,
             }
-        # Chain redraw events (same turn, no actions)
-        chain_detail, chained_events = self._chain_redraws(player, event)
+        # Chain redraw events — also captures primary structured data
+        chain_detail, chained_events, primary_structured = self._chain_redraws(player, event)
         if chain_detail:
             event_detail = f"{event_detail} | {chain_detail}"
         result = self._finalize_human_turn(event, event_detail)
         result["chained_events"] = chained_events
+        result["structured"] = primary_structured
         return result
 
-    def _chain_redraws(self, player, event) -> tuple[str, list[dict]]:
+    def _chain_redraws(self, player, event) -> tuple[str, list[dict], dict]:
         """If the event has redraws, keep drawing and executing events.
 
-        Returns (combined_detail_string, list_of_structured_event_dicts).
-        Each chained event gets its own structured data entry so the
-        frontend can render them as separate feed items.
+        Call AFTER executing the primary event. Captures the primary
+        event's structured data before chaining overwrites it.
+
+        Returns (combined_detail_string, chained_event_dicts, primary_structured_data).
         """
+        # Capture primary event's structured data before chaining overwrites it
+        primary_data = getattr(self.state, "_last_event_data", None)
+        primary_structured = dict(primary_data) if primary_data else {}
+
         from my_project.simulation import _event_needs_prompt, _has_human_player
         details = []
         chained_events = []
@@ -412,7 +420,7 @@ class PlayableGame:
                 "structured": dict(event_data) if event_data else {},
                 "redraws": event.redraws,
             })
-        return " | ".join(details) if details else "", chained_events
+        return " | ".join(details) if details else "", chained_events, primary_structured
 
     def _handle_post_event(self, event: EventCard) -> None:
         """Shared post-event handling: snapshot market, reshuffle at round end."""
@@ -875,8 +883,9 @@ class PlayableGame:
             }
 
         event_detail = execute_event(self.state, event, player)
-        # Chain redraw events (same turn, no actions)
-        chain_detail, chained_events = self._chain_redraws(player, event)
+        # Chain redraw events — also captures primary structured data
+        chain_detail, chained_events, primary_structured = self._chain_redraws(player, event)
+        self._primary_event_data = primary_structured
         if chain_detail:
             event_detail = f"{event_detail} | {chain_detail}"
         self.last_event = event_detail
@@ -916,6 +925,7 @@ class PlayableGame:
         self._handle_post_event(event)
         chained = getattr(self, "_last_chained_events", [])
         self._last_chained_events = []
+        primary_data = getattr(self, "_primary_event_data", {})
         return {
             "ok": True,
             "player_index": acting_player_idx,
@@ -924,6 +934,7 @@ class PlayableGame:
                 "type": event.type.value,
                 "detail": event_detail,
                 "lines": list(self.state.last_event_lines),
+                "structured": primary_data,
             },
             "chained_events": chained,
         }

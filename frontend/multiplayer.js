@@ -555,7 +555,7 @@ function hostAdvanceStep() {
     }
 
     if (eventDetail) {
-      const evData = stateSnap.last_event_data || {};
+      const evData = result.event?.structured || stateSnap.last_event_data || {};
       addEventFeedEntries(eventDetail, eventLines, playerSnaps, evData);
 
       // Render chained (redraw) events as separate feed entries
@@ -2221,11 +2221,12 @@ function wireGameButtons() {
       // Event resolved normally — add feed entry
       const snapAfter = game.state_dict().toJs({dict_converter: Object.fromEntries});
       const playerSnapsAfter = snapAfter.players.map(p => ({name: p.name, money: p.money, debt: p.debt, net_worth: p.net_worth}));
+      const evData = result.structured || snapAfter.last_event_data || {};
       addEventFeedEntries(
         result.detail || "Turn ended",
         (result.lines || snapAfter.last_event_lines || []).map(l => Object.assign({}, l)),
         playerSnapsAfter,
-        snapAfter.last_event_data || {},
+        evData,
       );
       // Render chained (redraw) events as separate feed entries
       const chained = result.chained_events || [];
