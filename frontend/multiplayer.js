@@ -2370,27 +2370,96 @@ function updateDebugPanel() {
   }
 
   const stateView = document.getElementById("debug-state-view");
-  if (entry?.state) {
-    const s = entry.state;
-    const lines = [];
+  if (!entry) { stateView.textContent = "No data"; return; }
+
+  const lines = [];
+
+  // Detail data (structured action/event info)
+  const d = entry.detail;
+  if (d && typeof d === "object" && Object.keys(d).length > 0) {
+    lines.push("=== ACTION/EVENT DETAIL ===");
+    // Event structured data
+    if (d.event_type) lines.push(`Event type: ${d.event_type}`);
+    if (d.card_drawn) lines.push(`Card drawn: ${d.card_drawn}`);
+    if (d.card_replaced) lines.push(`Card replaced: ${d.card_replaced}`);
+    if (d.card_rates?.length) lines.push(`Card rates: ${d.card_rates.map(r => `${r.amount > 0 ? "+" : ""}${r.amount} ${r.resource}`).join(", ")}`);
+    if (d.card_costs?.length) lines.push(`Card costs: ${d.card_costs.map(c => `${c.amount} ${c.resource}`).join(", ")}`);
+    if (d.card_effect) lines.push(`Card effect: ${d.card_effect}`);
+    if (d.news_name) lines.push(`News: ${d.news_name}`);
+    if (d.news_effects) lines.push(`Effects: ${d.news_effects}`);
+    if (d.auction_result) lines.push(`Auction: ${d.auction_result}`);
+    if (d.market_changes?.length) {
+      for (const c of d.market_changes) {
+        lines.push(`  ${c.resource}: +${c.units} units, $${c.price_before} → $${c.price_after}`);
+      }
+    }
+    if (d.player_contributions?.length) {
+      lines.push("Caused by:");
+      for (const p of d.player_contributions) {
+        const rates = Object.entries(p.rates).map(([r, v]) => `${v} ${r}`).join(", ");
+        lines.push(`  ${p.name}: ${rates}`);
+      }
+    }
+    if (d.pwr_adjust) lines.push(`PWR adjust: rate=${d.pwr_adjust.rate}, $${d.pwr_adjust.price_before} → $${d.pwr_adjust.price_after}`);
+    if (d.sub_events) lines.push(`Sub-events: ${d.sub_events.join(", ")}`);
+    // Action data
+    if (d.type === "build") lines.push(`Built: ${(d.buildings || []).join(", ")}, cost: $${d.build_money_spent || 0}`);
+    if (d.rates_gained) {
+      const rg = Object.entries(d.rates_gained).filter(([,v]) => v !== 0).map(([r,v]) => `${v > 0 ? "+" : ""}${v} ${r}`).join(", ");
+      if (rg) lines.push(`Rates gained: ${rg}`);
+    }
+    if (d.type === "sell") lines.push(`Sold: ${d.sell_amount || 0} ${d.sell_resource || ""} for $${d.sell_revenue || 0}`);
+    if (d.type === "contract") lines.push(`Contract: ${d.contract_label || ""} reward $${d.contract_reward || 0}`);
+    // AI actions list
+    if (d.actions?.length) {
+      lines.push("Actions:");
+      for (const a of d.actions) {
+        lines.push(`  ${a.detail || a.type}`);
+        if (a.rates_gained) {
+          const rg = Object.entries(a.rates_gained).filter(([,v]) => v !== 0).map(([r,v]) => `${v > 0 ? "+" : ""}${v} ${r}`).join(", ");
+          if (rg) lines.push(`    rates: ${rg}`);
+        }
+        if (a.net_worth_after !== undefined) lines.push(`    NW after: $${a.net_worth_after}`);
+      }
+    }
+    // Event lines from backend
+    if (d.player_snapshots?.length) {
+      lines.push("Player snapshots:");
+      for (const p of d.player_snapshots) {
+        lines.push(`  ${p.name}: $${p.money}${p.debt > 0 ? ` debt:$${p.debt}` : ""} NW:$${p.net_worth}`);
+      }
+    }
+    lines.push("");
+  }
+
+  // State snapshot
+  const s = entry.state;
+  if (s) {
+    lines.push("=== STATE ===");
     lines.push(`Market: ${RESOURCE_ORDER.map(r => `${r}=$${s.market?.[r] || 0}`).join(" ")}`);
+    if (s.market_positions) {
+      lines.push(`Positions: ${RESOURCE_ORDER.map(r => `${r}:${s.market_positions[r] ?? "?"}`).join(" ")}`);
+    }
     lines.push(`Deck: ${(s.event_deck_remaining || []).length} remaining`);
+    lines.push(`Round: ${s.round || "?"} Turn: ${(s.turn_index || 0) + 1}`);
     lines.push("");
     for (const p of s.players || []) {
       const rates = RESOURCE_ORDER.map(r => {
         const v = p.rates?.[r] || 0;
         return v !== 0 ? `${v > 0 ? "+" : ""}${v}${r}` : null;
       }).filter(Boolean).join(" ");
-      lines.push(`${p.name}: $${p.money}${p.debt > 0 ? ` debt:$${p.debt}` : ""} NW:$${p.net_worth}`);
+      lines.push(`${p.name}: $${p.money}${p.debt > 0 ? ` debt:$${p.debt}` : ""}${p.credit > 0 ? ` credit:$${p.credit}` : ""} NW:$${p.net_worth} | contracts:${p.contracts_fulfilled || 0}`);
       lines.push(`  rates: ${rates || "none"}`);
       lines.push(`  buildings: ${(p.buildings_played || []).join(", ") || "none"}`);
+      if (p.hand?.length) {
+        lines.push(`  hand: ${p.hand.map(c => c.building).join(", ")}`);
+      }
     }
     lines.push("");
     lines.push(`Pool: ${(s.pool || []).map(c => c.building).join(", ")}`);
-    stateView.textContent = lines.join("\n");
-  } else {
-    stateView.textContent = "No state data";
+    lines.push(`Contracts: ${(s.available_contracts || []).map(c => c.requirements?.map(r => `${r.amount}${r.resource}`).join("+") + "=$" + c.reward).join(" | ")}`);
   }
+  stateView.textContent = lines.join("\n");
 }
 
 function enterReplay(step) {
