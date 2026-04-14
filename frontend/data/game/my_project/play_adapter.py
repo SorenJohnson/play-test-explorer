@@ -257,16 +257,16 @@ class PlayableGame:
     pending_terminal_results: list[dict] = field(default_factory=list, init=False)
 
     def _total_player_turns(self) -> int:
-        """Total player turns across ALL rounds (not just the current deck).
+        """Total player turns across ALL rounds.
         Every non-redraw event is a player turn, including END_ROUND
-        and END_GAME. For a 2-round game this is round1_turns + round2_turns."""
-        current_deck_turns = sum(1 for e in self.state.event_deck if not e.redraws)
-        # Add turns already consumed from previous rounds
-        already_played = self._turn_count
-        remaining = current_deck_turns - (self.state.event_idx - sum(
-            1 for e in self.state.event_deck[:self.state.event_idx] if e.redraws
-        ))
-        return already_played + max(0, remaining)
+        and END_GAME. Count remaining non-redraw cards + turns already
+        completed (not counting the current in-progress turn)."""
+        remaining_cards = self.state.event_deck[self.state.event_idx:]
+        remaining_turns = sum(1 for e in remaining_cards if not e.redraws)
+        # _turn_count includes the current in-progress turn, but remaining
+        # also includes its event card. Subtract 1 if a turn is in progress.
+        completed = self._turn_count - (1 if self._turn_in_progress() else 0)
+        return completed + remaining_turns
 
     def clear_terminal_results(self) -> None:
         """Clear the pending terminal event results after the frontend has logged them."""
