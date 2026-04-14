@@ -670,6 +670,18 @@ details.feed-group > summary.feed-group-title::-webkit-details-marker { color: #
 .feed-line-player { color: #c9d1d9; margin: 2px 0; padding-left: 8px; }
 .feed-line-name { color: #58a6ff; font-weight: 500; margin-right: 4px; }
 .feed-nw-inline { color: #8b949e; font-size: 0.85em; margin-left: 4px; }
+.feed-round-marker {
+  text-align: center;
+  padding: 6px 0;
+  margin: 4px 0;
+  color: #f0883e;
+  font-weight: bold;
+  font-size: 0.75rem;
+  border-top: 1px solid #f0883e33;
+  border-bottom: 1px solid #f0883e33;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
 .pwr-up { color: #3fb950; font-weight: 600; font-size: 0.85em; }
 .pwr-down { color: #f85149; font-weight: 600; font-size: 0.85em; }
 .redraw-icon { color: #d29922; font-size: 0.9em; margin-left: 2px; }

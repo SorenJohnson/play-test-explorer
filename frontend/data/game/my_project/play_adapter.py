@@ -297,10 +297,16 @@ class PlayableGame:
                 )
 
     def _total_player_turns(self) -> int:
-        """Count events in the deck that are actual player-turns.
+        """Total player turns across ALL rounds (not just the current deck).
         Every non-redraw event is a player turn, including END_ROUND
-        and END_GAME (the player takes actions, then the event fires)."""
-        return sum(1 for e in self.state.event_deck if not e.redraws)
+        and END_GAME. For a 2-round game this is round1_turns + round2_turns."""
+        current_deck_turns = sum(1 for e in self.state.event_deck if not e.redraws)
+        # Add turns already consumed from previous rounds
+        already_played = self._turn_count
+        remaining = current_deck_turns - (self.state.event_idx - sum(
+            1 for e in self.state.event_deck[:self.state.event_idx] if e.redraws
+        ))
+        return already_played + max(0, remaining)
 
     def clear_terminal_results(self) -> None:
         """Clear the pending terminal event results after the frontend has logged them."""

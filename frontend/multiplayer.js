@@ -1676,6 +1676,15 @@ function addEventFeedEntries(_eventDetail, eventLines, playerSnaps, eventData) {
   broadcastFeed(entry);
   showEventBanner(buildEventCardLabel(eventData || {}));
 
+  // Round marker when END_ROUND fires
+  const evType = (eventData || {}).event_type;
+  if (evType === "end_round") {
+    const roundNum = currentState?.deck_round || currentState?.round || "?";
+    const marker = {kind: "round-marker", text: `--- Round ${roundNum} Complete ---`};
+    addFeedEntry(marker);
+    broadcastFeed(marker);
+  }
+
   // Animate draw building card: new card flies from event deck to pool
   if (eventData?.event_type === "draw_building_card" && eventData.card_drawn) {
     requestAnimationFrame(() => {
@@ -1952,6 +1961,10 @@ function renderFeedEntry(e) {
     `;
   }
 
+  if (e.kind === "round-marker") {
+    return `<div class="feed-round-marker">${e.text}</div>`;
+  }
+
   // Fallback
   return `<div class="feed-group"><div class="feed-group-title">${fmtMoney(e.text || '')} <span class="feed-time">${e.time || ''}</span></div></div>`;
 }
@@ -2153,6 +2166,11 @@ function wireGameButtons() {
   });
   document.getElementById("mp-pass-btn").addEventListener("click", () => {
     clearSelection();
+    // Log the pass/end turn
+    const playerName = currentState?.players[mySeat]?.name || "You";
+    addFeedEntry({kind: "turn", text: `${playerName}: End Turn`});
+    broadcastFeed({kind: "turn", text: `${playerName}: End Turn`});
+
     if (role === "host") {
       const result = game.end_human_turn().toJs({dict_converter: Object.fromEntries});
       const snapAfter = game.state_dict().toJs({dict_converter: Object.fromEntries});
