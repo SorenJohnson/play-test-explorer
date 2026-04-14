@@ -944,7 +944,7 @@ class PlayableGame:
                 _player_dict(
                     p,
                     is_human=(i in self._human_indices),
-                    reveal_hand=(i == cur_idx and i in self._human_indices),
+                    reveal_hand=(i in self._human_indices),  # host sees own hand always
                 )
                 for i, p in enumerate(s.players)
             ],

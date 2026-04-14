@@ -1270,7 +1270,7 @@ function renderHand(s) {
   const myTurn = isMyTurn(s);
 
   if (hand.length === 0) {
-    grid.innerHTML = `<div style="color:#8b949e;padding:12px">${myTurn ? 'Hand is empty' : 'Cards hidden until your turn'}</div>`;
+    grid.innerHTML = `<div style="color:#8b949e;padding:12px">Hand is empty</div>`;
     document.getElementById("mp-build-estimate").textContent = "";
     return;
   }
@@ -1279,10 +1279,10 @@ function renderHand(s) {
   const affordableSet = new Set(currentLegal?.affordable_single_builds || []);
   const cr = currentLegal?.cards_remaining ?? 2;
 
+  const inactive = !myTurn ? "inactive" : "";
   grid.innerHTML = hand.map((c, i) => {
     const sel = selectedCards.has(i) ? "selected" : "";
-    const dis = !myTurn ? "disabled" : "";
-    return `<div class="hand-card ${sel} ${dis}" data-hi="${i}">${renderCard(c)}</div>`;
+    return `<div class="hand-card ${sel} ${inactive}" data-hi="${i}">${renderCard(c)}</div>`;
   }).join("");
 
   // Build cost estimate
