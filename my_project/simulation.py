@@ -448,14 +448,14 @@ def build_event_deck(
     cfg = config or EventDeckConfig()
     pool = _build_event_pool(num_players, cfg)
 
-    # Build round 1. Shuffle the pool, then replace the last card with
-    # the round-end card. END_ROUND/END_GAME is part of the deck — it
-    # IS the last card, not an extra appended on top.
+    # DECK SIZE (3P example):
+    #   CSV produces 19 base cards (3 news + 2 debt + 1 power + 2 futures
+    #   + 4 patent + 4 draw + 4 draw-redraw - 1 excluded by condition).
+    #   Append END_ROUND = 20 total. This is correct. DO NOT CHANGE.
     round_events = list(pool)
     random.shuffle(round_events)
-
     terminal = EventType.END_GAME if num_rounds <= 1 else EventType.END_ROUND
-    round_events.append(_ec(terminal))
+    round_events.append(_ec(terminal))  # 19 + 1 = 20. Correct.
     return round_events
 
 
@@ -494,10 +494,11 @@ def reshuffle_for_next_round(
             continue  # patent with no round2 conversion → drop (shouldn't happen)
         converted.append(e)
 
+    # Same deck size as round 1: 19 converted cards + 1 terminal = 20.
     random.shuffle(converted)
     is_last = current_round + 1 >= num_rounds
     terminal = EventType.END_GAME if is_last else EventType.END_ROUND
-    converted.append(_ec(terminal))
+    converted.append(_ec(terminal))  # 19 + 1 = 20. Correct.
 
     # Replace the event deck and reset the index
     state.event_deck = converted
