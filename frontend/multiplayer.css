@@ -774,27 +774,29 @@ details.feed-group > summary.feed-group-title::-webkit-details-marker { color: #
 /* ===== Debug Panel ===== */
 #debug-panel {
   position: fixed;
-  bottom: 0;
-  left: 0;
+  top: 0;
   right: 0;
+  width: 360px;
+  height: 100vh;
   background: #0d1117;
-  border-top: 2px solid #f0883e;
+  border-left: 2px solid #f0883e;
   z-index: 300;
-  max-height: 50vh;
   overflow-y: auto;
   font-size: 0.8rem;
 }
 .debug-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 16px;
+  gap: 6px;
+  padding: 6px 10px;
   background: #161b22;
   border-bottom: 1px solid #30363d;
   position: sticky;
   top: 0;
   flex-wrap: wrap;
+  z-index: 1;
 }
+.debug-controls { flex-wrap: wrap; }
 .debug-title { font-weight: bold; color: #f0883e; }
 .debug-controls { display: flex; align-items: center; gap: 4px; }
 .debug-btn {
