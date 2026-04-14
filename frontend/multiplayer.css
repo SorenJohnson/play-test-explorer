@@ -724,7 +724,7 @@ details.feed-group > summary.feed-group-title::-webkit-details-marker { color: #
   pointer-events: none;
   z-index: 201;
   text-shadow: 0 1px 4px rgba(0,0,0,0.6);
-  animation: rateFloat 0.8s ease-out forwards;
+  animation: rateFloat 1s ease-out forwards;
   transform: translateX(-50%);
 }
 .rate-change-popup.positive { color: #3fb950; }

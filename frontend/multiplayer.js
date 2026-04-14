@@ -855,31 +855,37 @@ function animateAiActions(actions, playerIdx) {
 function animateRateChanges(rates, targetSelector) {
   // Show floating +/- numbers over the rate chips that changed
   if (!rates || typeof rates !== "object") return;
-  for (const [resource, amount] of Object.entries(rates)) {
-    if (amount === 0) continue;
-    // Find the rate chip for this resource
+  const entries = Object.entries(rates).filter(([, v]) => v !== 0);
+  if (entries.length === 0) return;
+
+  for (const [resource, amount] of entries) {
+    // Find the rate chip — search all chips under the target, match by resource text
     const chips = document.querySelectorAll(`${targetSelector} .rate-chip`);
     let chipEl = null;
     for (const chip of chips) {
       const resEl = chip.querySelector(".rate-res");
-      if (resEl && resEl.textContent.trim() === resource) {
+      if (resEl && resEl.textContent.trim().toUpperCase() === resource.toUpperCase()) {
         chipEl = chip;
         break;
       }
     }
-    if (!chipEl) continue;
+    if (!chipEl) {
+      // Fallback: try finding by resource color in the rates grid
+      continue;
+    }
     const rect = chipEl.getBoundingClientRect();
+    if (rect.width === 0) continue; // element not visible
     const popup = document.createElement("div");
     popup.className = amount > 0 ? "rate-change-popup positive" : "rate-change-popup negative";
     popup.textContent = `${amount > 0 ? "+" : ""}${amount}`;
     Object.assign(popup.style, {
       position: "fixed",
       left: (rect.left + rect.width / 2) + "px",
-      top: (rect.top - 4) + "px",
-      zIndex: "201",
+      top: (rect.top - 8) + "px",
+      zIndex: "250",
     });
     document.body.appendChild(popup);
-    setTimeout(() => { if (popup.parentNode) popup.remove(); }, 900);
+    setTimeout(() => { if (popup.parentNode) popup.remove(); }, 1200);
   }
 }
 
@@ -2180,9 +2186,13 @@ function sendAction(action) {
     if (result.ok) {
       humanTurnActions.push(result);
       hostRefreshState();
-      // Animate rate changes on your panel
+      // Animate rate changes on your panel (after DOM paints)
       if (result.rates_gained) {
-        animateRateChanges(result.rates_gained, ".player-panel-rates");
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            animateRateChanges(result.rates_gained, ".player-panel-rates");
+          });
+        });
       }
       const afterSnap = currentState?.players[mySeat];
       const playerAfter = afterSnap ? {money: afterSnap.money, debt: afterSnap.debt, net_worth: afterSnap.net_worth, rates: Object.assign({}, afterSnap.rates)} : null;
