@@ -390,6 +390,10 @@ class PlayableGame:
             self.state.last_event_lines = []
             detail = execute_event(self.state, event, player)
             details.append(detail)
+            # If this event triggered a prompt (e.g. patent auction),
+            # the prompt resolution will handle the feed entry — skip here.
+            if self.state.pending_prompt is not None:
+                break
             # Capture structured data for this chained event
             event_data = getattr(self.state, "_last_event_data", None)
             chained_events.append({
