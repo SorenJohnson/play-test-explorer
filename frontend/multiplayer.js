@@ -428,6 +428,7 @@ game
   };
   addFeedEntry(kickoff);
   broadcastFeed(kickoff);
+  logGameStep("start", "Game", -1, "Game started", {setupLines, marketLine});
 
   hostAdvanceGame();
 }
@@ -540,6 +541,7 @@ function hostAdvanceStep() {
   addFeedEntry(actionEntry);
   broadcastFeed(actionEntry);
   hostRefreshState();
+  logGameStep("turn", playerName, playerIdx, titleSummary, {actions: aiActions});
 
   // AI action animations
   animateAiActions(aiActions, playerIdx);
@@ -557,6 +559,7 @@ function hostAdvanceStep() {
     if (eventDetail) {
       const evData = result.event?.structured || stateSnap.last_event_data || {};
       addEventFeedEntries(eventDetail, eventLines, playerSnaps, evData);
+      logGameStep("event", playerName, playerIdx, buildEventTitle(evData), evData);
 
       // Render chained (redraw) events as separate feed entries
       const chained = result.chained_events || [];
@@ -564,6 +567,7 @@ function hostAdvanceStep() {
         const ceData = ce.structured || {};
         ceData._is_redraw = true;
         addEventFeedEntries(ce.detail, ce.lines || [], playerSnaps, ceData);
+        logGameStep("event", playerName, playerIdx, buildEventTitle(ceData), ceData);
       }
       hostRefreshState();
     }
@@ -729,12 +733,14 @@ function tryResolvePrompt() {
   pendingPromptAnswers = {};
   const result = game.resolve_pending_prompt(pyodide.toPy(merged)).toJs({dict_converter: Object.fromEntries});
   const snapAfter = game.state_dict().toJs({dict_converter: Object.fromEntries});
+  const promptEvData = snapAfter.last_event_data || {};
   addEventFeedEntries(
     result.detail || "Prompt resolved",
     (snapAfter.last_event_lines || []).map(l => Object.assign({}, l)),
     snapAfter.players.map(p => ({name: p.name, money: p.money, debt: p.debt, net_worth: p.net_worth})),
-    snapAfter.last_event_data || {},
+    promptEvData,
   );
+  logGameStep("prompt", "", -1, result.detail || "Prompt resolved", promptEvData);
 
   if (result.awaiting_prompt) {
     hostRefreshState();
@@ -1336,6 +1342,8 @@ function executePoolSwap(handIdx, poolIdx) {
   if (role === "host") {
     game.human_pool_swap(parseInt(handIdx), parseInt(poolIdx));
     hostRefreshState();
+    const pName = currentState?.players[mySeat]?.name || "You";
+    logGameStep("swap", pName, mySeat, `Swapped hand[${handIdx}] with pool[${poolIdx}]`, {handIdx, poolIdx});
   } else {
     hostConn.send(JSON.stringify({type: "pool_swap", hand_idx: parseInt(handIdx), pool_idx: parseInt(poolIdx)}));
   }
@@ -1527,12 +1535,17 @@ function sendPatentAction(action, params) {
         break;
     }
     if (result?.ok) {
+      const pName = currentState?.players[mySeat]?.name || "You";
       addFeedEntry({kind: "free-action", text: `You: ${result.detail}`});
-      broadcastFeed({kind: "free-action", text: `${currentState.players[mySeat]?.name}: ${result.detail}`});
+      broadcastFeed({kind: "free-action", text: `${pName}: ${result.detail}`});
+      hostRefreshState();
+      logGameStep("free_action", pName, mySeat, result.detail, result);
     } else if (result) {
       alert(result.reason || "Patent action failed");
+      hostRefreshState();
+    } else {
+      hostRefreshState();
     }
-    hostRefreshState();
   } else {
     hostConn.send(JSON.stringify({type: "patent_action", action, ...params}));
   }
@@ -2228,12 +2241,15 @@ function wireGameButtons() {
         playerSnapsAfter,
         evData,
       );
+      const pName = currentState?.players[mySeat]?.name || "You";
+      logGameStep("event", pName, mySeat, buildEventTitle(evData), evData);
       // Render chained (redraw) events as separate feed entries
       const chained = result.chained_events || [];
       for (const ce of chained) {
         const ceData = ce.structured || {};
         ceData._is_redraw = true;
         addEventFeedEntries(ce.detail, ce.lines || [], playerSnapsAfter, ceData);
+        logGameStep("event", pName, mySeat, buildEventTitle(ceData), ceData);
       }
       hostRefreshState();
       hostAdvanceGame();
@@ -2281,6 +2297,7 @@ function sendAction(action) {
         playerBefore: playerBefore,
         playerAfter: playerAfter,
       });
+      logGameStep(result.type || "action", playerName, mySeat, title, result);
     } else {
       alert(result.reason || "Action failed");
       hostRefreshState();
@@ -2289,3 +2306,132 @@ function sendAction(action) {
     hostConn.send(JSON.stringify({type: "action", action}));
   }
 }
+
+// ===== Game Log + Debug Panel =====
+
+const gameLog = [];
+let replayMode = false;
+let replayStep = -1;
+let debugPanelOpen = false;
+
+function logGameStep(type, playerName, playerIdx, summary, detail) {
+  if (role !== "host" || !game) return;
+  const state = game.state_dict().toJs({dict_converter: Object.fromEntries});
+  gameLog.push({
+    step: gameLog.length,
+    type,
+    player: playerName || "",
+    playerIdx: playerIdx ?? -1,
+    summary: summary || "",
+    detail: detail || {},
+    state,
+    time: new Date().toLocaleTimeString(),
+  });
+  if (debugPanelOpen) updateDebugPanel();
+}
+
+// Toggle debug panel with backtick
+document.addEventListener("keydown", (e) => {
+  if (e.key === "`" || (e.ctrlKey && e.key === "d")) {
+    e.preventDefault();
+    toggleDebugPanel();
+  }
+});
+
+function toggleDebugPanel() {
+  debugPanelOpen = !debugPanelOpen;
+  const panel = document.getElementById("debug-panel");
+  if (panel) panel.style.display = debugPanelOpen ? "block" : "none";
+  if (debugPanelOpen) updateDebugPanel();
+}
+
+function updateDebugPanel() {
+  const total = gameLog.length;
+  const step = replayMode ? replayStep : total - 1;
+  const entry = gameLog[step];
+
+  document.getElementById("debug-step-label").textContent = `${step + 1} / ${total}`;
+  const slider = document.getElementById("debug-slider");
+  slider.max = Math.max(0, total - 1);
+  slider.value = step;
+
+  document.getElementById("debug-replay-indicator").style.display = replayMode ? "inline" : "none";
+  document.getElementById("debug-live").style.display = replayMode ? "inline" : "none";
+
+  const info = document.getElementById("debug-step-info");
+  if (entry) {
+    const color = entry.playerIdx >= 0 ? PLAYER_COLORS[entry.playerIdx % PLAYER_COLORS.length] : "#8b949e";
+    info.innerHTML = `
+      <div><strong>Step ${entry.step + 1}</strong> — <span style="color:${color}">${entry.player}</span> <span style="text-transform:uppercase;color:#f0883e">${entry.type}</span> <span style="color:#6e7681">${entry.time}</span></div>
+      <div style="margin-top:4px">${entry.summary}</div>
+    `;
+  } else {
+    info.innerHTML = "<div>No data</div>";
+  }
+
+  const stateView = document.getElementById("debug-state-view");
+  if (entry?.state) {
+    const s = entry.state;
+    const lines = [];
+    lines.push(`Market: ${RESOURCE_ORDER.map(r => `${r}=$${s.market?.[r] || 0}`).join(" ")}`);
+    lines.push(`Deck: ${(s.event_deck_remaining || []).length} remaining`);
+    lines.push("");
+    for (const p of s.players || []) {
+      const rates = RESOURCE_ORDER.map(r => {
+        const v = p.rates?.[r] || 0;
+        return v !== 0 ? `${v > 0 ? "+" : ""}${v}${r}` : null;
+      }).filter(Boolean).join(" ");
+      lines.push(`${p.name}: $${p.money}${p.debt > 0 ? ` debt:$${p.debt}` : ""} NW:$${p.net_worth}`);
+      lines.push(`  rates: ${rates || "none"}`);
+      lines.push(`  buildings: ${(p.buildings_played || []).join(", ") || "none"}`);
+    }
+    lines.push("");
+    lines.push(`Pool: ${(s.pool || []).map(c => c.building).join(", ")}`);
+    stateView.textContent = lines.join("\n");
+  } else {
+    stateView.textContent = "No state data";
+  }
+}
+
+function enterReplay(step) {
+  step = Math.max(0, Math.min(step, gameLog.length - 1));
+  replayMode = true;
+  replayStep = step;
+  currentState = gameLog[step].state;
+  currentLegal = null;
+  renderGame();
+  updateDebugPanel();
+}
+
+function exitReplay() {
+  replayMode = false;
+  replayStep = -1;
+  hostRefreshState();
+  updateDebugPanel();
+}
+
+// Wire debug panel buttons
+document.getElementById("debug-close")?.addEventListener("click", toggleDebugPanel);
+document.getElementById("debug-first")?.addEventListener("click", () => enterReplay(0));
+document.getElementById("debug-prev")?.addEventListener("click", () => {
+  if (replayMode) enterReplay(replayStep - 1);
+  else enterReplay(gameLog.length - 2);
+});
+document.getElementById("debug-next")?.addEventListener("click", () => {
+  if (replayMode && replayStep < gameLog.length - 1) enterReplay(replayStep + 1);
+  else exitReplay();
+});
+document.getElementById("debug-last")?.addEventListener("click", () => exitReplay());
+document.getElementById("debug-live")?.addEventListener("click", () => exitReplay());
+document.getElementById("debug-slider")?.addEventListener("input", (e) => {
+  enterReplay(parseInt(e.target.value));
+});
+document.getElementById("debug-download")?.addEventListener("click", () => {
+  const blob = new Blob([JSON.stringify(gameLog, null, 2)], {type: "application/json"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `game-log-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+});

@@ -165,6 +165,29 @@
     </div>
   </div>
 
+  <!-- Debug Panel (toggle with backtick key) -->
+  <div id="debug-panel" style="display:none">
+    <div class="debug-header">
+      <span class="debug-title">Debug Panel</span>
+      <span id="debug-replay-indicator" class="debug-replay-badge" style="display:none">REPLAY MODE</span>
+      <span class="debug-controls">
+        <button id="debug-first" class="debug-btn" title="First step">|&#9664;</button>
+        <button id="debug-prev" class="debug-btn" title="Previous step">&#9664;</button>
+        <span id="debug-step-label">0 / 0</span>
+        <button id="debug-next" class="debug-btn" title="Next step">&#9654;</button>
+        <button id="debug-last" class="debug-btn" title="Last step (live)">&#9654;|</button>
+        <input type="range" id="debug-slider" min="0" max="0" value="0" class="debug-slider">
+      </span>
+      <button id="debug-live" class="debug-btn primary" style="display:none">Return to Live</button>
+      <button id="debug-download" class="debug-btn">Download Log</button>
+      <button id="debug-close" class="debug-btn">Close</button>
+    </div>
+    <div id="debug-body" class="debug-body">
+      <div id="debug-step-info"></div>
+      <div id="debug-state-view"></div>
+    </div>
+  </div>
+
   <script src="multiplayer.js"></script>
 </body>
 </html>
