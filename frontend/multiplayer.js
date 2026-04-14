@@ -428,7 +428,6 @@ game
   };
   addFeedEntry(kickoff);
   broadcastFeed(kickoff);
-  logGameStep("start", "Game", -1, "Game started", {setupLines, marketLine});
 
   hostAdvanceGame();
 }
@@ -453,6 +452,7 @@ function hostRefreshState() {
   }
   renderGame();
   broadcastState();
+  if (debugPanelOpen) updateDebugPanel();
 }
 
 function broadcastState() {
@@ -541,7 +541,6 @@ function hostAdvanceStep() {
   addFeedEntry(actionEntry);
   broadcastFeed(actionEntry);
   hostRefreshState();
-  logGameStep("turn", playerName, playerIdx, titleSummary, {actions: aiActions});
 
   // AI action animations
   animateAiActions(aiActions, playerIdx);
@@ -559,7 +558,6 @@ function hostAdvanceStep() {
     if (eventDetail) {
       const evData = result.event?.structured || stateSnap.last_event_data || {};
       addEventFeedEntries(eventDetail, eventLines, playerSnaps, evData);
-      logGameStep("event", playerName, playerIdx, buildEventTitle(evData), Object.assign({}, evData, {event_lines: eventLines}));
 
       // Render chained (redraw) events as separate feed entries
       const chained = result.chained_events || [];
@@ -568,7 +566,6 @@ function hostAdvanceStep() {
         ceData._is_redraw = true;
         const ceLines = ce.lines || [];
         addEventFeedEntries(ce.detail, ceLines, playerSnaps, ceData);
-        logGameStep("event", playerName, playerIdx, buildEventTitle(ceData), Object.assign({}, ceData, {event_lines: ceLines}));
       }
       hostRefreshState();
     }
@@ -742,10 +739,6 @@ function tryResolvePrompt() {
     snapAfter.players.map(p => ({name: p.name, money: p.money, debt: p.debt, net_worth: p.net_worth})),
     promptEvData,
   );
-  // Include event_lines in the log detail so bids/debt details are captured
-  const logDetail = Object.assign({}, promptEvData, {event_lines: promptLines});
-  const logSummary = buildEventTitle(promptEvData) || result.detail || "Prompt resolved";
-  logGameStep("event", "", -1, logSummary, logDetail);
 
   if (result.awaiting_prompt) {
     hostRefreshState();
@@ -1347,8 +1340,6 @@ function executePoolSwap(handIdx, poolIdx) {
   if (role === "host") {
     game.human_pool_swap(parseInt(handIdx), parseInt(poolIdx));
     hostRefreshState();
-    const pName = currentState?.players[mySeat]?.name || "You";
-    logGameStep("swap", pName, mySeat, `Swapped hand[${handIdx}] with pool[${poolIdx}]`, {handIdx, poolIdx});
   } else {
     hostConn.send(JSON.stringify({type: "pool_swap", hand_idx: parseInt(handIdx), pool_idx: parseInt(poolIdx)}));
   }
@@ -1544,7 +1535,6 @@ function sendPatentAction(action, params) {
       addFeedEntry({kind: "free-action", text: `You: ${result.detail}`});
       broadcastFeed({kind: "free-action", text: `${pName}: ${result.detail}`});
       hostRefreshState();
-      logGameStep("free_action", pName, mySeat, result.detail, result);
     } else if (result) {
       alert(result.reason || "Patent action failed");
       hostRefreshState();
@@ -2246,9 +2236,6 @@ function wireGameButtons() {
         playerSnapsAfter,
         evData,
       );
-      const pName = currentState?.players[mySeat]?.name || "You";
-      const humanEventLines = (result.lines || snapAfter.last_event_lines || []).map(l => Object.assign({}, l));
-      logGameStep("event", pName, mySeat, buildEventTitle(evData), Object.assign({}, evData, {event_lines: humanEventLines}));
       // Render chained (redraw) events as separate feed entries
       const chained = result.chained_events || [];
       for (const ce of chained) {
@@ -2256,7 +2243,6 @@ function wireGameButtons() {
         ceData._is_redraw = true;
         const ceLines = ce.lines || [];
         addEventFeedEntries(ce.detail, ceLines, playerSnapsAfter, ceData);
-        logGameStep("event", pName, mySeat, buildEventTitle(ceData), Object.assign({}, ceData, {event_lines: ceLines}));
       }
       hostRefreshState();
       hostAdvanceGame();
@@ -2304,7 +2290,6 @@ function sendAction(action) {
         playerBefore: playerBefore,
         playerAfter: playerAfter,
       });
-      logGameStep(result.type || "action", playerName, mySeat, title, result);
     } else {
       alert(result.reason || "Action failed");
       hostRefreshState();
@@ -2316,28 +2301,11 @@ function sendAction(action) {
 
 // ===== Game Log + Debug Panel =====
 
-const gameLog = [];
-let replayMode = false;
-let replayStep = -1;
+// ===== Debug Panel — driven entirely by Python action_log =====
+
 let debugPanelOpen = false;
+let debugStep = -1; // -1 = live (latest)
 
-function logGameStep(type, playerName, playerIdx, summary, detail) {
-  if (role !== "host" || !game) return;
-  const state = game.state_dict().toJs({dict_converter: Object.fromEntries});
-  gameLog.push({
-    step: gameLog.length,
-    type,
-    player: playerName || "",
-    playerIdx: playerIdx ?? -1,
-    summary: summary || "",
-    detail: detail || {},
-    state,
-    time: new Date().toLocaleTimeString(),
-  });
-  if (debugPanelOpen) updateDebugPanel();
-}
-
-// Toggle debug panel with backtick
 document.addEventListener("keydown", (e) => {
   if (e.key === "`" || (e.ctrlKey && e.key === "d")) {
     e.preventDefault();
@@ -2352,170 +2320,231 @@ function toggleDebugPanel() {
   if (debugPanelOpen) updateDebugPanel();
 }
 
+function _getActionLog() {
+  // Live from Python game object, or from last received state for clients
+  if (game) {
+    try {
+      const s = game.state_dict().toJs({dict_converter: Object.fromEntries});
+      return s.action_log || [];
+    } catch (e) { /* fall through */ }
+  }
+  return currentState?.action_log || [];
+}
+
 function updateDebugPanel() {
-  const total = gameLog.length;
-  const step = replayMode ? replayStep : total - 1;
-  const entry = gameLog[step];
+  const actionLog = _getActionLog();
+  const total = actionLog.length;
+  const step = debugStep >= 0 ? Math.min(debugStep, total - 1) : total - 1;
+  const isLive = debugStep < 0;
 
   document.getElementById("debug-step-label").textContent = `${step + 1} / ${total}`;
   const slider = document.getElementById("debug-slider");
   slider.max = Math.max(0, total - 1);
   slider.value = step;
 
-  document.getElementById("debug-replay-indicator").style.display = replayMode ? "inline" : "none";
-  document.getElementById("debug-live").style.display = replayMode ? "inline" : "none";
+  document.getElementById("debug-replay-indicator").style.display = isLive ? "none" : "inline";
+  document.getElementById("debug-live").style.display = isLive ? "none" : "inline";
 
+  // Step header
   const info = document.getElementById("debug-step-info");
-  if (entry) {
-    const color = entry.playerIdx >= 0 ? PLAYER_COLORS[entry.playerIdx % PLAYER_COLORS.length] : "#8b949e";
+  const a = actionLog[step];
+  if (a) {
+    const cls = _mutTypeClass(a.type);
+    const pColor = a.player_idx >= 0 ? PLAYER_COLORS[a.player_idx % PLAYER_COLORS.length] : "#8b949e";
+    const playerLabel = a.player || "GLOBAL";
     info.innerHTML = `
-      <div><strong>Step ${entry.step + 1}</strong> — <span style="color:${color}">${entry.player}</span> <span style="text-transform:uppercase;color:#f0883e">${entry.type}</span> <span style="color:#6e7681">${entry.time}</span></div>
-      <div style="margin-top:4px">${entry.summary}</div>
+      <div><strong>#${a.id}</strong> <span class="mut-type ${cls}">${a.type}</span> <span style="color:${pColor}">${playerLabel}</span></div>
+      <div style="margin-top:4px;color:#c9d1d9">${a.summary}</div>
     `;
   } else {
     info.innerHTML = "<div>No data</div>";
   }
 
-  const stateView = document.getElementById("debug-state-view");
-  if (!entry) { stateView.textContent = "No data"; return; }
+  // Content: mutations + metadata + snapshot for the current entry
+  const container = document.getElementById("debug-content");
+  if (!container) return;
+  if (!a) { container.innerHTML = '<div style="color:#6e7681;padding:12px">No actions yet.</div>'; return; }
 
-  const lines = [];
-
-  // Detail data (structured action/event info)
-  const d = entry.detail;
-  if (d && typeof d === "object" && Object.keys(d).length > 0) {
-    lines.push("=== ACTION/EVENT DETAIL ===");
-    // Event structured data
-    if (d.event_type) lines.push(`Event type: ${d.event_type}`);
-    if (d.card_drawn) lines.push(`Card drawn: ${d.card_drawn}`);
-    if (d.card_replaced) lines.push(`Card replaced: ${d.card_replaced}`);
-    if (d.card_rates?.length) lines.push(`Card rates: ${d.card_rates.map(r => `${r.amount > 0 ? "+" : ""}${r.amount} ${r.resource}`).join(", ")}`);
-    if (d.card_costs?.length) lines.push(`Card costs: ${d.card_costs.map(c => `${c.amount} ${c.resource}`).join(", ")}`);
-    if (d.card_effect) lines.push(`Card effect: ${d.card_effect}`);
-    if (d.news_name) lines.push(`News: ${d.news_name}`);
-    if (d.news_effects) lines.push(`Effects: ${d.news_effects}`);
-    if (d.auction_result) lines.push(`Auction: ${d.auction_result}`);
-    if (d.market_changes?.length) {
-      for (const c of d.market_changes) {
-        lines.push(`  ${c.resource}: +${c.units} units, $${c.price_before} → $${c.price_after}`);
-      }
-    }
-    if (d.player_contributions?.length) {
-      lines.push("Caused by:");
-      for (const p of d.player_contributions) {
-        const rates = Object.entries(p.rates).map(([r, v]) => `${v} ${r}`).join(", ");
-        lines.push(`  ${p.name}: ${rates}`);
-      }
-    }
-    if (d.pwr_adjust) lines.push(`PWR adjust: rate=${d.pwr_adjust.rate}, $${d.pwr_adjust.price_before} → $${d.pwr_adjust.price_after}`);
-    if (d.sub_events) lines.push(`Sub-events: ${d.sub_events.join(", ")}`);
-    // Action data
-    if (d.type === "build") lines.push(`Built: ${(d.buildings || []).join(", ")}, cost: $${d.build_money_spent || 0}`);
-    if (d.rates_gained) {
-      const rg = Object.entries(d.rates_gained).filter(([,v]) => v !== 0).map(([r,v]) => `${v > 0 ? "+" : ""}${v} ${r}`).join(", ");
-      if (rg) lines.push(`Rates gained: ${rg}`);
-    }
-    if (d.type === "sell") lines.push(`Sold: ${d.sell_amount || 0} ${d.sell_resource || ""} for $${d.sell_revenue || 0}`);
-    if (d.type === "contract") lines.push(`Contract: ${d.contract_label || ""} reward $${d.contract_reward || 0}`);
-    // AI actions list
-    if (d.actions?.length) {
-      lines.push("Actions:");
-      for (const a of d.actions) {
-        lines.push(`  ${a.detail || a.type}`);
-        if (a.rates_gained) {
-          const rg = Object.entries(a.rates_gained).filter(([,v]) => v !== 0).map(([r,v]) => `${v > 0 ? "+" : ""}${v} ${r}`).join(", ");
-          if (rg) lines.push(`    rates: ${rg}`);
-        }
-        if (a.net_worth_after !== undefined) lines.push(`    NW after: $${a.net_worth_after}`);
-      }
-    }
-    // Event lines from backend (auction bids, power bill per-player, debt details)
-    if (d.event_lines?.length) {
-      lines.push("Event lines:");
-      for (const line of d.event_lines) {
-        if (line.kind === "header") lines.push(`  [${line.text}]`);
-        else if (line.kind === "player") lines.push(`  ${line.name || ""}: ${line.text}${line.net_worth_after !== undefined ? ` (NW: $${line.net_worth_after})` : ""}`);
-        else lines.push(`  ${line.text || ""}`);
-      }
-    }
-    if (d.player_snapshots?.length) {
-      lines.push("Player snapshots:");
-      for (const p of d.player_snapshots) {
-        lines.push(`  ${p.name}: $${p.money}${p.debt > 0 ? ` debt:$${p.debt}` : ""} NW:$${p.net_worth}`);
-      }
-    }
-    lines.push("");
+  // Replay state up to current step
+  const tracker = new StateTracker();
+  for (let i = 0; i <= step; i++) {
+    tracker.applyAction(actionLog[i]);
   }
 
-  // State snapshot
-  const s = entry.state;
-  if (s) {
-    lines.push("=== STATE ===");
-    lines.push(`Market: ${RESOURCE_ORDER.map(r => `${r}=$${s.market?.[r] || 0}`).join(" ")}`);
-    if (s.market_positions) {
-      lines.push(`Positions: ${RESOURCE_ORDER.map(r => `${r}:${s.market_positions[r] ?? "?"}`).join(" ")}`);
+  const html = [];
+
+  // Mutations
+  if (a.mutations?.length) {
+    for (const m of a.mutations) {
+      html.push(`<div><span class="mut-field">${m.field}</span> <span class="mut-old">${formatMutValue(m.old)}</span> <span class="mut-arrow">\u2192</span> <span class="mut-new">${formatMutValue(m.new)}</span></div>`);
     }
-    lines.push(`Deck: ${(s.event_deck_remaining || []).length} remaining`);
-    lines.push(`Round: ${s.round || "?"} Turn: ${(s.turn_index || 0) + 1}`);
-    lines.push("");
-    for (const p of s.players || []) {
-      const rates = RESOURCE_ORDER.map(r => {
-        const v = p.rates?.[r] || 0;
-        return v !== 0 ? `${v > 0 ? "+" : ""}${v}${r}` : null;
-      }).filter(Boolean).join(" ");
-      lines.push(`${p.name}: $${p.money}${p.debt > 0 ? ` debt:$${p.debt}` : ""}${p.credit > 0 ? ` credit:$${p.credit}` : ""} NW:$${p.net_worth} | contracts:${p.contracts_fulfilled || 0}`);
-      lines.push(`  rates: ${rates || "none"}`);
-      lines.push(`  buildings: ${(p.buildings_played || []).join(", ") || "none"}`);
-      if (p.hand?.length) {
-        lines.push(`  hand: ${p.hand.map(c => c.building).join(", ")}`);
-      }
-    }
-    lines.push("");
-    lines.push(`Pool: ${(s.pool || []).map(c => c.building).join(", ")}`);
-    lines.push(`Contracts: ${(s.available_contracts || []).map(c => c.requirements?.map(r => `${r.amount}${r.resource}`).join("+") + "=$" + c.reward).join(" | ")}`);
+  } else {
+    html.push('<div style="color:#484f58;font-size:0.68rem">No mutations</div>');
   }
-  stateView.textContent = lines.join("\n");
+
+  // Metadata
+  const meta = a.metadata;
+  if (meta && Object.keys(meta).length > 0) {
+    html.push('<div class="mut-metadata">');
+    for (const [key, val] of Object.entries(meta)) {
+      html.push(`<div><span class="mut-meta-key">${key}:</span> ${formatMetaValue(val)}</div>`);
+    }
+    html.push('</div>');
+  }
+
+  // Snapshot
+  html.push(tracker.renderSnapshot());
+
+  container.innerHTML = html.join("");
 }
 
-function enterReplay(step) {
-  step = Math.max(0, Math.min(step, gameLog.length - 1));
-  replayMode = true;
-  replayStep = step;
-  currentState = gameLog[step].state;
-  currentLegal = null;
-  renderGame();
+function _mutTypeClass(type) {
+  if (type.startsWith("event")) return "event";
+  if (type.startsWith("free")) return "free";
+  return type;
+}
+
+class StateTracker {
+  constructor() {
+    this.players = [];
+    this.market = Object.fromEntries(RESOURCE_ORDER.map(r => [r, 0]));
+  }
+
+  _ensurePlayer(idx) {
+    while (this.players.length <= idx) {
+      this.players.push({
+        name: "", money: 0, debt: 0, credit: 0,
+        rates: Object.fromEntries(RESOURCE_ORDER.map(r => [r, 0])),
+      });
+    }
+  }
+
+  applyAction(action) {
+    for (const m of action.mutations || []) {
+      this._applyMut(m);
+    }
+  }
+
+  _applyMut(m) {
+    const f = m.field;
+    const mkt = f.match(/^market\.(\w+)$/);
+    if (mkt && typeof m.new === "number") {
+      this.market[mkt[1]] = m.new;
+      return;
+    }
+    const pm = f.match(/^player\.(\d+)\.(.+)$/);
+    if (!pm) return;
+    const idx = parseInt(pm[1]);
+    const rest = pm[2];
+    this._ensurePlayer(idx);
+    const p = this.players[idx];
+
+    if (rest === "name" && typeof m.new === "string") p.name = m.new;
+    else if (rest === "money" && typeof m.new === "number") p.money = m.new;
+    else if (rest === "debt" && typeof m.new === "number") p.debt = m.new;
+    else if (rest === "credit" && typeof m.new === "number") p.credit = m.new;
+    else {
+      const rm = rest.match(/^rates\.(\w+)$/);
+      if (rm && typeof m.new === "number") p.rates[rm[1]] = m.new;
+    }
+  }
+
+  renderSnapshot() {
+    const lines = [];
+    lines.push('<div class="mut-snapshot">');
+    const mktParts = RESOURCE_ORDER
+      .map(r => { const pos = this.market[r]; return pos ? `${r}:${pos}` : null; })
+      .filter(Boolean);
+    lines.push(`<div class="mut-snap-row"><span class="mut-snap-label">MKT</span> ${mktParts.join(" ")}</div>`);
+    for (const p of this.players) {
+      if (!p.name) continue;
+      const nw = p.money - p.debt + p.credit;
+      const rates = RESOURCE_ORDER
+        .map(r => { const v = p.rates[r]; return v ? `${v > 0 ? "+" : ""}${v}${r}` : null; })
+        .filter(Boolean).join(" ");
+      let line = `$${p.money}`;
+      if (p.debt) line += ` debt:$${p.debt}`;
+      if (p.credit) line += ` cr:$${p.credit}`;
+      line += ` NW:$${nw}`;
+      if (rates) line += ` | ${rates}`;
+      lines.push(`<div class="mut-snap-row"><span class="mut-snap-label">${p.name.replace("Player_", "P")}</span> ${line}</div>`);
+    }
+    lines.push('</div>');
+    return lines.join("");
+  }
+}
+
+function formatMetaValue(v) {
+  if (v === null || v === undefined) return "null";
+  if (typeof v === "number") return String(v);
+  if (typeof v === "string") return v;
+  if (Array.isArray(v)) {
+    return v.map(item => {
+      if (typeof item === "object") {
+        return Object.entries(item).map(([k, val]) => `${k}:${val}`).join(" ");
+      }
+      return String(item);
+    }).join(" | ");
+  }
+  return Object.entries(v).map(([k, val]) => `${k}:${val}`).join(", ");
+}
+
+function formatCardDesc(c) {
+  if (typeof c === "string") return c;
+  if (!c || !c.name) return JSON.stringify(c);
+  let s = c.name;
+  if (c.sells?.length) s += ` (${c.sells.join(", ")})`;
+  else if (c.action === "contract") s += " (contract)";
+  return s;
+}
+
+function formatMutValue(v) {
+  if (v === null || v === undefined) return "null";
+  if (typeof v === "object") {
+    if (!Array.isArray(v) && v.name) return formatCardDesc(v);
+    if (Array.isArray(v)) return v.map(item =>
+      (typeof item === "object" && item?.name) ? formatCardDesc(item) : String(item)
+    ).join(", ");
+    if (v.old && v.new) return `${formatMutValue(v.old)} \u2194 ${formatMutValue(v.new)}`;
+    return Object.entries(v).map(([k,val]) => `${k}:${formatMutValue(val)}`).join(", ");
+  }
+  return String(v);
+}
+
+// Navigation — steps through action_log entries
+function debugGo(step) {
+  debugStep = step;
+  updateDebugPanel();
+}
+function debugLive() {
+  debugStep = -1;
   updateDebugPanel();
 }
 
-function exitReplay() {
-  replayMode = false;
-  replayStep = -1;
-  hostRefreshState();
-  updateDebugPanel();
-}
-
-// Wire debug panel buttons
 document.getElementById("debug-close")?.addEventListener("click", toggleDebugPanel);
-document.getElementById("debug-first")?.addEventListener("click", () => enterReplay(0));
+document.getElementById("debug-first")?.addEventListener("click", () => debugGo(0));
 document.getElementById("debug-prev")?.addEventListener("click", () => {
-  if (replayMode) enterReplay(replayStep - 1);
-  else enterReplay(gameLog.length - 2);
+  const actionLog = _getActionLog();
+  const cur = debugStep >= 0 ? debugStep : actionLog.length - 1;
+  debugGo(Math.max(0, cur - 1));
 });
 document.getElementById("debug-next")?.addEventListener("click", () => {
-  if (replayMode && replayStep < gameLog.length - 1) enterReplay(replayStep + 1);
-  else exitReplay();
+  const actionLog = _getActionLog();
+  if (debugStep >= 0 && debugStep < actionLog.length - 1) debugGo(debugStep + 1);
+  else debugLive();
 });
-document.getElementById("debug-last")?.addEventListener("click", () => exitReplay());
-document.getElementById("debug-live")?.addEventListener("click", () => exitReplay());
+document.getElementById("debug-last")?.addEventListener("click", () => debugLive());
+document.getElementById("debug-live")?.addEventListener("click", () => debugLive());
 document.getElementById("debug-slider")?.addEventListener("input", (e) => {
-  enterReplay(parseInt(e.target.value));
+  debugGo(parseInt(e.target.value));
 });
 document.getElementById("debug-download")?.addEventListener("click", () => {
-  const blob = new Blob([JSON.stringify(gameLog, null, 2)], {type: "application/json"});
+  const actionLog = _getActionLog();
+  const blob = new Blob([JSON.stringify(actionLog, null, 2)], {type: "application/json"});
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `game-log-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = `action-log-${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
   URL.revokeObjectURL(url);
 });

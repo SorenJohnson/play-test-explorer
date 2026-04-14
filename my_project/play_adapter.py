@@ -1030,6 +1030,23 @@ class PlayableGame:
                 }
                 for ec in s.event_deck[s.event_idx:]
             ],
+            # Observable game log — every mutation grouped by action
+            "action_log": [
+                {
+                    "id": e.action_id,
+                    "type": e.type,
+                    "player": e.player_name,
+                    "player_idx": e.player_idx,
+                    "summary": e.summary,
+                    "mutations": [
+                        {"field": m.field, "old": m.old_value, "new": m.new_value}
+                        for m in e.mutations
+                    ],
+                    "metadata": e.metadata if e.metadata else {},
+                }
+                for e in s.log.entries
+            ],
+            "action_log_length": len(s.log.entries),
         }
 
     def state_for_seat(self, seat_idx: int) -> dict:

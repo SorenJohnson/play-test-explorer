@@ -84,8 +84,6 @@ def _summarize_game(state: GameState) -> GameSummary:
     final_debt = [p.debt for p in state.players]
     final_net_worth = [p.net_worth() for p in state.players]
     contracts = [p.contracts_fulfilled for p in state.players]
-    # Flatten Card → name string at the monte_carlo boundary so the JSON
-    # output schema and downstream analytics stay unchanged.
     buildings = [p.building_names() for p in state.players]
     rates = [{r.value: v for r, v in p.rates.items()} for p in state.players]
     final_market = state.market.snapshot()
@@ -103,44 +101,10 @@ def _summarize_game(state: GameState) -> GameSummary:
         for p in state.players
     ]
 
-    # Action history with structured action data.
-    # Redraw chain events are already merged into the parent turn's
-    # history record by run_game — no separate records to filter.
-    actions = []
-    for rec in state.history:
-        turn_actions = []
-        for ar in rec.actions:
-            action_data: dict = {"type": ar.action_type, "detail": ar.detail}
-            if ar.action_type == "build":
-                action_data["buildings"] = ar.buildings
-                action_data["costs_paid"] = ar.build_costs_paid
-                action_data["money_spent"] = ar.build_money_spent
-                action_data["rates_gained"] = ar.rates_gained
-            elif ar.action_type == "sell":
-                action_data["resource"] = ar.sell_resource
-                action_data["amount"] = ar.sell_amount
-                action_data["revenue"] = ar.sell_revenue
-            elif ar.action_type == "contract":
-                action_data["label"] = ar.contract_label
-                action_data["rates_spent"] = ar.contract_rates_spent
-                action_data["reward"] = ar.contract_reward
-                action_data["true_cost"] = ar.contract_true_cost
-                action_data["gross_cost"] = ar.contract_gross_cost
-            turn_actions.append(action_data)
-
-        actions.append({
-            "turn": rec.turn,
-            "player": rec.player,
-            "action_count": len(rec.actions),
-            "actions": turn_actions,
-            "event": rec.event,
-            "money_before": rec.money_before,
-            "money_after": rec.money_after,
-            "debt": rec.debt,
-            "contracts": rec.contracts_fulfilled,
-            "market": rec.market_snapshot,
-            "rates": rec.rates_snapshot,
-        })
+    # Build action_history from GameLog entries.
+    # Entries are flat; turns are delimited by event entries.
+    # A state tracker replays mutations for per-turn snapshots.
+    actions = _build_action_history(state)
 
     initial_market = getattr(state, "_initial_market", final_market)
 
@@ -166,6 +130,184 @@ def _summarize_game(state: GameState) -> GameSummary:
         futures_debt_per_resource={r.value: v for r, v in state.futures_debt_per_resource.items()},
         player_flows=player_flows,
     )
+
+
+class _StateTracker:
+    """Replays mutations to reconstruct per-turn state snapshots."""
+
+    def __init__(self, num_players: int) -> None:
+        self.market: dict[str, int] = {r.value: 0 for r in Resource}
+        self.players: list[dict] = [
+            {"money": 0, "debt": 0, "credit": 0, "contracts": 0,
+             "rates": {r.value: 0 for r in Resource}}
+            for _ in range(num_players)
+        ]
+
+    def apply(self, entry) -> None:
+        for m in entry.mutations:
+            self._apply_mut(m.field, m.new_value)
+
+    def _apply_mut(self, field: str, new_val) -> None:
+        import re
+        mkt = re.match(r"^market\.(\w+)$", field)
+        if mkt and isinstance(new_val, (int, float)):
+            self.market[mkt.group(1)] = int(new_val)
+            return
+        pm = re.match(r"^player\.(\d+)\.(.+)$", field)
+        if not pm:
+            return
+        idx = int(pm.group(1))
+        rest = pm.group(2)
+        if idx >= len(self.players):
+            return
+        p = self.players[idx]
+        if rest == "money" and isinstance(new_val, (int, float)):
+            p["money"] = int(new_val)
+        elif rest == "debt" and isinstance(new_val, (int, float)):
+            p["debt"] = int(new_val)
+        elif rest == "credit" and isinstance(new_val, (int, float)):
+            p["credit"] = int(new_val)
+        else:
+            rm = re.match(r"^rates\.(\w+)$", rest)
+            if rm and isinstance(new_val, (int, float)):
+                p["rates"][rm.group(1)] = int(new_val)
+
+    def record_contract(self, player_idx: int) -> None:
+        if 0 <= player_idx < len(self.players):
+            self.players[player_idx]["contracts"] += 1
+
+    def player_snapshot(self, idx: int) -> dict:
+        p = self.players[idx]
+        return {
+            "money": p["money"], "debt": p["debt"],
+            "credit": p["credit"], "contracts": p["contracts"],
+            "rates": dict(p["rates"]),
+        }
+
+    def market_snapshot(self) -> dict[str, int]:
+        """Return market prices (not positions) via PRICE_TRACK lookup."""
+        from my_project.simulation import PRICE_TRACK
+        result = {}
+        for r, pos in self.market.items():
+            clamped = max(0, min(pos, len(PRICE_TRACK) - 1))
+            result[r] = PRICE_TRACK[clamped]
+        return result
+
+
+def _build_action_history(state: GameState) -> list[dict]:
+    """Build turn-grouped action_history from GameLog entries.
+
+    Turns are delimited by event entries. Chained redraw events (event
+    entries with no preceding player actions) are merged into their
+    parent turn, matching the old TurnRecord grouping.
+    """
+    tracker = _StateTracker(len(state.players))
+    log_entries = state.log.entries
+    num_players = len(state.players)
+
+    turns: list[dict] = []
+    pending: list = []
+    turn_num = 0
+
+    for entry in log_entries:
+        tracker.apply(entry)
+
+        if entry.type == "setup":
+            continue
+
+        # Track contract fulfillment
+        if entry.type == "contract" and entry.player_idx >= 0:
+            tracker.record_contract(entry.player_idx)
+
+        if entry.type.startswith("event:"):
+            # Is this a chained redraw event? (no player actions since last event)
+            has_player_actions = any(
+                e.type in ("build", "sell", "contract", "swap")
+                or e.type.startswith("free:")
+                for e in pending
+            )
+
+            if not has_player_actions and turns:
+                # Chained redraw: merge into the previous turn
+                last = turns[-1]
+                last["event"] += f" | {entry.summary}"
+                # Update snapshots to post-chain state
+                pidx = 0
+                for i, p in enumerate(state.players):
+                    if p.name == last["player"]:
+                        pidx = i
+                        break
+                snap = tracker.player_snapshot(pidx)
+                last["money_after"] = snap["money"]
+                last["debt"] = snap["debt"]
+                last["contracts"] = snap["contracts"]
+                last["market"] = tracker.market_snapshot()
+                last["rates"] = snap["rates"]
+                pending = []
+                continue
+
+            # Primary event — closes a turn.
+            turn_num += 1
+            turn_player_idx = (turn_num - 1) % num_players
+            turn_player = state.players[turn_player_idx].name
+
+            # Extract build/sell/contract actions from pending entries
+            turn_actions = []
+            money_before = None
+            for e in pending:
+                if e.type in ("build", "sell", "contract"):
+                    action_data: dict = {"type": e.type, "detail": e.summary}
+                    meta = e.metadata
+                    if e.type == "build":
+                        action_data["buildings"] = meta.get("buildings", [])
+                        action_data["costs_paid"] = meta.get("costs_paid", {})
+                        action_data["money_spent"] = meta.get("money_spent", 0)
+                        action_data["rates_gained"] = meta.get("rates_gained", {})
+                    elif e.type == "sell":
+                        action_data["resource"] = meta.get("sell_resource", "")
+                        action_data["amount"] = meta.get("sell_amount", 0)
+                        action_data["revenue"] = meta.get("sell_revenue", 0)
+                    elif e.type == "contract":
+                        action_data["label"] = meta.get("contract_label", "")
+                        action_data["rates_spent"] = meta.get("rates_spent", {})
+                        action_data["reward"] = meta.get("reward", 0)
+                        action_data["true_cost"] = meta.get("true_cost", 0)
+                        action_data["gross_cost"] = meta.get("gross_cost", 0)
+                    turn_actions.append(action_data)
+
+                # Track money_before from the first mutation on this player
+                if money_before is None and e.player_idx == turn_player_idx:
+                    for m in e.mutations:
+                        if m.field == f"player.{turn_player_idx}.money":
+                            money_before = m.old_value
+                            break
+
+            # Also check the event entry for money_before
+            if money_before is None:
+                for m in entry.mutations:
+                    if m.field == f"player.{turn_player_idx}.money":
+                        money_before = m.old_value
+                        break
+
+            snap = tracker.player_snapshot(turn_player_idx)
+            turns.append({
+                "turn": turn_num,
+                "player": turn_player,
+                "action_count": len(turn_actions),
+                "actions": turn_actions,
+                "event": entry.summary,
+                "money_before": money_before if money_before is not None else snap["money"],
+                "money_after": snap["money"],
+                "debt": snap["debt"],
+                "contracts": snap["contracts"],
+                "market": tracker.market_snapshot(),
+                "rates": snap["rates"],
+            })
+            pending = []
+        else:
+            pending.append(entry)
+
+    return turns
 
 
 def run_monte_carlo(

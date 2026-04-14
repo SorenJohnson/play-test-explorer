@@ -11,9 +11,13 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
+from typing import Any, ClassVar
 
 from my_project.accounting import CostLedger
-from my_project.models import Card, Contract, Resource, ResourceAmount
+from my_project.models import (
+    Card, CardZone, Contract, Currency, GameLog, Resource, ResourceAmount,
+    ResourceRates,
+)
 
 
 # --- Game configuration (loaded from GameConfig.csv) ---
@@ -71,11 +75,18 @@ def _load_corporations(data_dir: Path | None = None) -> list[tuple[str, dict[str
 class Market:
     """Tracks price position (index into PRICE_TRACK) for each resource."""
     positions: dict[Resource, int] = field(default_factory=dict)
+    _log: GameLog | None = field(default=None, init=False, repr=False, compare=False)
 
     @classmethod
     def create(cls, start_position: int = 10) -> Market:
         """All resources start at the same position (default index 4 = price $2)."""
         return cls(positions={r: start_position for r in Resource})
+
+    def _record(self, resource: Resource, old_pos: int, new_pos: int) -> None:
+        if self._log and old_pos != new_pos:
+            self._log.record(
+                f"market.{resource.value}", old_pos, new_pos,
+            )
 
     def price(self, resource: Resource) -> int:
         pos = self.positions[resource]
@@ -85,20 +96,24 @@ class Market:
     def buy(self, resource: Resource, amount: int) -> int:
         """Buy `amount` units at the current price. Returns total cost. Then price rises by amount."""
         cost = self.price(resource) * amount
-        self.positions[resource] = min(self.positions[resource] + amount, len(PRICE_TRACK) - 1)
+        old = self.positions[resource]
+        self.positions[resource] = min(old + amount, len(PRICE_TRACK) - 1)
+        self._record(resource, old, self.positions[resource])
         return cost
 
     def sell(self, resource: Resource, amount: int) -> int:
         """Sell `amount` units at the current price. Returns total revenue. Then price drops by amount."""
         revenue = self.price(resource) * amount
-        self.positions[resource] = max(self.positions[resource] - amount, 0)
+        old = self.positions[resource]
+        self.positions[resource] = max(old - amount, 0)
+        self._record(resource, old, self.positions[resource])
         return revenue
 
     def adjust(self, resource: Resource, delta: int) -> None:
         """Shift price position by delta (positive = up, negative = down)."""
-        self.positions[resource] = max(0, min(
-            self.positions[resource] + delta, len(PRICE_TRACK) - 1
-        ))
+        old = self.positions[resource]
+        self.positions[resource] = max(0, min(old + delta, len(PRICE_TRACK) - 1))
+        self._record(resource, old, self.positions[resource])
 
     def estimate_buy_cost(self, resource: Resource, amount: int) -> int:
         """Estimate cost of buying without modifying market state.
@@ -191,6 +206,58 @@ class Player:
             "buildings_played": self.building_names(),
             "contracts_fulfilled": self.contracts_fulfilled,
         }
+
+    # --- Observable state support ---
+
+    _CURRENCY_FIELDS: ClassVar[frozenset[str]] = frozenset({"money", "debt", "credit"})
+    _ZONE_FIELDS: ClassVar[frozenset[str]] = frozenset({"hand", "buildings_played"})
+
+    _currencies: dict[str, Currency] = field(
+        default_factory=dict, init=False, repr=False, compare=False,
+    )
+
+    def _init_observables(self, log: GameLog, player_idx: int) -> None:
+        """Upgrade money/debt/credit to Currency, rates to ResourceRates,
+        hand/buildings_played to CardZone."""
+        prefix = f"player.{player_idx}"
+        currencies = {
+            "money": Currency(self.money, log, f"{prefix}.money"),
+            "debt": Currency(self.debt, log, f"{prefix}.debt"),
+            "credit": Currency(self.credit, log, f"{prefix}.credit"),
+        }
+        object.__setattr__(self, "_currencies", currencies)
+        object.__setattr__(
+            self, "rates",
+            ResourceRates(self.rates, log, f"{prefix}.rates"),
+        )
+        object.__setattr__(
+            self, "hand",
+            CardZone(self.hand, log, f"{prefix}.hand"),
+        )
+        object.__setattr__(
+            self, "buildings_played",
+            CardZone(self.buildings_played, log, f"{prefix}.buildings"),
+        )
+
+    def __getattribute__(self, name: str) -> Any:
+        if name in Player._CURRENCY_FIELDS:
+            currencies = object.__getattribute__(self, "_currencies")
+            if currencies and name in currencies:
+                return currencies[name]._value
+        return object.__getattribute__(self, name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name in Player._CURRENCY_FIELDS:
+            currencies = object.__getattribute__(self, "__dict__").get("_currencies")
+            if currencies and name in currencies:
+                currencies[name].set(value)
+                return
+        if name in Player._ZONE_FIELDS:
+            existing = object.__getattribute__(self, "__dict__").get(name)
+            if isinstance(existing, CardZone):
+                existing.replace(value if isinstance(value, list) else list(value))
+                return
+        object.__setattr__(self, name, value)
 
 
 # --- Deck ---
@@ -608,6 +675,7 @@ class GameState:
     _suspended_chain_active: bool = field(default=False, repr=False)
     turn: int = 0
     event_idx: int = 0
+    log: GameLog = field(default_factory=GameLog)
     history: list[TurnRecord] = field(default_factory=list)
     # Event-driven economy tracking (summed across all players)
     pwr_total_earned: int = 0  # cash earned from positive PWR at power bills
@@ -642,6 +710,49 @@ class GameState:
         for ec in self.event_deck[self.event_idx:]:
             counts[ec.type] += 1
         return counts
+
+    def _init_observables(self) -> None:
+        """Upgrade pool to CardZone, wire market log, init player observables."""
+        object.__setattr__(
+            self, "pool", CardZone(self.pool, self.log, "pool"),
+        )
+        self.market._log = self.log
+        for idx, p in enumerate(self.players):
+            p._init_observables(self.log, idx)
+        self._log_setup()
+
+    def _log_setup(self) -> None:
+        """Record the initial game state as a 'setup' action entry."""
+        self.log.begin("setup", "", -1, "Game setup")
+        # Market positions
+        for r in Resource:
+            self.log.record(f"market.{r.value}", 0, self.market.positions[r])
+        # Pool
+        self.log.record("pool", [], [CardZone._card_desc(c) for c in self.pool])
+        # Players
+        for idx, p in enumerate(self.players):
+            prefix = f"player.{idx}"
+            self.log.record(f"{prefix}.name", "", p.name)
+            if p.corporation:
+                self.log.record(f"{prefix}.corporation", "", p.corporation)
+            self.log.record(f"{prefix}.money", 0, p.money)
+            self.log.record(f"{prefix}.debt", 0, p.debt)
+            self.log.record(f"{prefix}.credit", 0, p.credit)
+            for r in Resource:
+                v = p.rates.get(r, 0)
+                if v != 0:
+                    self.log.record(f"{prefix}.rates.{r.value}", 0, v)
+            if p.hand:
+                self.log.record(f"{prefix}.hand", [], [CardZone._card_desc(c) for c in p.hand])
+        self.log.end()
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name == "pool":
+            existing = object.__getattribute__(self, "__dict__").get("pool")
+            if isinstance(existing, CardZone):
+                existing.replace(value if isinstance(value, list) else list(value))
+                return
+        object.__setattr__(self, name, value)
 
     @classmethod
     def create(
@@ -745,6 +856,7 @@ class GameState:
             num_rounds=num_rounds,
         )
         state._event_pool = _event_pool
+        state._init_observables()
         return state
 
 
@@ -865,6 +977,11 @@ def execute_build(
 
     deficit, _ = result
 
+    # Log action
+    card_names = [c.building for c in build_cards]
+    pidx = state.players.index(player)
+    state.log.begin("build", player.name, pidx, f"Build {', '.join(card_names)}")
+
     # Actually buy from market
     total_cost = 0
     costs_paid: dict[str, int] = {}
@@ -930,6 +1047,11 @@ def execute_build(
     if cost_detail:
         detail += f" (bought {', '.join(cost_detail)})"
 
+    state.log.annotate("buildings", [c.building for c in build_cards])
+    state.log.annotate("costs_paid", costs_paid)
+    state.log.annotate("money_spent", total_cost)
+    state.log.annotate("rates_gained", rates_gained)
+    state.log.end()
     return ActionRecord(
         action_type="build",
         detail=detail,
@@ -966,6 +1088,7 @@ def execute_sell(
     if player.cards_remaining() < 1:
         return None
     card = player.hand[card_idx]
+    pidx = state.players.index(player)
     best_resource = None
     best_revenue = 0
 
@@ -992,11 +1115,17 @@ def execute_sell(
                     best_resource = sell_res
 
     if best_resource is None:
+        state.log.begin("sell", player.name, pidx, f"Sell {card.building} (no resources)")
         state.deck.discard.append(player.hand.pop(card_idx))
         player.cards_spent_this_turn += 1
+        state.log.annotate("sell_resource", "")
+        state.log.annotate("sell_amount", 0)
+        state.log.annotate("sell_revenue", 0)
+        state.log.end()
         return ActionRecord(action_type="sell", detail="Sold (no matching resources)")
 
     rate = max(0, player.rate(best_resource))
+    state.log.begin("sell", player.name, pidx, f"Sell {rate} {best_resource.value} via {card.building}")
     revenue = state.market.sell(best_resource, rate)
     player.money += revenue
     player.ledger.record_sell(best_resource, revenue)
@@ -1022,6 +1151,10 @@ def execute_sell(
             pass
 
     player.cards_spent_this_turn += 1
+    state.log.annotate("sell_resource", best_resource.value)
+    state.log.annotate("sell_amount", rate)
+    state.log.annotate("sell_revenue", revenue)
+    state.log.end()
     return ActionRecord(
         action_type="sell",
         detail=f"Sold {rate} {best_resource.value} for ${revenue}{detail_extra}",
@@ -1105,6 +1238,11 @@ def execute_contract(
         if req.amount > 0 and player.rate(req.resource) < req.amount:
             return None
 
+    # Log action
+    pidx = state.players.index(player)
+    req_label = ", ".join(f"{r.amount} {r.resource.value}" for r in contract.requirements)
+    state.log.begin("contract", player.name, pidx, f"Contract ({req_label}) for ${contract.reward}")
+
     # Compute costs from ledger before spending rates (uses discounted reqs)
     contract_true_cost = player.ledger.contract_cost(effective_reqs)
     contract_gross_cost = player.ledger.contract_gross_cost(effective_reqs)
@@ -1159,6 +1297,12 @@ def execute_contract(
     if state.contracts:
         state.available_contracts.append(state.contracts.pop())
 
+    state.log.annotate("contract_label", label)
+    state.log.annotate("rates_spent", rates_spent)
+    state.log.annotate("reward", contract.reward)
+    state.log.annotate("true_cost", round(contract_true_cost, 2))
+    state.log.annotate("gross_cost", round(contract_gross_cost, 2))
+    state.log.end()
     return ActionRecord(
         action_type="contract",
         detail=f"Fulfilled contract ({label}) for ${contract.reward}",
@@ -1580,12 +1724,14 @@ def do_power_bill(state: GameState) -> None:
     _record_event_line(
         state, kind="header", text=f"Power Bill — PWR @ ${pwr_price}"
     )
+    per_player_bill: list[dict] = []
     for player in state.players:
         base_rate = player.rate(Resource.PWR)
         vault = player.patent_state.get("energy_vault", 0)
 
         # Build the per-player text for the event log row.
         bill_parts: list[str] = []
+        player_bill: dict = {"name": player.name, "rate": base_rate}
 
         # Energy Vault: shields from negative power bills
         if base_rate < 0 and vault > 0:
@@ -1593,6 +1739,7 @@ def do_power_bill(state: GameState) -> None:
             bill_parts.append(
                 f"Energy Vault shields bill ({vault - 1} uses left)"
             )
+            player_bill["shielded"] = True
         elif base_rate > 0:
             earning = base_rate * pwr_price
             player.money += earning
@@ -1603,6 +1750,7 @@ def do_power_bill(state: GameState) -> None:
             bill_parts.append(
                 f"+${earning} (sold {base_rate} PWR)"
             )
+            player_bill["earning"] = earning
         elif base_rate < 0:
             shortage = abs(base_rate)
             cost = shortage * pwr_price
@@ -1615,11 +1763,14 @@ def do_power_bill(state: GameState) -> None:
             bill_parts.append(
                 f"−${cost} (bought {shortage} PWR)"
             )
+            player_bill["debt"] = cost
         # Pleasure Dome bonus is added on top of normal bill processing.
         bonus = _pleasure_dome_bonus(state, player)
         if bonus > 0:
             player.money += bonus
             bill_parts.append(f"+${bonus} dome bonus")
+            player_bill["dome_bonus"] = bonus
+        per_player_bill.append(player_bill)
         if bill_parts:
             _record_event_line(
                 state,
@@ -1627,6 +1778,8 @@ def do_power_bill(state: GameState) -> None:
                 player=player,
                 text=" · ".join(bill_parts),
             )
+    state.log.annotate("pwr_price", pwr_price)
+    state.log.annotate("per_player", per_player_bill)
 
 
 def _ai_debt_paydown(state: GameState, player: Player) -> int:
@@ -1708,6 +1861,18 @@ def do_debt_collection(state: GameState) -> None:
                 text=f"+${bonus} Financial Instruments payout",
             )
 
+    # Annotate debt collection metadata
+    per_player_dc: list[dict] = []
+    for idx, player in enumerate(state.players):
+        entry: dict = {"name": player.name}
+        interest = (player.debt + debt_added.get(idx, 0)) // DEBT_INTEREST_DIVISOR
+        if interest > 0:
+            entry["interest"] = interest
+        if debt_added.get(idx, 0) > 0:
+            entry["debt_added"] = debt_added[idx]
+        per_player_dc.append(entry)
+    state.log.annotate("per_player", per_player_dc)
+
 
 def do_futures_trading(state: GameState) -> None:
     """Negative rates push market prices up, but no debt is charged.
@@ -1755,6 +1920,8 @@ def do_futures_trading(state: GameState) -> None:
         "market_changes": market_changes,
         "player_contributions": player_contributions,
     }
+    state.log.annotate("market_changes", market_changes)
+    state.log.annotate("player_contributions", player_contributions)
 
 
 def do_futures_settlement(state: GameState) -> None:
@@ -2016,7 +2183,17 @@ def do_patent_auction(state: GameState) -> str:
     ]
     pre_hand_size = [p.hand_size for p in state.players]
 
+    # Annotate auction metadata (bids are decisions, not state mutations)
+    state.log.annotate("patent", patent.building)
+    state.log.annotate("bids", {
+        state.players[idx].name: amt for idx, amt in bids.items()
+    })
+
     result = settle_silent_auction(state, patent, bids)
+
+    if result is not None:
+        state.log.annotate("winner", state.players[result[0]].name)
+        state.log.annotate("price", result[1])
 
     # Per-player bid lines, showing the winner with "WON".
     winner_idx = result[0] if result is not None else None
@@ -2295,6 +2472,13 @@ def execute_event(state: GameState, event: EventCard, active_player: Player) -> 
     AFTER the primary effect (adjusts PWR market by active player's rate).
     This is a CSV-configurable modifier — any event type can carry it.
     """
+    # Most events are global (affect all players); only PWR_ADJUST is player-specific.
+    if event.type == EventType.PWR_ADJUST:
+        pidx = state.players.index(active_player)
+        state.log.begin(f"event:{event.type.value}", active_player.name, pidx, f"Event: {event.type.value}")
+    else:
+        label = event.label or event.type.value
+        state.log.begin(f"event:{event.type.value}", "", -1, f"Event: {label}")
     detail: str
     match event.type:
         case EventType.NO_EVENT:
@@ -2360,6 +2544,7 @@ def execute_event(state: GameState, event: EventCard, active_player: Player) -> 
 
     structured["detail"] = detail
     state._last_event_data = structured
+    state.log.end()
     return detail
 
 
@@ -2367,7 +2552,12 @@ def execute_event(state: GameState, event: EventCard, active_player: Player) -> 
 
 def swap_pool_card(state: GameState, player: Player, hand_idx: int, pool_idx: int) -> None:
     """Swap a card from the player's hand with a card from the pool."""
+    pidx = state.players.index(player)
+    h_name = player.hand[hand_idx].building
+    p_name = state.pool[pool_idx].building
+    state.log.begin("swap", player.name, pidx, f"Swap {h_name} ↔ {p_name}")
     player.hand[hand_idx], state.pool[pool_idx] = state.pool[pool_idx], player.hand[hand_idx]
+    state.log.end()
 
 
 # --- Turn & Game ---
@@ -2593,6 +2783,7 @@ def _execute_free_actions(state: GameState, player: Player) -> list[str]:
     turn log). Empty list if nothing fired.
     """
     fired: list[str] = []
+    pidx = state.players.index(player)
 
     # --- Rate conversion free actions ---
     # Each conversion permanently changes rates. Only fire when the
@@ -2616,9 +2807,11 @@ def _execute_free_actions(state: GameState, player: Player) -> list[str]:
             gain = _rate_ongoing_value(best, state, player)
             loss = _rate_ongoing_value(Resource.PWR, state, player)
             if gain > loss:
+                state.log.begin("free:oc", player.name, pidx, f"OC: -1 PWR, +1 {best.value}")
                 player.rates[Resource.PWR] = player.rate(Resource.PWR) - 1
                 player.rates[best] = player.rate(best) + 1
                 player.has_used_optimization_center_this_turn = True
+                state.log.end()
                 fired.append(f"Optimization Center: -1 PWR, +1 {best.value} (return ${gain:.0f} > cost ${loss:.0f})")
 
     # Water Engine: -1 H2O, +2 PWR. Evaluate like a free building with
@@ -2632,9 +2825,11 @@ def _execute_free_actions(state: GameState, player: Player) -> list[str]:
         gain = 2 * _rate_ongoing_value(Resource.PWR, state, player)
         loss = _rate_ongoing_value(Resource.H2O, state, player)
         if gain > loss:
+            state.log.begin("free:water_engine", player.name, pidx, "Water Engine: -1 H2O, +2 PWR")
             player.rates[Resource.H2O] = player.rate(Resource.H2O) - 1
             player.rates[Resource.PWR] = player.rate(Resource.PWR) + 2
             player.has_used_water_engine_this_turn = True
+            state.log.end()
             fired.append(f"Water Engine: -1 H2O, +2 PWR (return ${gain:.0f} > cost ${loss:.0f})")
 
     # Teleportation: free sell (rate × price cash), -1 PWR permanent.
@@ -2651,9 +2846,11 @@ def _execute_free_actions(state: GameState, player: Player) -> list[str]:
             rate = player.rate(best)
             revenue = rate * state.market.price(best)
             if revenue > pwr_cost:
+                state.log.begin("free:teleportation", player.name, pidx, f"Teleportation: sell {rate} {best.value}")
                 player.money += revenue
                 player.rates[Resource.PWR] = player.rate(Resource.PWR) - 1
                 player.has_used_teleportation_this_turn = True
+                state.log.end()
                 fired.append(f"Teleportation: sold {rate} {best.value} for ${revenue}, -1 PWR (cost ${pwr_cost:.0f})")
 
     # Nanotechnology: replace the least useful pool card with a deck draw
@@ -2681,12 +2878,14 @@ def _execute_free_actions(state: GameState, player: Player) -> list[str]:
             avg_deck_val = 0.0
 
         if worst_val < avg_deck_val:
+            state.log.begin("free:nanotech", player.name, pidx, f"Nanotech: replace {state.pool[worst_idx].building}")
             discarded = state.pool.pop(worst_idx)
             state.deck.discard.append(discarded)
             drawn = state.deck.draw(1)
             state.pool.extend(drawn)
             player.has_used_nanotechnology_this_turn = True
             new_name = drawn[0].building if drawn else "(empty)"
+            state.log.end()
             fired.append(f"Nanotechnology: replaced pool card {discarded.building} with {new_name}")
 
     return fired
