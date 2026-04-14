@@ -1653,7 +1653,11 @@ function buildEventCardLabel(ed) {
   if (!ed) return "";
   switch (ed.event_type || "") {
     case "draw_building_card": return "Draw Building Card";
-    case "news_bulletin": return `News: ${ed.news_name || "?"}`;
+    case "news_bulletin": {
+      const name = ed.news_name || "?";
+      const effects = ed.news_effects || "";
+      return effects ? `News: ${name} (${effects})` : `News: ${name}`;
+    }
     case "patent_auction": return "Patent Auction";
     case "power_bill": return "Power Bill";
     case "debt_collection": return "Debt Collection";
