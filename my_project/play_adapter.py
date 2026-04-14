@@ -382,18 +382,27 @@ class PlayableGame:
         Each chained event gets its own structured data entry so the
         frontend can render them as separate feed items.
         """
+        from my_project.simulation import _event_needs_prompt, _has_human_player
         details = []
         chained_events = []
         while event.redraws and self.state.event_idx < len(self.state.event_deck):
             event = self.state.event_deck[self.state.event_idx]
+
+            # Check if this chained event needs a prompt BEFORE executing.
+            # If so, suspend and let resume_pending_event handle it.
+            prompt = _event_needs_prompt(self.state, event)
+            if prompt is not None and _has_human_player(self.state):
+                self.state.event_idx += 1
+                self.state.pending_prompt = prompt
+                self.state._suspended_event = event
+                self.state._suspended_chain_active = event.redraws
+                break
+
             self.state.event_idx += 1
             self.state.last_event_lines = []
             detail = execute_event(self.state, event, player)
             details.append(detail)
-            # If this event triggered a prompt (e.g. patent auction),
-            # the prompt resolution will handle the feed entry — skip here.
-            if self.state.pending_prompt is not None:
-                break
+
             # Capture structured data for this chained event
             event_data = getattr(self.state, "_last_event_data", None)
             chained_events.append({
