@@ -1884,10 +1884,12 @@ function renderFeedEntry(e) {
       }).join("")}</div>`;
     }
 
+    const redrawIcon = ed.redraws ? '<span class="redraw-icon" title="Draws another event">&#8635;</span>' : '';
+
     // Always expandable for events
     return `
       <details class="feed-group event">
-        <summary class="feed-group-title"><span class="feed-event-icon">&#9889;</span> ${eventTitle} <span class="feed-time">${e.time}</span></summary>
+        <summary class="feed-group-title"><span class="feed-event-icon">&#9889;</span> ${eventTitle} ${redrawIcon} <span class="feed-time">${e.time}</span></summary>
         <div class="feed-group-body">${detailHtml || '<div class="feed-line-note">No additional details</div>'}</div>
       </details>
     `;

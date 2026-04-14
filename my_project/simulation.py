@@ -2335,6 +2335,8 @@ def execute_event(state: GameState, event: EventCard, active_player: Player) -> 
         event.type, detail, state,
     )
     structured = state._last_event_structured
+    structured["redraws"] = event.redraws
+    structured["pwr_adjust_flag"] = event.pwr_adjust
 
     # PWR_Adjust modifier: fire after the primary effect if the card flag is set.
     if event.pwr_adjust and event.type != EventType.PWR_ADJUST:
