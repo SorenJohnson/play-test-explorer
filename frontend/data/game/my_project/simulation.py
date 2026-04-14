@@ -448,11 +448,12 @@ def build_event_deck(
     cfg = config or EventDeckConfig()
     pool = _build_event_pool(num_players, cfg)
 
-    # Build round 1. END_ROUND/END_GAME is part of the deck (last card).
+    # Build round 1. Shuffle the pool, then replace the last card with
+    # the round-end card. END_ROUND/END_GAME is part of the deck — it
+    # IS the last card, not an extra appended on top.
     round_events = list(pool)
     random.shuffle(round_events)
 
-    # Add the round-end card as the last card in the deck
     terminal = EventType.END_GAME if num_rounds <= 1 else EventType.END_ROUND
     round_events.append(_ec(terminal))
     return round_events
