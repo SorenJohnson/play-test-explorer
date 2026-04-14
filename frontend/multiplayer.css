@@ -109,9 +109,15 @@ body {
 }
 
 /* ===== Status Bar ===== */
-#game-screen {
-  max-width: 1400px;
+#game-wrapper {
+  display: flex;
+  max-width: 1800px;
   margin: 0 auto;
+}
+#game-screen {
+  flex: 1;
+  max-width: 1400px;
+  min-width: 0;
 }
 #status-bar {
   display: flex;
@@ -773,17 +779,18 @@ details.feed-group > summary.feed-group-title::-webkit-details-marker { color: #
 
 /* ===== Debug Panel ===== */
 #debug-panel {
-  position: fixed;
-  top: 0;
-  right: 0;
-  width: 360px;
-  height: 100vh;
+  width: 340px;
+  flex-shrink: 0;
   background: #0d1117;
   border-left: 2px solid #f0883e;
-  z-index: 300;
   overflow-y: auto;
   font-size: 0.8rem;
+  max-height: 100vh;
+  position: sticky;
+  top: 0;
 }
+.debug-body-wrap { padding: 8px 10px; }
+.debug-slider { width: 100%; margin-bottom: 8px; }
 .debug-header {
   display: flex;
   align-items: center;
