@@ -2030,8 +2030,10 @@ function showPrompt(prompt) {
 
 let endgameNwChart = null;
 
+let endgameShown = false;
 function showEndgame() {
-  if (!currentState) return;
+  if (!currentState || endgameShown) return;
+  endgameShown = true;
   const overlay = document.getElementById("endgame-overlay");
   const rankings = document.getElementById("endgame-rankings");
   const sorted = [...currentState.players].sort((a, b) => b.net_worth - a.net_worth);
