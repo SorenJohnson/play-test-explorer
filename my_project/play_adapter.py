@@ -313,11 +313,12 @@ class PlayableGame:
         active = self.state.players[self._active_player_idx]
         reset_per_turn_flags(active)
 
-        # Pre-advance event_idx and stash the current turn's event so that
-        # state.remaining_events() does NOT reveal it to the UI or any helper
-        # that inspects remaining events during the action phase.
-        self._pending_event = self.state.event_deck[self.state.event_idx]
-        self.state.event_idx += 1
+        # Stash the current turn's event. Don't advance event_idx yet —
+        # it advances when end_human_turn fires the event.
+        if self.state.event_idx < len(self.state.event_deck):
+            self._pending_event = self.state.event_deck[self.state.event_idx]
+        else:
+            self._pending_event = None
 
     def end_human_turn(self) -> dict:
         """Complete the human turn: draw back to hand size, fire the event.
@@ -337,9 +338,14 @@ class PlayableGame:
         if needed > 0:
             player.hand.extend(self.state.deck.draw(needed))
 
-        # Fire the pre-stashed event. event_idx was already advanced in
-        # begin_human_turn; do NOT advance it again here.
+        # Fire the pre-stashed event. Advance event_idx now.
         event = self._pending_event
+        self._pending_event = None
+        if event is None:
+            # Deck exhausted — game should be over
+            self.human_turn_in_progress = False
+            return {"type": "end_game", "detail": "Game over", "lines": []}
+        self.state.event_idx += 1
         self.state.last_event_lines = []
 
         # Check if this event needs human input (patent auction bid) before firing.
