@@ -1873,6 +1873,7 @@ def _apply_news_effect(state: GameState, effect: NewsEffect, active_player: Play
             return "→ debt collection"
         if which == "futures_trading":
             do_futures_trading(state)
+            return "→ futures trading"
         if which == "futures_settlement":
             do_futures_settlement(state)
             return "→ futures settlement"
