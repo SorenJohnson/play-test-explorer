@@ -1269,7 +1269,11 @@ function renderPool(s) {
         const pi = parseInt(el.dataset.pi);
         const hi = Array.from(selectedCards)[0];
         executePoolSwap(hi, pi);
-        clearSelection();
+        // Keep the swapped-in card selected at the same hand index
+        selectedCards.clear();
+        selectedCards.add(hi);
+        selectedContract = -1;
+        pendingPoolSwap = -1;
       });
     });
   }
@@ -1394,32 +1398,58 @@ function renderActions(s) {
   const canSell = myTurn && sellCard?.can_sell?.length > 0 && cr >= 1;
   sellBtn.disabled = !canSell;
 
-  // Sell resource picker (show when card has multiple sell options)
-  let sellPickerHtml = "";
-  if (canSell && sellCard.can_sell.length > 1) {
-    const me = s.players[mySeat];
-    const opts = sellCard.can_sell.map(r => {
-      const rate = me.rates?.[r] || 0;
-      const rev = rate > 0 ? rate * (s.market[r] || 0) : 0;
-      return `<option value="${r}">${r} (rate ${rate}, $${rev})</option>`;
-    }).join("");
-    sellPickerHtml = `<select id="mp-sell-resource" class="toggle-select">${opts}</select>`;
+  // Sell resource picker — buttons below action bar
+  const sellPicker = document.getElementById("mp-sell-picker");
+  if (sellPicker) {
+    if (canSell && sellCard.can_sell.length > 1) {
+      const me = s.players[mySeat];
+      // Auto-select best resource (highest revenue)
+      let bestRes = sellCard.can_sell[0];
+      let bestRev = 0;
+      const btns = sellCard.can_sell.map(r => {
+        const rate = me.rates?.[r] || 0;
+        const rev = rate > 0 ? rate * (s.market[r] || 0) : 0;
+        if (rev > bestRev) { bestRev = rev; bestRes = r; }
+        const color = RESOURCE_COLORS[r] || "#8b949e";
+        return `<button class="sell-res-btn" data-res="${r}">
+          <span class="sell-res-name" style="color:${color}">${r}</span>
+          <span class="sell-res-detail">rate ${rate} · $${rev}</span>
+        </button>`;
+      }).join("");
+      // Hacker Array picker
+      let hackerHtml = "";
+      if (currentLegal?.hacker_array_status?.owned) {
+        const resOpts = RESOURCE_ORDER.filter(r => r !== "PWR").map(r => `<option value="${r}">${r}</option>`).join("");
+        hackerHtml = `<div class="sell-hacker-row">
+          <span style="font-size:0.75rem;color:#8b949e">Hacker Array:</span>
+          <select id="mp-hacker-target" class="toggle-select">${resOpts}</select>
+          <select id="mp-hacker-dir" class="toggle-select">
+            <option value="1">+3 (raise)</option>
+            <option value="-1">-3 (lower)</option>
+          </select>
+        </div>`;
+      }
+      sellPicker.innerHTML = `
+        <div class="sell-res-label">Sell resource:</div>
+        <div class="sell-res-btns">${btns}</div>
+        ${hackerHtml}
+        <input type="hidden" id="mp-sell-resource" value="${bestRes}">
+      `;
+      sellPicker.style.display = "block";
+      // Wire click handlers and highlight default
+      sellPicker.querySelectorAll(".sell-res-btn").forEach(btn => {
+        if (btn.dataset.res === bestRes) btn.classList.add("selected");
+        btn.addEventListener("click", () => {
+          sellPicker.querySelectorAll(".sell-res-btn").forEach(b => b.classList.remove("selected"));
+          btn.classList.add("selected");
+          document.getElementById("mp-sell-resource").value = btn.dataset.res;
+        });
+      });
+    } else {
+      sellPicker.style.display = "none";
+      sellPicker.innerHTML = "";
+    }
   }
-  // Hacker Array picker
-  let hackerHtml = "";
-  if (canSell && currentLegal?.hacker_array_status?.owned) {
-    const resOpts = RESOURCE_ORDER.filter(r => r !== "PWR").map(r => `<option value="${r}">${r}</option>`).join("");
-    hackerHtml = `
-      <span style="font-size:0.8rem;color:#8b949e">HA target:</span>
-      <select id="mp-hacker-target" class="toggle-select">${resOpts}</select>
-      <select id="mp-hacker-dir" class="toggle-select">
-        <option value="1">+3 (raise)</option>
-        <option value="-1">-3 (lower)</option>
-      </select>
-    `;
-  }
-  const sellExtras = document.getElementById("mp-sell-extras");
-  if (sellExtras) sellExtras.innerHTML = sellPickerHtml + hackerHtml;
 
   contractBtn.disabled = !myTurn || selectedContract < 0;
   passBtn.disabled = !myTurn;
@@ -1578,45 +1608,38 @@ function renderPlayerPanel(s) {
   const me = s.players[mySeat];
   if (!me) return;
   const panel = document.getElementById("mp-your-stats");
-  const color = PLAYER_COLORS[mySeat % PLAYER_COLORS.length];
 
-  // Rates grid (all 9 resources, styled)
+  // Set zone title
+  const title = document.getElementById("player-zone-title");
+  if (title) title.textContent = me.name + (me.corporation ? ` \u2014 ${me.corporation}` : "");
+
   const ratesGrid = RESOURCE_ORDER.map(r => {
     const v = me.rates?.[r] || 0;
     const cls = v > 0 ? "rate-pos" : v < 0 ? "rate-neg" : "rate-zero";
     return `<div class="rate-chip ${cls}"><span class="rate-res" style="color:${RESOURCE_COLORS[r]}">${r}</span><span class="rate-val">${v > 0 ? "+" : ""}${v}</span></div>`;
   }).join("");
 
-  // Buildings (split into regular + specials + patents)
   const builtCards = me.built_cards || [];
   const buildings = builtCards.filter(c => !c.effect && c.slot !== 5).map(c => c.building);
   const specials = builtCards.filter(c => c.effect && c.slot !== 5);
   const patents = builtCards.filter(c => c.slot === 5);
-
   const buildingList = buildings.length ? buildings.join(", ") : "none";
-  const specialList = specials.map(c => `<div class="built-special"><strong>${c.building}</strong> <span style="color:#a371f7">${c.effect}</span></div>`).join("");
-  const patentList = patents.map(c => `<div class="built-special"><strong>${c.building}</strong> <span style="color:#d2a8ff">${c.effect}</span></div>`).join("");
+  const specialList = specials.map(c => `<span class="opp-special">${c.building}</span>`).join(" ");
+  const patentList = patents.map(c => `<span class="opp-patent">${c.building}</span>`).join(" ");
 
   panel.innerHTML = `
-    <div class="player-panel-inner">
-      <div class="player-panel-header" style="border-left:3px solid ${color}">
-        <div class="player-panel-name" style="color:${color}">${me.name}${me.corporation ? ` — ${me.corporation}` : ''}</div>
-        <div class="player-panel-money">
-          <span>Cash: <strong>$${me.money}</strong></span>
-          ${me.debt > 0 ? `<span style="color:#f85149"> | Debt: <strong>$${me.debt}</strong></span>` : ''}
-          ${me.credit > 0 ? `<span style="color:#d29922"> | Credit: <strong>$${me.credit}</strong></span>` : ''}
-          <span style="color:${me.net_worth >= 0 ? '#3fb950' : '#f85149'}"> | NW: <strong>$${me.net_worth}</strong></span>
-          <span> | Contracts: <strong>${me.contracts_fulfilled || 0}</strong></span>
-        </div>
+    <div class="player-stats">
+      <div class="player-stats-money">
+        <span>Cash: <strong>$${me.money}</strong></span>
+        ${me.debt > 0 ? `<span style="color:#f85149"> | Debt: <strong>$${me.debt}</strong></span>` : ''}
+        ${me.credit > 0 ? `<span style="color:#d29922"> | Credit: <strong>$${me.credit}</strong></span>` : ''}
+        <span style="color:${me.net_worth >= 0 ? '#3fb950' : '#f85149'}"> | NW: <strong>$${me.net_worth}</strong></span>
+        <span> | Contracts: <strong>${me.contracts_fulfilled || 0}</strong></span>
       </div>
-      <div class="player-panel-rates">
-        <div class="rates-grid">${ratesGrid}</div>
-      </div>
-      <div class="player-panel-buildings">
-        <div style="font-size:0.75rem;color:#8b949e">Buildings: ${buildingList}</div>
-        ${specialList ? `<div style="margin-top:4px">${specialList}</div>` : ''}
-        ${patentList ? `<div style="margin-top:4px">${patentList}</div>` : ''}
-      </div>
+      <div class="player-rates-grid">${ratesGrid}</div>
+      <div class="player-stats-buildings">${buildingList}</div>
+      ${specialList ? `<div class="player-stats-specials">${specialList}</div>` : ''}
+      ${patentList ? `<div class="player-stats-specials">${patentList}</div>` : ''}
     </div>
   `;
 }
@@ -1662,23 +1685,6 @@ function renderOpponents(s) {
   }).join("");
 }
 
-function renderYourStats(s) {
-  const me = s.players[mySeat];
-  if (!me) return;
-  const bar = document.getElementById("mp-your-stats");
-  const rates = RESOURCE_ORDER.map(r => {
-    const v = me.rates?.[r] || 0;
-    if (v === 0) return '';
-    return `<span style="color:${v > 0 ? '#3fb950' : '#f85149'}">${v > 0 ? '+' : ''}${v} ${r}</span>`;
-  }).filter(Boolean).join(" | ");
-  bar.innerHTML = `
-    <div class="stat-item"><span class="stat-label">Cash:</span> <span class="stat-value">$${me.money}</span></div>
-    <div class="stat-item"><span class="stat-label">Debt:</span> <span class="stat-value ${me.debt > 0 ? 'negative' : ''}">${me.debt > 0 ? '$' + me.debt : '-'}</span></div>
-    <div class="stat-item"><span class="stat-label">NW:</span> <span class="stat-value ${me.net_worth >= 0 ? 'positive' : 'negative'}">$${me.net_worth}</span></div>
-    <div class="stat-item"><span class="stat-label">Contracts:</span> <span class="stat-value">${me.contracts_fulfilled || 0}</span></div>
-    <div class="stat-item"><span class="stat-label">Rates:</span> ${rates || '<span class="stat-value">none</span>'}</div>
-  `;
-}
 
 // ===== Event Feed =====
 
@@ -2147,8 +2153,9 @@ function wireGameButtons() {
     }).filter(Boolean);
     const destRect = document.getElementById("mp-your-stats")?.getBoundingClientRect();
 
-    sendAction({type: "build", build_cards: [...selectedCards].map(Number)});
+    const buildCards = [...selectedCards].map(Number);
     clearSelection();
+    sendAction({type: "build", build_cards: buildCards});
 
     // Animate cards flying to buildings area
     if (destRect) {
@@ -2174,8 +2181,8 @@ function wireGameButtons() {
       action.hacker_target = hTarget.value;
       action.hacker_direction = parseInt(hDir?.value || "1");
     }
-    sendAction(action);
     clearSelection();
+    sendAction(action);
 
     // Animate fade out
     if (cardRect) animateFadeOut(cardRect, cardHtml);
@@ -2197,8 +2204,8 @@ function wireGameButtons() {
       action.card_idx = cardIdx;
     }
     if (useSE) action.use_space_elevator = true;
-    sendAction(action);
     clearSelection();
+    sendAction(action);
 
     // Animate fade + reward
     if (cardRect) {

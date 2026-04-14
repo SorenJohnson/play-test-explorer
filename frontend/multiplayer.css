@@ -247,6 +247,11 @@ body {
   min-height: calc(100vh - 50px);
 }
 #game-area { padding: 12px 16px; overflow-y: auto; }
+.player-zone {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 2px solid #30363d;
+}
 
 /* ===== Event Feed Sidebar ===== */
 #event-feed {
@@ -483,6 +488,34 @@ body {
 .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .action-btn.active { background: #238636; border-color: #2ea043; color: #fff; }
 
+/* Sell resource picker */
+.sell-picker {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+}
+.sell-res-label { font-size: 0.75rem; color: #8b949e; margin-bottom: 6px; }
+.sell-res-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.sell-res-btn {
+  background: #21262d;
+  border: 2px solid #484f58;
+  border-radius: 6px;
+  padding: 6px 14px;
+  cursor: pointer;
+  text-align: center;
+  min-width: 80px;
+}
+.sell-res-btn:hover { background: #30363d; }
+.sell-res-btn.selected {
+  border-color: #ffffff;
+  background: #21262d;
+}
+.sell-res-name { display: block; font-weight: 600; font-size: 0.85rem; }
+.sell-res-detail { display: block; font-size: 0.7rem; color: #8b949e; }
+.sell-hacker-row { margin-top: 8px; display: flex; align-items: center; gap: 6px; }
+
 /* ===== Opponents Strip ===== */
 .opponents-strip {
   display: grid;
@@ -516,22 +549,23 @@ body {
 .opp-patent { color: #d2a8ff; margin-right: 6px; }
 
 /* ===== Your Stats Bar ===== */
-.your-stats-bar {
-  background: #161b22;
-  border-top: 1px solid #30363d;
-  padding: 8px 16px;
-  display: flex;
-  gap: 16px;
-  flex-wrap: wrap;
-  font-size: 0.85rem;
-  position: sticky;
-  bottom: 0;
+/* Your stats (inline above hand) */
+.player-stats { margin-bottom: 10px; }
+.player-stats-money { font-size: 0.9rem; color: #c9d1d9; margin-bottom: 6px; }
+.player-stats-buildings { font-size: 0.8rem; color: #8b949e; margin-top: 6px; }
+.player-stats-specials { font-size: 0.8rem; margin-top: 2px; }
+.player-rates-grid {
+  display: grid;
+  grid-template-columns: repeat(9, 1fr);
+  gap: 6px;
+  margin-bottom: 6px;
 }
-.stat-item { display: flex; gap: 4px; }
-.stat-label { color: #8b949e; }
-.stat-value { font-weight: 600; }
-.stat-value.positive { color: #3fb950; }
-.stat-value.negative { color: #f85149; }
+.player-rates-grid .rate-chip {
+  padding: 8px 4px;
+  font-size: 0.9rem;
+}
+.player-rates-grid .rate-chip .rate-res { font-size: 0.75rem; font-weight: 600; }
+.player-rates-grid .rate-chip .rate-val { font-size: 1rem; font-weight: 800; }
 
 /* ===== Modals ===== */
 .modal-overlay {
@@ -571,22 +605,7 @@ body {
   text-align: center;
 }
 
-/* ===== Player Panel ===== */
-.player-panel-inner { padding: 8px 0; }
-.player-panel-header {
-  padding: 8px 12px;
-  margin-bottom: 8px;
-  background: #161b22;
-  border-radius: 6px;
-}
-.player-panel-name { font-size: 1rem; font-weight: 600; margin-bottom: 4px; }
-.player-panel-money { font-size: 0.85rem; color: #c9d1d9; }
-.player-panel-rates { margin-bottom: 8px; }
-.rates-grid {
-  display: grid;
-  grid-template-columns: repeat(9, 1fr);
-  gap: 4px;
-}
+/* ===== Rate Chips (shared by player card + opponent cards) ===== */
 .rate-chip {
   background: #161b22;
   border: 1px solid #30363d;
@@ -600,8 +619,6 @@ body {
 .rate-chip.rate-pos { border-color: #238636; }
 .rate-chip.rate-neg { border-color: #da3633; }
 .rate-chip.rate-zero { opacity: 0.4; }
-.player-panel-buildings { font-size: 0.8rem; }
-.built-special { font-size: 0.75rem; margin: 2px 0; }
 
 /* AP display */
 .ap-full { color: #3fb950; }

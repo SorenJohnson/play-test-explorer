@@ -87,56 +87,54 @@
     <div id="game-layout">
       <!-- Left: game area -->
       <div id="game-area">
-        <!-- Other Players (above market) -->
-        <section class="game-section">
-          <h3 class="section-title">Other Players</h3>
-          <div id="mp-opponents" class="opponents-strip"></div>
-        </section>
+        <!-- ===== Shared Board ===== -->
+        <div class="board-zone">
+          <section class="game-section">
+            <h3 class="section-title">Other Players</h3>
+            <div id="mp-opponents" class="opponents-strip"></div>
+          </section>
 
-        <!-- Market -->
-        <section class="game-section">
-          <h3 class="section-title" style="cursor:pointer" id="market-toggle">Market <span style="font-size:0.7rem">(click cell for track, header for chart)</span></h3>
-          <div id="mp-market-grid" class="market-grid"></div>
-          <div id="mp-market-ruler" class="market-ruler" style="display:none"></div>
-          <div id="market-chart-wrap" style="display:none;margin-top:8px">
-            <canvas id="mp-market-chart" height="180"></canvas>
-          </div>
-        </section>
+          <section class="game-section">
+            <h3 class="section-title" style="cursor:pointer" id="market-toggle">Market <span style="font-size:0.7rem">(click cell for track, header for chart)</span></h3>
+            <div id="mp-market-grid" class="market-grid"></div>
+            <div id="mp-market-ruler" class="market-ruler" style="display:none"></div>
+            <div id="market-chart-wrap" style="display:none;margin-top:8px">
+              <canvas id="mp-market-chart" height="180"></canvas>
+            </div>
+          </section>
 
-        <!-- Contracts -->
-        <section class="game-section">
-          <h3 class="section-title">Contracts</h3>
-          <div id="mp-contracts-grid" class="contracts-grid"></div>
-        </section>
+          <section class="game-section">
+            <h3 class="section-title">Contracts</h3>
+            <div id="mp-contracts-grid" class="contracts-grid"></div>
+          </section>
 
-        <!-- Your Stats / Player Board -->
-        <div id="mp-your-stats" class="your-stats-bar"></div>
+          <section class="game-section">
+            <h3 class="section-title">Building Pool</h3>
+            <div id="mp-pool-grid" class="pool-grid"></div>
+          </section>
+        </div>
 
-        <!-- Pool -->
-        <section class="game-section">
-          <h3 class="section-title">Building Pool</h3>
-          <div id="mp-pool-grid" class="pool-grid"></div>
-        </section>
+        <!-- ===== Your Tableau ===== -->
+        <div id="player-zone" class="player-zone">
+          <section id="hand-section" class="game-section">
+            <h3 id="player-zone-title" class="section-title"></h3>
+            <div id="mp-your-stats"></div>
+            <div id="mp-hand-grid" class="hand-grid"></div>
+            <div id="mp-build-estimate" class="build-estimate"></div>
+          </section>
 
-        <!-- Your Hand -->
-        <section id="hand-section" class="game-section">
-          <h3 class="section-title">Your Hand</h3>
-          <div id="mp-hand-grid" class="hand-grid"></div>
-          <div id="mp-build-estimate" class="build-estimate"></div>
-        </section>
-
-        <!-- Actions -->
-        <section id="action-section" class="game-section">
-          <div id="mp-action-bar" class="action-bar">
-            <button id="mp-build-btn" class="action-btn" disabled>Build</button>
-            <button id="mp-sell-btn" class="action-btn" disabled>Sell</button>
-            <span id="mp-sell-extras"></span>
-            <button id="mp-contract-btn" class="action-btn" disabled>Contract</button>
-            <button id="mp-pass-btn" class="action-btn" disabled>End Turn</button>
-          </div>
-          <div id="mp-special-toggles"></div>
-          <div id="mp-patent-actions"></div>
-        </section>
+          <section id="action-section" class="game-section">
+            <div id="mp-action-bar" class="action-bar">
+              <button id="mp-build-btn" class="action-btn" disabled>Build</button>
+              <button id="mp-sell-btn" class="action-btn" disabled>Sell</button>
+              <button id="mp-contract-btn" class="action-btn" disabled>Contract</button>
+              <button id="mp-pass-btn" class="action-btn" disabled>End Turn</button>
+            </div>
+            <div id="mp-sell-picker" class="sell-picker" style="display:none"></div>
+            <div id="mp-special-toggles"></div>
+            <div id="mp-patent-actions"></div>
+          </section>
+        </div>
       </div>
 
       <!-- Right: event feed sidebar -->
