@@ -689,6 +689,7 @@ details.feed-group > summary.feed-group-title::-webkit-details-marker { color: #
 .pwr-up { color: #3fb950; font-weight: 600; font-size: 0.85em; }
 .pwr-down { color: #f85149; font-weight: 600; font-size: 0.85em; }
 .redraw-icon { color: #d29922; font-size: 0.9em; margin-left: 2px; }
+.redraw-marker { color: #d29922; font-size: 0.9em; }
 
 /* ===== Patent Actions ===== */
 .patent-action-row {

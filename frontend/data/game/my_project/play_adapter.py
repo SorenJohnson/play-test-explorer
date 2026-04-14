@@ -368,22 +368,38 @@ class PlayableGame:
                 "awaiting_prompt": True,
             }
         # Chain redraw events (same turn, no actions)
-        chain_detail = self._chain_redraws(player, event)
+        chain_detail, chained_events = self._chain_redraws(player, event)
         if chain_detail:
             event_detail = f"{event_detail} | {chain_detail}"
-        return self._finalize_human_turn(event, event_detail)
+        result = self._finalize_human_turn(event, event_detail)
+        result["chained_events"] = chained_events
+        return result
 
-    def _chain_redraws(self, player, event) -> str:
+    def _chain_redraws(self, player, event) -> tuple[str, list[dict]]:
         """If the event has redraws, keep drawing and executing events.
-        Returns combined event detail string for all chained events."""
+
+        Returns (combined_detail_string, list_of_structured_event_dicts).
+        Each chained event gets its own structured data entry so the
+        frontend can render them as separate feed items.
+        """
         details = []
+        chained_events = []
         while event.redraws and self.state.event_idx < len(self.state.event_deck):
             event = self.state.event_deck[self.state.event_idx]
             self.state.event_idx += 1
             self.state.last_event_lines = []
             detail = execute_event(self.state, event, player)
             details.append(detail)
-        return " | ".join(details) if details else ""
+            # Capture structured data for this chained event
+            event_data = getattr(self.state, "_last_event_data", None)
+            chained_events.append({
+                "detail": detail,
+                "type": event.type.value,
+                "lines": list(self.state.last_event_lines),
+                "structured": dict(event_data) if event_data else {},
+                "redraws": event.redraws,
+            })
+        return " | ".join(details) if details else "", chained_events
 
     def _handle_post_event(self, event: EventCard) -> None:
         """Shared post-event handling: snapshot market, reshuffle at round end."""
@@ -847,11 +863,12 @@ class PlayableGame:
 
         event_detail = execute_event(self.state, event, player)
         # Chain redraw events (same turn, no actions)
-        chain_detail = self._chain_redraws(player, event)
+        chain_detail, chained_events = self._chain_redraws(player, event)
         if chain_detail:
             event_detail = f"{event_detail} | {chain_detail}"
         self.last_event = event_detail
         self.last_ai_actions = actions_log
+        self._last_chained_events = chained_events
 
         if self.state.pending_prompt is not None:
             # An AI's event needs human input (e.g. an auction event fired
@@ -884,6 +901,8 @@ class PlayableGame:
         self._active_player_idx = -1
         self._suspended_ai_turn = None
         self._handle_post_event(event)
+        chained = getattr(self, "_last_chained_events", [])
+        self._last_chained_events = []
         return {
             "ok": True,
             "player_index": acting_player_idx,
@@ -893,6 +912,7 @@ class PlayableGame:
                 "detail": event_detail,
                 "lines": list(self.state.last_event_lines),
             },
+            "chained_events": chained,
         }
 
     def _execute_ai_action(self, player: Player, action: Action):

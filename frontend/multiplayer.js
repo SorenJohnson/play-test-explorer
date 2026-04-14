@@ -557,6 +557,14 @@ function hostAdvanceStep() {
     if (eventDetail) {
       const evData = stateSnap.last_event_data || {};
       addEventFeedEntries(eventDetail, eventLines, playerSnaps, evData);
+
+      // Render chained (redraw) events as separate feed entries
+      const chained = result.chained_events || [];
+      for (const ce of chained) {
+        const ceData = ce.structured || {};
+        ceData._is_redraw = true;
+        addEventFeedEntries(ce.detail, ce.lines || [], playerSnaps, ceData);
+      }
       hostRefreshState();
     }
 
@@ -1967,11 +1975,12 @@ function renderFeedEntry(e) {
     }
 
     const redrawIcon = ed.redraws ? '<span class="redraw-icon" title="Draws another event">&#8635;</span>' : '';
+    const isRedraw = ed._is_redraw ? '<span class="redraw-marker" title="Redrawn event">&#8627;</span> ' : '';
 
     // Always expandable for events
     return `
       <details class="feed-group event">
-        <summary class="feed-group-title">${ed.pwr_adjust ? '<span class="feed-event-icon">&#9889;</span> ' : ''}${eventTitle} ${redrawIcon} <span class="feed-time">${e.time}</span></summary>
+        <summary class="feed-group-title">${isRedraw}${ed.pwr_adjust ? '<span class="feed-event-icon">&#9889;</span> ' : ''}${eventTitle} ${redrawIcon} <span class="feed-time">${e.time}</span></summary>
         <div class="feed-group-body">${detailHtml || '<div class="feed-line-note">No additional details</div>'}</div>
       </details>
     `;
@@ -2211,12 +2220,20 @@ function wireGameButtons() {
 
       // Event resolved normally — add feed entry
       const snapAfter = game.state_dict().toJs({dict_converter: Object.fromEntries});
+      const playerSnapsAfter = snapAfter.players.map(p => ({name: p.name, money: p.money, debt: p.debt, net_worth: p.net_worth}));
       addEventFeedEntries(
         result.detail || "Turn ended",
         (result.lines || snapAfter.last_event_lines || []).map(l => Object.assign({}, l)),
-        snapAfter.players.map(p => ({name: p.name, money: p.money, debt: p.debt, net_worth: p.net_worth})),
+        playerSnapsAfter,
         snapAfter.last_event_data || {},
       );
+      // Render chained (redraw) events as separate feed entries
+      const chained = result.chained_events || [];
+      for (const ce of chained) {
+        const ceData = ce.structured || {};
+        ceData._is_redraw = true;
+        addEventFeedEntries(ce.detail, ce.lines || [], playerSnapsAfter, ceData);
+      }
       hostRefreshState();
       hostAdvanceGame();
     } else {
