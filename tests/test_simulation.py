@@ -68,12 +68,13 @@ class TestMarket:
 
 class TestEventDeck:
     def test_deck_has_terminal_sentinels(self):
-        """A 2-round deck has 1 END_ROUND and 1 END_GAME sentinel."""
+        """A 2-round deck starts with round 1 + END_ROUND. Round 2 is
+        built by reshuffle_for_next_round when END_ROUND fires."""
         deck = build_event_deck(3, num_rounds=2)
         end_round = sum(1 for e in deck if e.type == EventType.END_ROUND)
         end_game = sum(1 for e in deck if e.type == EventType.END_GAME)
         assert end_round == 1
-        assert end_game == 1
+        assert end_game == 0  # END_GAME only appears after reshuffle
 
     def test_3p_turns_are_balanced(self):
         """At 3P with 2 rounds, players get roughly equal turns.
@@ -101,20 +102,20 @@ class TestEventDeck:
         assert patents_in_r2 == 0, f"Expected 0 patent auctions in round 2, got {patents_in_r2}"
 
     def test_round_2_converts_patents_to_draws(self):
-        """Round 2 converts patent auctions to draw_building_card events."""
-        deck = build_event_deck(3, num_rounds=2)
-        end_round_idx = next(i for i, e in enumerate(deck) if e.type == EventType.END_ROUND)
-        r1 = deck[:end_round_idx]
-        r2 = deck[end_round_idx + 1:-1]  # exclude END_GAME
-        # Round 1 has patent auctions; round 2 should have none
-        r1_patents = sum(1 for e in r1 if e.type == EventType.PATENT_AUCTION)
-        r2_patents = sum(1 for e in r2 if e.type == EventType.PATENT_AUCTION)
+        """Round 2 (via reshuffle) converts patent auctions to draw_building_card."""
+        from my_project.simulation import reshuffle_for_next_round, GameState
+        cards, contracts = _load_data()
+        state = GameState.create(cards, contracts, num_players=3, num_rounds=2)
+        # Round 1 deck has patent auctions
+        r1_patents = sum(1 for e in state.event_deck if e.type == EventType.PATENT_AUCTION)
         assert r1_patents > 0
+        # Reshuffle for round 2
+        reshuffle_for_next_round(state, 3, 1, 2)
+        r2_patents = sum(1 for e in state.event_deck if e.type == EventType.PATENT_AUCTION)
         assert r2_patents == 0
-        # Round 2 should have more draw_building_card events (converted patents)
-        r2_draws = sum(1 for e in r2 if e.type == EventType.DRAW_BUILDING_CARD)
-        r1_draws = sum(1 for e in r1 if e.type == EventType.DRAW_BUILDING_CARD)
-        assert r2_draws > r1_draws
+        # Round 2 should have draw_building_card events (converted patents)
+        r2_draws = sum(1 for e in state.event_deck if e.type == EventType.DRAW_BUILDING_CARD)
+        assert r2_draws > 0
 
     def test_single_round_has_end_game_only(self):
         """A 1-round deck has END_GAME but no END_ROUND."""

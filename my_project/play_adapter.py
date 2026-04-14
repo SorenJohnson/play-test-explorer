@@ -280,6 +280,14 @@ class PlayableGame:
                 "detail": detail,
                 "lines": list(self.state.last_event_lines),
             })
+            # Reshuffle deck for next round when END_ROUND fires
+            if terminal.type == _ET.END_ROUND:
+                from my_project.simulation import reshuffle_for_next_round
+                current_round = self.deck_round_number()
+                reshuffle_for_next_round(
+                    self.state, self.num_players,
+                    current_round, self.num_rounds,
+                )
 
     def _total_player_turns(self) -> int:
         """Count events in the deck that are actual player-turns.

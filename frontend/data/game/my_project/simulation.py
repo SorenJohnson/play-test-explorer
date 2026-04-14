@@ -449,40 +449,58 @@ def build_event_deck(
     cfg = config or EventDeckConfig()
     pool = _build_event_pool(num_players, cfg)
 
+    # Build round 1 only. Round 2+ are built by reshuffle_for_next_round().
+    round_events = list(pool)
+    random.shuffle(round_events)
+
+    terminal = EventType.END_GAME if num_rounds <= 1 else EventType.END_ROUND
+    round_events.append(_ec(terminal))
+    return round_events
+
+
+def reshuffle_for_next_round(
+    state: GameState,
+    num_players: int,
+    current_round: int,
+    num_rounds: int,
+) -> None:
+    """Reshuffle the event deck for the next round.
+
+    Called when END_ROUND fires. Converts patent auctions to their
+    round-2 replacements (all patents have a Round2_Event conversion),
+    reshuffles, and appends the appropriate terminal card.
+    """
     _type_map = {e.value: e for e in EventType}
+    from my_project.parsing import _condition_matches
 
-    all_events: list[EventCard] = []
-    for round_idx in range(num_rounds):
-        is_last = round_idx == num_rounds - 1
+    # The pool is everything that was in this round's deck minus the
+    # END_ROUND terminal (which was the last card consumed).
+    # We stored the original pool on state at creation time.
+    pool = list(state._event_pool)
 
-        if round_idx > 0:
-            # Convert events with Round2_Event to their round-2 replacement.
-            # Patent auctions without a conversion are dropped.
-            from my_project.parsing import _condition_matches
-            converted: list[EventCard] = []
-            for e in pool:
-                r2 = getattr(e, "_round2_event", "")
-                if r2:
-                    r2_type = _type_map.get(r2)
-                    if r2_type:
-                        r2_cond = getattr(e, "_round2_redraw", "")
-                        is_redraw = bool(r2_cond) and _condition_matches(r2_cond, num_players)
-                        converted.append(_ec(r2_type, redraws=is_redraw, pwr_adjust=e.pwr_adjust))
-                    continue
-                elif e.type == EventType.PATENT_AUCTION:
-                    continue  # patent with no round2 conversion → drop
-                converted.append(e)
-            pool = converted
+    # Convert events for round 2+
+    converted: list[EventCard] = []
+    for e in pool:
+        r2 = getattr(e, "_round2_event", "")
+        if r2:
+            r2_type = _type_map.get(r2)
+            if r2_type:
+                r2_cond = getattr(e, "_round2_redraw", "")
+                is_redraw = bool(r2_cond) and _condition_matches(r2_cond, num_players)
+                converted.append(_ec(r2_type, redraws=is_redraw, pwr_adjust=e.pwr_adjust))
+            continue
+        elif e.type == EventType.PATENT_AUCTION:
+            continue  # patent with no round2 conversion → drop (shouldn't happen)
+        converted.append(e)
 
-        round_events = list(pool)
-        random.shuffle(round_events)
+    random.shuffle(converted)
+    is_last = current_round + 1 >= num_rounds
+    terminal = EventType.END_GAME if is_last else EventType.END_ROUND
+    converted.append(_ec(terminal))
 
-        # Append the terminal sentinel (not a player-turn — fires as cleanup)
-        terminal = EventType.END_GAME if is_last else EventType.END_ROUND
-        round_events.append(_ec(terminal))
-        all_events.extend(round_events)
-
-    return all_events
+    # Replace the event deck and reset the index
+    state.event_deck = converted
+    state.event_idx = 0
 
 
 # --- Actions ---
@@ -668,6 +686,8 @@ class GameState:
             event_deck = build_event_deck(
                 num_players, event_deck_config, num_rounds=num_rounds,
             )
+        # Store the base event pool for reshuffling at round boundaries
+        _event_pool = _build_event_pool(num_players, event_deck_config or EventDeckConfig())
 
         # Build news deck (defaults to one card per NEWS_EFFECTS entry,
         # shuffled). Callers can supply a custom list for tests / playtesting.
@@ -709,7 +729,7 @@ class GameState:
             p.hand = hand
             players.append(p)
 
-        return cls(
+        state = cls(
             players=players,
             market=market,
             deck=deck,
@@ -722,6 +742,8 @@ class GameState:
             max_turns=max_turns,
             num_rounds=num_rounds,
         )
+        state._event_pool = _event_pool
+        return state
 
 
 # --- Build cost calculation ---
@@ -2801,30 +2823,28 @@ def run_game(
     else:
         raise ValueError("Must provide either `strategy` or `strategies`")
 
-    # Play until the event deck is exhausted. Each player turn:
-    # 1. Player takes actions (build/sell/contract/pass)
-    # 2. Draw and execute events until a non-redraw event fires
-    # Redraw events chain within the same player's turn — the player
-    # only acts once, but multiple events can fire.
-    # This gives exactly 10 turns/player for all player counts.
-    safety = len(state.event_deck) + 100
+    # Play until the event deck is exhausted. Each card in the deck is a
+    # player turn (including END_ROUND/END_GAME). Redraws chain: they fire
+    # then also draw+fire the next card (2 cards consumed, 1 player turn).
+    current_round = 0
+    safety = 500
     player_turn = 0
     while state.event_idx < len(state.event_deck) and player_turn < safety:
         player_idx = player_turn % num_players
         player = state.players[player_idx]
 
-        # First event: full turn (actions + event)
-        event = state.event_deck[state.event_idx]
+        # Draw and fire the event for this turn
+        primary_event = state.event_deck[state.event_idx]
         state.event_idx += 1
-        run_turn(state, player, player_strategies[player_idx], event)
+        run_turn(state, player, player_strategies[player_idx], primary_event)
 
         # Chain redraw events: execute event only (no actions).
         # Merge chained event details into the parent turn's history record.
+        event = primary_event
         while event.redraws and state.event_idx < len(state.event_deck):
             event = state.event_deck[state.event_idx]
             state.event_idx += 1
             chain_detail = execute_event(state, event, player)
-            # Append to the last history record's event text
             if state.history:
                 last = state.history[-1]
                 last.event = f"{last.event} | {chain_detail}"
@@ -2833,6 +2853,11 @@ def run_game(
                 last.contracts_fulfilled = player.contracts_fulfilled
                 last.market_snapshot = state.market.snapshot()
                 last.rates_snapshot = {r.value: player.rate(r) for r in Resource}
+
+        # Check if the primary event was END_ROUND → reshuffle for next round
+        if primary_event.type == EventType.END_ROUND:
+            current_round += 1
+            reshuffle_for_next_round(state, num_players, current_round, num_rounds)
 
         player_turn += 1
 
