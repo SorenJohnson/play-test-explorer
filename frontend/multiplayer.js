@@ -826,13 +826,20 @@ function animateAiActions(actions, playerIdx) {
     if (a.type === "build") {
       // Card flies from pool area to opponent's panel
       const names = (a.buildings || []).join(", ");
-      const rates = Object.entries(a.rates_gained || {})
+      const ratesHtml = Object.entries(a.rates_gained || {})
         .filter(([, v]) => v !== 0)
         .map(([r, v]) => `<span class="${v > 0 ? 'rate-pos' : 'rate-neg'}">${v > 0 ? '+' : ''}${v} ${r}</span>`)
         .join(" ");
-      const html = `<div class="card-name">${names}</div>${rates ? `<div class="card-rates">${rates}</div>` : ""}`;
+      const html = `<div class="card-name">${names}</div>${ratesHtml ? `<div class="card-rates">${ratesHtml}</div>` : ""}`;
       const sourceRect = {left: poolRect.left + poolRect.width / 2 - 80, top: poolRect.top, width: 160, height: 40};
-      setTimeout(() => animateCard(sourceRect, oppRect, html), delay);
+      const ratesGained = a.rates_gained;
+      setTimeout(() => {
+        animateCard(sourceRect, oppRect, html);
+        // Rate change popups on the opponent's rate chips
+        if (ratesGained && oppEl) {
+          setTimeout(() => animateRateChanges(ratesGained, "#mp-opponents"), 200);
+        }
+      }, delay);
       delay += 120;
     } else if (a.type === "sell" && a.sell_revenue > 0) {
       // Reward popup near opponent
@@ -842,6 +849,37 @@ function animateAiActions(actions, playerIdx) {
       setTimeout(() => animateReward(oppRect, `+$${a.contract_reward}`), delay);
       delay += 80;
     }
+  }
+}
+
+function animateRateChanges(rates, targetSelector) {
+  // Show floating +/- numbers over the rate chips that changed
+  if (!rates || typeof rates !== "object") return;
+  for (const [resource, amount] of Object.entries(rates)) {
+    if (amount === 0) continue;
+    // Find the rate chip for this resource
+    const chips = document.querySelectorAll(`${targetSelector} .rate-chip`);
+    let chipEl = null;
+    for (const chip of chips) {
+      const resEl = chip.querySelector(".rate-res");
+      if (resEl && resEl.textContent.trim() === resource) {
+        chipEl = chip;
+        break;
+      }
+    }
+    if (!chipEl) continue;
+    const rect = chipEl.getBoundingClientRect();
+    const popup = document.createElement("div");
+    popup.className = amount > 0 ? "rate-change-popup positive" : "rate-change-popup negative";
+    popup.textContent = `${amount > 0 ? "+" : ""}${amount}`;
+    Object.assign(popup.style, {
+      position: "fixed",
+      left: (rect.left + rect.width / 2) + "px",
+      top: (rect.top - 4) + "px",
+      zIndex: "201",
+    });
+    document.body.appendChild(popup);
+    setTimeout(() => { if (popup.parentNode) popup.remove(); }, 900);
   }
 }
 
@@ -2142,6 +2180,10 @@ function sendAction(action) {
     if (result.ok) {
       humanTurnActions.push(result);
       hostRefreshState();
+      // Animate rate changes on your panel
+      if (result.rates_gained) {
+        animateRateChanges(result.rates_gained, ".player-panel-rates");
+      }
       const afterSnap = currentState?.players[mySeat];
       const playerAfter = afterSnap ? {money: afterSnap.money, debt: afterSnap.debt, net_worth: afterSnap.net_worth, rates: Object.assign({}, afterSnap.rates)} : null;
       const playerName = currentState?.players[mySeat]?.name || "You";

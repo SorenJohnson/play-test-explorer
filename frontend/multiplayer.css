@@ -717,6 +717,24 @@ details.feed-group > summary.feed-group-title::-webkit-details-marker { color: #
 @keyframes fadeSlideDown {
   to { opacity: 0; transform: translateY(20px); }
 }
+.rate-change-popup {
+  position: fixed;
+  font-weight: bold;
+  font-size: 1rem;
+  pointer-events: none;
+  z-index: 201;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+  animation: rateFloat 0.8s ease-out forwards;
+  transform: translateX(-50%);
+}
+.rate-change-popup.positive { color: #3fb950; }
+.rate-change-popup.negative { color: #f85149; }
+@keyframes rateFloat {
+  0% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+  50% { transform: translateX(-50%) translateY(-12px) scale(1.2); }
+  100% { opacity: 0; transform: translateX(-50%) translateY(-20px) scale(1); }
+}
+
 .reward-popup {
   position: fixed;
   color: #3fb950;
