@@ -37,7 +37,7 @@ class TestEventDeckConfig:
         """Default EventDeckConfig draws counts from default_event_counts(num_players)."""
         deck = build_event_deck(3, EventDeckConfig(), num_rounds=1)
         # 3P CSV defaults: 3 news, 2 debt, 1 power, 2 futures, 4 patent (3+1 conditional)
-        assert _count(deck, EventType.NEWS_BULLETIN) == 3
+        assert _count(deck, EventType.NEWS_BULLETIN) == 2
         assert _count(deck, EventType.DEBT_COLLECTION) == 2
         assert _count(deck, EventType.POWER_BILL) == 1
         assert _count(deck, EventType.FUTURES_TRADING) == 2
@@ -76,7 +76,7 @@ class TestEventDeckConfig:
     def test_no_config_uses_defaults(self):
         """Passing config=None is equivalent to passing EventDeckConfig()."""
         deck = build_event_deck(3, None, num_rounds=1)
-        assert _count(deck, EventType.NEWS_BULLETIN) == 3
+        assert _count(deck, EventType.NEWS_BULLETIN) == 2
         assert _count(deck, EventType.PATENT_AUCTION) == 4
 
     def test_zero_count_disables_event(self):

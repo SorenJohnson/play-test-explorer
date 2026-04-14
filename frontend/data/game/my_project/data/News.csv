@@ -8,7 +8,7 @@ Raw Materials Volatile,market_random,"H2O, FE"
 Life Support Volatile,market_random,"O2, FOOD"
 Quarry Output Volatile,market_random,"C, SI"
 Consumer Goods Volatile,market_random,"GLS, ELX"
-Power Market Volatile,market_random_x2,PWR
+Power Market Volatile,market_random,PWR
 All Quiet,,
 Debt Collection,trigger,debt_collection
 Power Bill,trigger,power_bill
