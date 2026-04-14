@@ -1642,12 +1642,12 @@ function buildEventTitle(ed) {
     default: title = type.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
   }
 
-  // PWR adjust: colored +/- next to lightning icon
+  // PWR adjust prepended before title (rendered before lightning icon)
   if (ed.pwr_adjust) {
     const rate = ed.pwr_adjust.rate;
     const cls = rate >= 0 ? "pwr-up" : "pwr-down";
     const sign = rate >= 0 ? "+" : "";
-    title += ` <span class="${cls}">${sign}${rate} PWR</span>`;
+    title = `<span class="${cls}">${sign}${rate} PWR</span> ${title}`;
   }
 
   return title;
