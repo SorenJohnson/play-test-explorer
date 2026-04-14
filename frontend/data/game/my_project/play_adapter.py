@@ -419,15 +419,9 @@ class PlayableGame:
             details.append(detail)
         return " | ".join(details) if details else ""
 
-    def _finalize_human_turn(self, event: EventCard, event_detail: str) -> dict:
-        """Finalize the in-progress human turn after the event has fully resolved."""
-        self._pending_event = None
-        self.last_event = event_detail
-        self.human_turn_in_progress = False
-        self._active_player_idx = -1
+    def _handle_post_event(self, event: EventCard) -> None:
+        """Shared post-event handling: snapshot market, reshuffle at round end."""
         self._snapshot_market(turn=self.state.turn)
-
-        # If the event was END_ROUND, reshuffle the deck for the next round
         from my_project.simulation import EventType as _ET
         if event.type == _ET.END_ROUND:
             from my_project.simulation import reshuffle_for_next_round
@@ -436,6 +430,14 @@ class PlayableGame:
                 self.state, self.num_players,
                 current_round, self.num_rounds,
             )
+
+    def _finalize_human_turn(self, event: EventCard, event_detail: str) -> dict:
+        """Finalize the in-progress human turn after the event has fully resolved."""
+        self._pending_event = None
+        self.last_event = event_detail
+        self.human_turn_in_progress = False
+        self._active_player_idx = -1
+        self._handle_post_event(event)
         return {
             "type": event.type.value,
             "detail": event_detail,
@@ -914,18 +916,8 @@ class PlayableGame:
         """Finalize the in-progress AI turn after the event has fully resolved."""
         self.last_event = event_detail
         self._active_player_idx = -1
-        self._snapshot_market(turn=self.state.turn)
         self._suspended_ai_turn = None
-
-        # If the event was END_ROUND, reshuffle the deck for the next round
-        from my_project.simulation import EventType as _ET
-        if event.type == _ET.END_ROUND:
-            from my_project.simulation import reshuffle_for_next_round
-            current_round = self.deck_round_number()
-            reshuffle_for_next_round(
-                self.state, self.num_players,
-                current_round, self.num_rounds,
-            )
+        self._handle_post_event(event)
         return {
             "ok": True,
             "player_index": acting_player_idx,
