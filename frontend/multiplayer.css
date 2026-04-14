@@ -111,11 +111,13 @@ body {
 #status-bar {
   display: flex;
   gap: 16px;
-  padding: 8px 16px;
+  padding: 8px 24px;
   background: #161b22;
   border-bottom: 1px solid #30363d;
   align-items: center;
   flex-wrap: wrap;
+  max-width: 1400px;
+  margin: 0 auto;
 }
 .status-cell { display: flex; flex-direction: column; align-items: center; }
 .status-label { font-size: 0.7rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; }
@@ -237,6 +239,7 @@ body {
   grid-template-columns: 1fr 320px;
   max-width: 1400px;
   margin: 0 auto;
+  padding: 0 24px;
   gap: 0;
   min-height: calc(100vh - 50px);
 }
