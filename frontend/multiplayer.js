@@ -1629,7 +1629,7 @@ function addEventFeedEntries(_eventDetail, eventLines, playerSnaps, eventData) {
   };
   addFeedEntry(entry);
   broadcastFeed(entry);
-  showEventBanner(buildEventTitle(eventData || {}));
+  showEventBanner(buildEventCardLabel(eventData || {}));
 
   // Animate draw building card: card slides into pool
   if (eventData?.event_type === "draw_building_card" && eventData.card_drawn) {
@@ -1645,6 +1645,23 @@ function addEventFeedEntries(_eventDetail, eventLines, playerSnaps, eventData) {
         `<div class="card-name">${eventData.card_drawn}</div>`
       );
     }
+  }
+}
+
+function buildEventCardLabel(ed) {
+  // Simple label for the discard card face — just the event type, no effects
+  if (!ed) return "";
+  switch (ed.event_type || "") {
+    case "draw_building_card": return "Draw Building Card";
+    case "news_bulletin": return `News: ${ed.news_name || "?"}`;
+    case "patent_auction": return "Patent Auction";
+    case "power_bill": return "Power Bill";
+    case "debt_collection": return "Debt Collection";
+    case "futures_trading": return "Futures Trading";
+    case "futures_settlement": return "Futures Settlement";
+    case "end_round": return "END OF ROUND";
+    case "end_game": return "END GAME";
+    default: return (ed.event_type || "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
   }
 }
 
