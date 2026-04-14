@@ -2175,22 +2175,24 @@ function wireGameButtons() {
 
     if (role === "host") {
       const result = game.end_human_turn().toJs({dict_converter: Object.fromEntries});
-      const snapAfter = game.state_dict().toJs({dict_converter: Object.fromEntries});
+      humanTurnActions = [];
 
-      // Emit event feed entries for the turn's event
+      // If awaiting prompt (patent auction, debt paydown), don't add event
+      // entry yet — the prompt resolution will add the complete event.
+      if (result.awaiting_prompt) {
+        hostRefreshState();
+        handleHostPrompt(currentState.pending_prompt);
+        return;
+      }
+
+      // Event resolved normally — add feed entry
+      const snapAfter = game.state_dict().toJs({dict_converter: Object.fromEntries});
       addEventFeedEntries(
         result.detail || "Turn ended",
         (result.lines || snapAfter.last_event_lines || []).map(l => Object.assign({}, l)),
         snapAfter.players.map(p => ({name: p.name, money: p.money, debt: p.debt, net_worth: p.net_worth})),
         snapAfter.last_event_data || {},
       );
-      humanTurnActions = [];
-
-      if (result.awaiting_prompt) {
-        hostRefreshState();
-        handleHostPrompt(currentState.pending_prompt);
-        return;
-      }
       hostRefreshState();
       hostAdvanceGame();
     } else {
