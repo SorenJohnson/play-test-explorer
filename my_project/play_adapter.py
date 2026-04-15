@@ -599,9 +599,12 @@ class PlayableGame:
             return {"ok": False, "reason": "Already used this turn"}
         if player.rate(Resource.H2O) < 1:
             return {"ok": False, "reason": "Need at least +1 H2O rate"}
+        pidx = self.state.players.index(player)
+        self.state.log.begin("free:water_engine", player.name, pidx, "Water Engine: -1 H2O, +2 PWR")
         player.rates[Resource.H2O] = player.rate(Resource.H2O) - 1
         player.rates[Resource.PWR] = player.rate(Resource.PWR) + 2
         player.has_used_water_engine_this_turn = True
+        self.state.log.end()
         return {
             "ok": True,
             "type": "patent",
@@ -623,13 +626,15 @@ class PlayableGame:
             return {"ok": False, "reason": "Pool is empty"}
         if pool_idx < 0 or pool_idx >= len(self.state.pool):
             return {"ok": False, "reason": f"Invalid pool index: {pool_idx}"}
-        # Discard the chosen pool card and draw a replacement from the deck.
+        pidx = self.state.players.index(player)
+        self.state.log.begin("free:nanotech", player.name, pidx, f"Nanotech: replace pool[{pool_idx}]")
         discarded = self.state.pool.pop(pool_idx)
         self.state.deck.discard.append(discarded)
         drawn = self.state.deck.draw(1)
         self.state.pool.extend(drawn)
         player.has_used_nanotechnology_this_turn = True
         new_name = drawn[0].building if drawn else "(deck empty)"
+        self.state.log.end()
         return {
             "ok": True,
             "type": "patent",
@@ -660,10 +665,12 @@ class PlayableGame:
             return {"ok": False, "reason": "Cannot target PWR"}
         if player.rate(res) < 1:
             return {"ok": False, "reason": f"Need at least +1 {resource} rate"}
-        # Apply: -1 PWR, +1 chosen resource
+        pidx = self.state.players.index(player)
+        self.state.log.begin("free:oc", player.name, pidx, f"OC: -1 PWR, +1 {resource}")
         player.rates[Resource.PWR] = player.rate(Resource.PWR) - 1
         player.rates[res] = player.rate(res) + 1
         player.has_used_optimization_center_this_turn = True
+        self.state.log.end()
         return {
             "ok": True,
             "type": "special",
@@ -689,13 +696,15 @@ class PlayableGame:
             return {"ok": False, "reason": f"Invalid resource: {resource}"}
         if player.rate(res) < 1:
             return {"ok": False, "reason": f"Need at least +1 {resource} rate"}
-        # Full sell: rate × price (same as a normal sell card, but free)
+        # Full sell: rate × price, market drops (same as a normal sell)
         rate = player.rate(res)
-        price = self.state.market.price(res)
-        revenue = rate * price
+        pidx = self.state.players.index(player)
+        self.state.log.begin("free:teleportation", player.name, pidx, f"Teleportation: sell {rate} {resource}")
+        revenue = self.state.market.sell(res, rate)
         player.money += revenue
         player.rates[Resource.PWR] = player.rate(Resource.PWR) - 1
         player.has_used_teleportation_this_turn = True
+        self.state.log.end()
         return {
             "ok": True,
             "type": "patent",
@@ -1089,13 +1098,14 @@ class PlayableGame:
         if not self.is_human_turn():
             return {
                 "already_built": False,
+                "matter_replication": False,
                 "cards_remaining": 0,
                 "max_build_cards": 0,
                 "affordable_single_builds": [],
                 "can_sell": [],
                 "can_contract": [],
-                "space_elevator_status": {"owned": False, "used": False},
-                "launch_pad_status": {"owned": False, "used": False},
+                "space_elevator_status": {"owned": False, "used": False, "available": False},
+                "launch_pad_status": {"owned": False, "used": False, "available": False},
                 "hacker_array_status": {"owned": False},
                 "optimization_center_status": {
                     "owned": False, "used": False, "available": False,
@@ -1267,13 +1277,14 @@ class PlayableGame:
 
         return {
             "already_built": already_built,
+            "matter_replication": has_mr,
             "cards_remaining": cr,
             "max_build_cards": max_build_cards,
             "affordable_single_builds": affordable,
             "can_sell": can_sell,
             "can_contract": can_contract,
-            "space_elevator_status": {"owned": se_owned, "used": se_used},
-            "launch_pad_status": {"owned": lp_owned, "used": lp_used},
+            "space_elevator_status": {"owned": se_owned, "used": se_used, "available": se_owned and not se_used},
+            "launch_pad_status": {"owned": lp_owned, "used": lp_used, "available": lp_owned and not lp_used},
             "hacker_array_status": {"owned": ha_owned},
             "optimization_center_status": {
                 "owned": oc_owned,

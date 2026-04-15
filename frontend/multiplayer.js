@@ -57,6 +57,9 @@ document.getElementById("btn-connect").addEventListener("click", () => {
 document.getElementById("btn-start").addEventListener("click", startGame);
 document.getElementById("prompt-submit").addEventListener("click", submitPrompt);
 document.getElementById("btn-new-game").addEventListener("click", () => location.reload());
+document.getElementById("btn-review-game").addEventListener("click", () => {
+  document.getElementById("endgame-overlay").style.display = "none";
+});
 
 // ===== Host: PeerJS Setup =====
 
@@ -1323,7 +1326,7 @@ function renderHand(s) {
       el.addEventListener("click", () => {
         const hi = parseInt(el.dataset.hi);
         if (selectedCards.has(hi)) selectedCards.delete(hi);
-        else if (selectedCards.size < cr) selectedCards.add(hi);
+        else if (selectedCards.size < Math.max(cr, 1)) selectedCards.add(hi);
         renderHand(s);
         renderPool(s);
         renderActions(s);
@@ -1451,7 +1454,11 @@ function renderActions(s) {
     }
   }
 
-  contractBtn.disabled = !myTurn || selectedContract < 0;
+  // Contract needs: contract selected AND (hand card with contract icon + AP, OR Launch Pad available)
+  const lpAvail = currentLegal?.launch_pad_status?.available;
+  const hasContractCard = selectedCards.size === 1 && cr >= 1 &&
+    (s.players[mySeat]?.hand || [])[Array.from(selectedCards)[0]]?.can_fulfill_contract;
+  contractBtn.disabled = !myTurn || selectedContract < 0 || (!hasContractCard && !lpAvail);
   passBtn.disabled = !myTurn;
 
   renderPatentActions(s);
@@ -1611,8 +1618,7 @@ function _buildRateNumberLine(rates) {
     color: RESOURCE_COLORS[r],
   }));
 
-  // Two rows sharing 11 columns: 5 4 3 2 1 | 0 | 1 2 3 4 5
-  // Top row = 1s (abs % 5, or abs if ≤5), bottom row = 5s (floor(abs/5))
+  // Two rows sharing 11 columns: -5 -4 -3 -2 -1 | 0 | +1 +2 +3 +4 +5
   const onesSlots = Array.from({length: 11}, () => []);
   const fivesSlots = Array.from({length: 11}, () => []);
 
@@ -1622,12 +1628,10 @@ function _buildRateNumberLine(rates) {
     const ones = abs <= 5 ? abs : abs % 5;
     const fives = Math.floor(abs / 5);
 
-    // Place ones dot
-    let onesSlot = 5; // zero
+    let onesSlot = 5;
     if (ones > 0) onesSlot = neg ? 5 - ones : 5 + ones;
     onesSlots[onesSlot].push(e);
 
-    // Place fives dot (only if fives > 0)
     if (fives > 0) {
       let fivesSlot = neg ? 5 - fives : 5 + fives;
       fivesSlot = Math.max(0, Math.min(10, fivesSlot));
@@ -1635,53 +1639,30 @@ function _buildRateNumberLine(rates) {
     }
   }
 
-  const labels = [5,4,3,2,1,0,1,2,3,4,5];
-  function renderOnesRow(slots) {
+  // Cell labels: 1s track shows -5..-1, 0, +1..+5; 5s track shows -25..-5, 0, +5..+25
+  const onesLabels = ["\u22125","\u22124","\u22123","\u22122","\u22121","0","+1","+2","+3","+4","+5"];
+  const fivesLabels = ["\u221225","\u221220","\u221215","\u221210","\u22125","0","+5","+10","+15","+20","+25"];
+
+  function renderRow(slots, labels, dotClass, slotClass) {
     return slots.map((dots, i) => {
       const isZero = i === 5;
+      const isNeg = i < 5;
+      const hue = isZero ? "" : isNeg ? "rnl-cell-neg" : "rnl-cell-pos";
       const dotHtml = dots.map(e =>
-        `<span class="rnl-dot" style="background:${e.color}" title="${e.res}: ${e.val > 0 ? '+' : ''}${e.val}">${e.res}</span>`
+        `<span class="${dotClass}" style="background:${e.color}" title="${e.res}: ${e.val > 0 ? '+' : ''}${e.val}">${dotClass === 'rnl-dot' ? e.res : ''}</span>`
       ).join("");
       return `<div class="rnl-slot-wrap ${isZero ? 'rnl-zero' : ''}">
-        <div class="rnl-slot">${dotHtml}</div>
+        <div class="rnl-slot ${hue} ${slotClass || ''}">
+          <span class="rnl-bg-num">${labels[i]}</span>
+          ${dotHtml}
+        </div>
       </div>`;
     }).join("");
   }
-
-  function renderFivesRow(slots) {
-    return slots.map((dots, i) => {
-      const isZero = i === 5;
-      const dotHtml = dots.map(e =>
-        `<span class="rnl-dot-sm" style="background:${e.color}" title="${e.res}: ${e.val > 0 ? '+' : ''}${e.val}"></span>`
-      ).join("");
-      return `<div class="rnl-slot-wrap ${isZero ? 'rnl-zero' : ''}">
-        <div class="rnl-slot rnl-slot-sm">${dotHtml}</div>
-      </div>`;
-    }).join("");
-  }
-
-  const labelsHtml = labels.map((l, i) =>
-    `<div class="rnl-slot-wrap ${i === 5 ? 'rnl-zero' : ''}"><div class="rnl-slot-label">${l}</div></div>`
-  ).join("");
 
   return `<div class="rate-number-line">
-    <div class="rnl-row-label">1s</div>
-    <div class="rnl-track">
-      <div class="rnl-side-label rnl-neg-label">\u2212</div>
-      ${renderOnesRow(onesSlots)}
-      <div class="rnl-side-label rnl-pos-label">+</div>
-    </div>
-    <div class="rnl-row-label">5s</div>
-    <div class="rnl-track">
-      <div class="rnl-side-label rnl-neg-label">\u2212</div>
-      ${renderFivesRow(fivesSlots)}
-      <div class="rnl-side-label rnl-pos-label">+</div>
-    </div>
-    <div class="rnl-track rnl-labels-row">
-      <div class="rnl-side-label"></div>
-      ${labelsHtml}
-      <div class="rnl-side-label"></div>
-    </div>
+    <div class="rnl-track">${renderRow(onesSlots, onesLabels, "rnl-dot", "")}</div>
+    <div class="rnl-track">${renderRow(fivesSlots, fivesLabels, "rnl-dot-sm", "rnl-slot-sm")}</div>
   </div>`;
 }
 
@@ -1690,9 +1671,12 @@ function renderPlayerPanel(s) {
   if (!me) return;
   const panel = document.getElementById("mp-your-stats");
 
-  // Set zone title
+  // Set zone title with NW
   const title = document.getElementById("player-zone-title");
-  if (title) title.textContent = me.name + (me.corporation ? ` \u2014 ${me.corporation}` : "");
+  if (title) {
+    const nwColor = me.net_worth >= 0 ? '#3fb950' : '#f85149';
+    title.innerHTML = `<span>${me.name}${me.corporation ? ` \u2014 ${me.corporation}` : ''}</span><span class="player-zone-nw" style="color:${nwColor}">NW $${me.net_worth}</span>`;
+  }
 
   const ratesGrid = RESOURCE_ORDER.map(r => {
     const v = me.rates?.[r] || 0;
@@ -1714,11 +1698,7 @@ function renderPlayerPanel(s) {
   panel.innerHTML = `
     <div class="player-stats">
       <div class="player-stats-money">
-        <span>Cash: <strong>$${me.money}</strong></span>
-        ${me.debt > 0 ? `<span style="color:#f85149"> | Debt: <strong>$${me.debt}</strong></span>` : ''}
-        ${me.credit > 0 ? `<span style="color:#d29922"> | Credit: <strong>$${me.credit}</strong></span>` : ''}
-        <span style="color:${me.net_worth >= 0 ? '#3fb950' : '#f85149'}"> | NW: <strong>$${me.net_worth}</strong></span>
-        <span> | Contracts: <strong>${me.contracts_fulfilled || 0}</strong></span>
+        Cash $${me.money}${me.debt > 0 ? ` | <span style="color:#f85149">Debt $${me.debt}</span>` : ''}${me.credit > 0 ? ` | <span style="color:#d29922">Credit $${me.credit}</span>` : ''} | ${me.contracts_fulfilled || 0} contracts
       </div>
       <div class="player-rates-grid">${ratesGrid}</div>
       ${rateNumberLine}
@@ -1759,7 +1739,7 @@ function renderOpponents(s) {
           <span class="opponent-nw" style="color:${p.net_worth >= 0 ? '#3fb950' : '#f85149'}">NW $${p.net_worth}</span>
         </div>
         <div class="opponent-money">
-          $${p.money}${p.debt > 0 ? ` <span style="color:#f85149">Debt $${p.debt}</span>` : ''}${p.credit > 0 ? ` <span style="color:#d29922">Credit $${p.credit}</span>` : ''} | ${p.contracts_fulfilled || 0} contracts
+          Cash $${p.money}${p.debt > 0 ? ` | <span style="color:#f85149">Debt $${p.debt}</span>` : ''}${p.credit > 0 ? ` | <span style="color:#d29922">Credit $${p.credit}</span>` : ''} | ${p.contracts_fulfilled || 0} contracts
         </div>
         <div class="opponent-rates-grid">${ratesGrid}</div>
         <div class="opponent-buildings">${buildingList}</div>

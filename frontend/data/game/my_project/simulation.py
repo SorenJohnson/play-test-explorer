@@ -2870,6 +2870,7 @@ def _execute_free_actions(state: GameState, player: Player) -> list[str]:
             revenue = rate * state.market.price(best)
             if revenue > pwr_cost:
                 state.log.begin("free:teleportation", player.name, pidx, f"Teleportation: sell {rate} {best.value}")
+                revenue = state.market.sell(best, rate)
                 player.money += revenue
                 player.rates[Resource.PWR] = player.rate(Resource.PWR) - 1
                 player.has_used_teleportation_this_turn = True

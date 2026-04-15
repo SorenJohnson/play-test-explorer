@@ -778,17 +778,32 @@ class TestTeleportation:
         p.rates[Resource.FE] = 2
         money_before = p.money
         fe_rate_before = p.rate(Resource.FE)
+        fe_price_before = game.state.market.price(Resource.FE)
+        fe_pos_before = game.state.market.positions[Resource.FE]
         pwr_rate_before = p.rate(Resource.PWR)
         result = game.use_teleportation(0, "FE")
         assert result["ok"]
-        # Player got cash equal to rate × market price (full sell)
-        fe_price = game.state.market.price(Resource.FE)
-        assert p.money == money_before + fe_rate_before * fe_price
+        # Player got cash equal to rate × market price at time of sell
+        assert p.money == money_before + fe_rate_before * fe_price_before
         # FE rate UNCHANGED (the patent says "does not effect rates" for the sold resource)
         assert p.rate(Resource.FE) == fe_rate_before
         # PWR rate decreased by 1 (the patent's cost)
         assert p.rate(Resource.PWR) == pwr_rate_before - 1
         assert p.has_used_teleportation_this_turn
+        # Market should drop by the sold amount (same as a normal sell)
+        fe_pos_after = game.state.market.positions[Resource.FE]
+        assert fe_pos_after < fe_pos_before
+
+    def test_market_drops_on_sell(self):
+        game = _make_game_with_human()
+        p = game.state.players[0]
+        p.buildings_played.append(_patent("Teleportation"))
+        p.rates[Resource.FE] = 3
+        fe_pos_before = game.state.market.positions[Resource.FE]
+        result = game.use_teleportation(0, "FE")
+        assert result["ok"]
+        # Market position should decrease by the rate (3 units sold)
+        assert game.state.market.positions[Resource.FE] == max(0, fe_pos_before - 3)
 
     def test_blocked_when_no_positive_rate(self):
         game = _make_game_with_human()
