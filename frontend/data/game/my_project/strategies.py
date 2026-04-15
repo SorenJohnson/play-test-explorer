@@ -61,15 +61,12 @@ def _score_card(card, player: Player, state) -> float:
     # Contract card value = best affordable contract score
     contract_value = 0.0
     if card.can_fulfill_contract:
-        # AI considers contracts both with and without the Space Elevator
-        # discount when valuing pool-swap candidates.
-        se_available = (
-            _count_buildings(player, "Space Elevator") > 0
-            and not player.has_used_space_elevator_this_turn
-        )
+        # Space Elevator is always-on — factor in its discount when the
+        # player owns one.
+        se_owned = _count_buildings(player, "Space Elevator") > 0
         for contract in state.available_contracts:
             effective = effective_contract_requirements(
-                player, contract, apply_elevator=se_available
+                player, contract, apply_elevator=se_owned
             )
             can_afford = all(
                 req.amount == 0 or player.rate(req.resource) >= req.amount
@@ -161,56 +158,40 @@ def random_strategy(state: GameState, player: Player) -> Action:
                         options.append(action)
                         break
 
-    # Contract enumeration: hand-card and SE paths cost 1 AP. Launch Pad is
-    # FREE, so it's enumerated regardless of AP.
-    se_available = (
-        _count_buildings(player, "Space Elevator") > 0
-        and not player.has_used_space_elevator_this_turn
-    )
+    # Contract enumeration: hand-card path costs 1 AP. Launch Pad is FREE,
+    # so it's enumerated regardless of AP. Space Elevator is always-on —
+    # the discount automatically applies inside execute_contract when owned,
+    # so we just check affordability against the effective requirements.
+    se_owned = _count_buildings(player, "Space Elevator") > 0
     lp_available = (
         _count_buildings(player, "Launch Pad") > 0
         and not player.has_used_launch_pad_this_turn
     )
     for ci, contract in enumerate(state.available_contracts):
-        # Reqs without elevator
-        plain_reqs = effective_contract_requirements(player, contract, apply_elevator=False)
-        plain_affordable = all(
-            player.rate(req.resource) >= req.amount for req in plain_reqs
+        effective = effective_contract_requirements(
+            player, contract, apply_elevator=se_owned
         )
-        # Reqs with elevator
-        if se_available:
-            disc_reqs = effective_contract_requirements(player, contract, apply_elevator=True)
-            disc_affordable = all(
-                req.amount == 0 or player.rate(req.resource) >= req.amount for req in disc_reqs
-            )
-        else:
-            disc_affordable = False
+        affordable = all(
+            req.amount == 0 or player.rate(req.resource) >= req.amount
+            for req in effective
+        )
+        if not affordable:
+            continue
 
         # Real contract-icon hand cards (cost 1 AP)
         if has_cards:
             for i, card in enumerate(player.hand):
                 if not card.can_fulfill_contract:
                     continue
-                if disc_affordable:
-                    options.append(Action(
-                        ActionType.CONTRACT, contract_card=i, contract_idx=ci, use_elevator=True
-                    ))
-                elif plain_affordable:
-                    options.append(Action(
-                        ActionType.CONTRACT, contract_card=i, contract_idx=ci
-                    ))
+                options.append(Action(
+                    ActionType.CONTRACT, contract_card=i, contract_idx=ci,
+                ))
         # Launch Pad: FREE — always enumerate when available, even at AP=0.
         if lp_available:
-            if disc_affordable:
-                options.append(Action(
-                    ActionType.CONTRACT, contract_card=-1, contract_idx=ci,
-                    use_launch_pad=True, use_elevator=True,
-                ))
-            elif plain_affordable:
-                options.append(Action(
-                    ActionType.CONTRACT, contract_card=-1, contract_idx=ci,
-                    use_launch_pad=True,
-                ))
+            options.append(Action(
+                ActionType.CONTRACT, contract_card=-1, contract_idx=ci,
+                use_launch_pad=True,
+            ))
 
     if not options:
         # No legal proposal. The "discard via sell" cycle hack only works if
@@ -998,44 +979,39 @@ def smart_greedy_strategy(state: GameState, player: Player) -> Action:
                         action.hacker_direction = hd
                 best_action = action
 
-    # Score contract options. AI uses Space Elevator and Launch Pad whenever
-    # they're available.
-    se_available = (
-        _count_buildings(player, "Space Elevator") > 0
-        and not player.has_used_space_elevator_this_turn
-    )
+    # Score contract options. Space Elevator is always-on — the discount
+    # is applied automatically inside execute_contract when the player
+    # owns one, so we evaluate affordability against the effective reqs.
+    se_owned = _count_buildings(player, "Space Elevator") > 0
     lp_available = (
         _count_buildings(player, "Launch Pad") > 0
         and not player.has_used_launch_pad_this_turn
     )
     for ci, contract in enumerate(state.available_contracts):
-        # Affordability with elevator
-        if se_available:
-            disc_reqs = effective_contract_requirements(player, contract, apply_elevator=True)
-            disc_affordable = all(
-                req.amount == 0 or player.rate(req.resource) >= req.amount for req in disc_reqs
-            )
-        else:
-            disc_affordable = False
-        plain_affordable = all(
-            player.rate(req.resource) >= req.amount for req in contract.requirements
+        effective = effective_contract_requirements(
+            player, contract, apply_elevator=se_owned
         )
+        affordable = all(
+            req.amount == 0 or player.rate(req.resource) >= req.amount
+            for req in effective
+        )
+        if not affordable:
+            continue
 
         contract_score = _smart_score_contract(state, player, contract)
-        if contract_score is None and not disc_affordable:
-            continue
         if contract_score is None:
-            # Affordable only with elevator — re-score using effective reqs
+            # _smart_score_contract only returns None when it can't afford
+            # without SE — re-score using the discounted reqs so SE-only
+            # contracts still get valued.
             from my_project.simulation import _rate_ongoing_value
             opportunity_cost = sum(
                 _rate_ongoing_value(req.resource, state, player) * req.amount
-                for req in disc_reqs
+                for req in effective
             )
             contract_score = contract.reward - opportunity_cost
         if contract_score <= best_score:
             continue
 
-        use_elev = disc_affordable  # use it whenever it's needed/available
         # Try a contract-icon hand card first (spends 1 card — only if has_cards)
         chosen = None
         if has_cards:
@@ -1045,7 +1021,6 @@ def smart_greedy_strategy(state: GameState, player: Player) -> Action:
                         ActionType.CONTRACT,
                         contract_card=i,
                         contract_idx=ci,
-                        use_elevator=use_elev and se_available,
                     )
                     break
         # Fall back to Launch Pad (FREE — works even with 0 cards remaining)
@@ -1055,9 +1030,8 @@ def smart_greedy_strategy(state: GameState, player: Player) -> Action:
                 contract_card=-1,
                 contract_idx=ci,
                 use_launch_pad=True,
-                use_elevator=use_elev and se_available,
             )
-        if chosen is not None and (plain_affordable or disc_affordable):
+        if chosen is not None:
             best_score = contract_score
             best_action = chosen
 
@@ -1113,13 +1087,10 @@ def _card_value(card, player: Player, state: GameState) -> float:
     # Contract value: best contract this card can fulfill
     contract_val = 0.0
     if card.can_fulfill_contract:
-        se_avail = (
-            _count_buildings(player, "Space Elevator") > 0
-            and not player.has_used_space_elevator_this_turn
-        )
+        se_owned = _count_buildings(player, "Space Elevator") > 0
         for contract in state.available_contracts:
             eff = effective_contract_requirements(
-                player, contract, apply_elevator=se_avail
+                player, contract, apply_elevator=se_owned
             )
             if all(req.amount == 0 or player.rate(req.resource) >= req.amount for req in eff):
                 sc = _smart_score_contract(state, player, contract)
@@ -1190,42 +1161,36 @@ def _enumerate_actions(
                 actions.append((sell_sc, action))
 
     # --- Contracts ---
-    se_avail = (
-        _count_buildings(player, "Space Elevator") > 0
-        and not player.has_used_space_elevator_this_turn
-    )
+    # Space Elevator is always-on: the discount applies in execute_contract
+    # automatically when the player owns one. Check affordability against
+    # the effective requirements.
+    se_owned = _count_buildings(player, "Space Elevator") > 0
     lp_avail = (
         _count_buildings(player, "Launch Pad") > 0
         and not player.has_used_launch_pad_this_turn
     )
     for ci, contract in enumerate(state.available_contracts):
-        # Check affordability
-        if se_avail:
-            disc_reqs = effective_contract_requirements(player, contract, apply_elevator=True)
-            disc_ok = all(r.amount == 0 or player.rate(r.resource) >= r.amount for r in disc_reqs)
-        else:
-            disc_ok = False
-        plain_ok = all(
-            player.rate(r.resource) >= r.amount for r in contract.requirements
+        effective = effective_contract_requirements(
+            player, contract, apply_elevator=se_owned
         )
-        if not plain_ok and not disc_ok:
+        affordable = all(
+            r.amount == 0 or player.rate(r.resource) >= r.amount
+            for r in effective
+        )
+        if not affordable:
             continue
 
         c_score = _smart_score_contract(state, player, contract)
         if c_score is None:
-            if disc_ok:
-                from my_project.simulation import _rate_ongoing_value
-                opp = sum(
-                    _rate_ongoing_value(r.resource, state, player) * r.amount
-                    for r in disc_reqs
-                )
-                c_score = contract.reward - opp
-            else:
-                continue
+            # Affordable only via SE — score using discounted reqs
+            from my_project.simulation import _rate_ongoing_value
+            opp = sum(
+                _rate_ongoing_value(r.resource, state, player) * r.amount
+                for r in effective
+            )
+            c_score = contract.reward - opp
         if c_score <= 0:
             continue
-
-        use_elev = disc_ok and se_avail
 
         # Path A: hand card (1 card spent)
         if cr >= 1:
@@ -1234,7 +1199,7 @@ def _enumerate_actions(
                     actions.append((
                         c_score,
                         Action(ActionType.CONTRACT, contract_card=i,
-                               contract_idx=ci, use_elevator=use_elev),
+                               contract_idx=ci),
                     ))
                     break  # one card is enough
 
@@ -1243,8 +1208,7 @@ def _enumerate_actions(
             actions.append((
                 c_score,
                 Action(ActionType.CONTRACT, contract_card=-1,
-                       contract_idx=ci, use_launch_pad=True,
-                       use_elevator=use_elev),
+                       contract_idx=ci, use_launch_pad=True),
             ))
 
 

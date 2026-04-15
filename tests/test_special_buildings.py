@@ -184,7 +184,7 @@ class TestSpaceElevator:
         ]
 
     def test_apply_elevator_false_returns_original(self):
-        """Even if the player owns SE, apply_elevator=False returns original reqs."""
+        """Callers that explicitly want plain reqs pass apply_elevator=False."""
         cards, contracts = _load()
         state = GameState.create(cards, contracts, num_players=3)
         p = state.players[0]
@@ -226,8 +226,8 @@ class TestSpaceElevator:
         assert amounts[Resource.FOOD] == 2
         assert amounts[Resource.GLS] == 0
 
-    def test_elevator_default_target_is_first_req(self):
-        """When no target is supplied, the first requirement gets the discount."""
+    def test_elevator_default_target_is_largest_req(self):
+        """When no target is supplied, the largest requirement gets the discount."""
         cards, contracts = _load()
         state = GameState.create(cards, contracts, num_players=3)
         p = state.players[0]
@@ -242,8 +242,8 @@ class TestSpaceElevator:
         )
         effective = effective_contract_requirements(p, contract, apply_elevator=True)
         amounts = {r.resource: r.amount for r in effective}
-        assert amounts[Resource.FOOD] == 1  # first req gets the -1
-        assert amounts[Resource.GLS] == 1   # second req unchanged
+        assert amounts[Resource.FOOD] == 1  # largest req gets the -1
+        assert amounts[Resource.GLS] == 1   # smaller req unchanged
 
     def test_elevator_floor_at_zero(self):
         cards, contracts = _load()
@@ -258,7 +258,8 @@ class TestSpaceElevator:
         effective = effective_contract_requirements(p, contract, apply_elevator=True)
         assert effective[0].amount == 0
 
-    def test_elevator_lets_player_fulfill_otherwise_unaffordable(self):
+    def test_elevator_applies_automatically_on_fulfill(self):
+        """SE is always-on: owning it makes otherwise-unaffordable contracts work."""
         cards, contracts = _load()
         state = GameState.create(cards, contracts, num_players=3)
         p = state.players[0]
@@ -271,29 +272,39 @@ class TestSpaceElevator:
         )
         state.available_contracts[0] = custom_contract
         p.hand = [_make_contract_card()]
-        record = execute_contract(state, p, card_idx=0, contract_idx=0, use_elevator=True)
+        record = execute_contract(state, p, card_idx=0, contract_idx=0)
         assert record is not None
         assert p.contracts_fulfilled == 1
-        assert p.has_used_space_elevator_this_turn
 
-    def test_elevator_use_blocked_after_first_use(self):
+    def test_elevator_has_no_per_turn_limit(self):
+        """Fulfilling a second contract in the same turn still gets the SE discount."""
         cards, contracts = _load()
         state = GameState.create(cards, contracts, num_players=3)
         p = state.players[0]
         p.buildings_played.append(_build_special("Space Elevator"))
-        p.has_used_space_elevator_this_turn = True
-        custom_contract = Contract(
-            requirements=[ResourceAmount(resource=Resource.FOOD, amount=1)],
-            reward=10,
-            count=1,
-        )
-        state.available_contracts[0] = custom_contract
         p.rates[Resource.FOOD] = 0
-        p.hand = [_make_contract_card()]
-        record = execute_contract(state, p, card_idx=0, contract_idx=0, use_elevator=True)
-        assert record is None  # already used this turn
+        p.rates[Resource.GLS] = 0
+        custom_a = Contract(
+            requirements=[ResourceAmount(resource=Resource.FOOD, amount=1)],
+            reward=10, count=1,
+        )
+        custom_b = Contract(
+            requirements=[ResourceAmount(resource=Resource.GLS, amount=1)],
+            reward=10, count=1,
+        )
+        state.available_contracts[0] = custom_a
+        state.available_contracts[1] = custom_b
+        p.hand = [_make_contract_card(), _make_contract_card()]
+        r1 = execute_contract(state, p, card_idx=0, contract_idx=0)
+        assert r1 is not None
+        # Second SE fulfillment in the same turn should ALSO succeed —
+        # no per-turn gate on Space Elevator any more.
+        r2 = execute_contract(state, p, card_idx=0, contract_idx=0)
+        assert r2 is not None
+        assert p.contracts_fulfilled == 2
 
-    def test_elevator_use_rejected_when_not_owned(self):
+    def test_no_elevator_cannot_afford(self):
+        """Without an SE, a contract requiring 1 FOOD at rate 0 is rejected."""
         cards, contracts = _load()
         state = GameState.create(cards, contracts, num_players=3)
         p = state.players[0]
@@ -306,26 +317,8 @@ class TestSpaceElevator:
         state.available_contracts[0] = custom_contract
         p.rates[Resource.FOOD] = 0
         p.hand = [_make_contract_card()]
-        record = execute_contract(state, p, card_idx=0, contract_idx=0, use_elevator=True)
-        assert record is None
-
-    def test_elevator_default_off_does_not_discount(self):
-        """When use_elevator is not passed, the discount doesn't apply even if owned."""
-        cards, contracts = _load()
-        state = GameState.create(cards, contracts, num_players=3)
-        p = state.players[0]
-        p.buildings_played.append(_build_special("Space Elevator"))
-        custom_contract = Contract(
-            requirements=[ResourceAmount(resource=Resource.FOOD, amount=1)],
-            reward=10,
-            count=1,
-        )
-        state.available_contracts[0] = custom_contract
-        p.rates[Resource.FOOD] = 0
-        p.hand = [_make_contract_card()]
-        # Without use_elevator, the FOOD requirement isn't discounted
         record = execute_contract(state, p, card_idx=0, contract_idx=0)
-        assert record is None  # 0 < 1, can't afford
+        assert record is None
 
 
 # --- Optimization Center ---
@@ -655,7 +648,7 @@ class TestLaunchPad:
         assert p.rate(Resource.GLS) == 0  # 1 - 1
 
     def test_launch_pad_combos_with_space_elevator(self):
-        """Both flags can apply to the same fulfillment."""
+        """Launch Pad + Space Elevator: SE auto-applies, LP skips the card cost."""
         cards, contracts = _load()
         state = GameState.create(cards, contracts, num_players=3)
         p = state.players[0]
@@ -667,14 +660,13 @@ class TestLaunchPad:
             count=1,
         )
         state.available_contracts[0] = custom_contract
-        # Player has 0 FE — only the SE discount makes it affordable
+        # Player has 0 FE — only the SE discount (always-on) makes it affordable
         p.rates[Resource.FE] = 0
         record = execute_contract(
             state, p, card_idx=-1, contract_idx=0,
-            use_launch_pad=True, use_elevator=True,
+            use_launch_pad=True,
         )
         assert record is not None
         assert p.has_used_launch_pad_this_turn
-        assert p.has_used_space_elevator_this_turn
 
 

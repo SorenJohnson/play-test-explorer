@@ -178,7 +178,7 @@ class Player:
     has_built_this_turn: bool = False
     # Special-building per-turn flags (each is a "use once per turn"
     # capability that refreshes between turns, NOT a one-shot consumable).
-    has_used_space_elevator_this_turn: bool = False
+    # Space Elevator is NOT here: it's always-on, applied to every contract.
     has_used_launch_pad_this_turn: bool = False
     has_used_optimization_center_this_turn: bool = False
     # Active-patent per-turn flags (same shape).
@@ -606,7 +606,6 @@ class Action:
     contract_card: int = -1  # index of card to use for contract
     contract_idx: int = -1  # index into available_contracts
     # Special-building flags carried through to execute_*:
-    use_elevator: bool = False     # consume Space Elevator's per-turn discount
     use_launch_pad: bool = False   # use Launch Pad as the contract icon source
     elevator_target: str = ""      # which contract requirement to discount (resource value)
     # Per-sell Hacker Array choice (used by execute_sell when set)
@@ -1193,7 +1192,6 @@ def execute_contract(
     card_idx: int,
     contract_idx: int,
     *,
-    use_elevator: bool = False,
     use_launch_pad: bool = False,
     elevator_target: str | None = None,
 ) -> ActionRecord | None:
@@ -1209,10 +1207,11 @@ def execute_contract(
        `has_used_launch_pad_this_turn` (only one Launch Pad contract per
        turn). `card_idx` is ignored.
 
-    `use_elevator=True`: applies a one-time -1 to ONE resource (Space
-    Elevator's per-turn discount). The resource is `elevator_target`
-    (e.g. "FE"); if not provided, defaults to the first requirement.
-    Also gated by the per-turn flag. Combines with both paths.
+    Space Elevator: if the player owns one, the contract always gets -1
+    to ONE resource (floor at 0). The player picks which resource via
+    `elevator_target` (e.g. "FE"); if not provided, defaults to the
+    largest requirement (best default for AI). There is no per-turn
+    limit — every contract fulfilled while SE is owned gets the discount.
 
     Returns ActionRecord on success, None if any precondition fails
     (including insufficient action points).
@@ -1242,16 +1241,10 @@ def execute_contract(
         if not player.hand[card_idx].can_fulfill_contract:
             return None
 
-    # Validate Space Elevator path
-    if use_elevator:
-        if player.has_used_space_elevator_this_turn:
-            return None
-        if _count_buildings(player, "Space Elevator") == 0:
-            return None
-
-    # Apply Space Elevator discount only if requested
+    # Space Elevator always applies if the player owns one.
+    has_elevator = _count_buildings(player, "Space Elevator") > 0
     effective_reqs = effective_contract_requirements(
-        player, contract, apply_elevator=use_elevator, elevator_target=elevator_target
+        player, contract, apply_elevator=has_elevator, elevator_target=elevator_target
     )
 
     # Check if player can afford the (discounted) rate costs.
@@ -1297,8 +1290,6 @@ def execute_contract(
         state.deck.discard.append(player.hand.pop(card_idx))
 
     # Set per-turn flags
-    if use_elevator:
-        player.has_used_space_elevator_this_turn = True
     if use_launch_pad:
         player.has_used_launch_pad_this_turn = True
     # Count hand cards spent toward per-turn cap
@@ -1308,10 +1299,15 @@ def execute_contract(
     # (the discount is reflected in rates_spent for analytics).
     req_str = ", ".join(f"{r.amount} {r.resource.value}" for r in contract.requirements)
     label = req_str
-    if use_elevator:
-        # Pick which resource was discounted for the log
-        target = elevator_target or (contract.requirements[0].resource.value if contract.requirements else "")
-        label += f" [SE -1 {target}]" if target else " [SE -1]"
+    if has_elevator and contract.requirements:
+        # Pick which resource was discounted for the log. Matches the
+        # default-target logic in effective_contract_requirements.
+        if elevator_target:
+            target = elevator_target
+        else:
+            largest = max(contract.requirements, key=lambda r: r.amount)
+            target = largest.resource.value
+        label += f" [SE -1 {target}]"
     if use_launch_pad:
         label += " [LP]"
 
@@ -1604,16 +1600,14 @@ def effective_contract_requirements(
 ) -> list[ResourceAmount]:
     """Return contract requirements, optionally with Space Elevator -1.
 
-    Space Elevator gives -1 to ONE resource on the contract (player's pick),
-    not -1 across the board. The discount only applies if:
+    Space Elevator gives -1 to ONE resource on the contract. The discount
+    applies whenever:
       - the player owns a Space Elevator
-      - `apply_elevator` is True (caller controls per-turn limit)
-      - `elevator_target` is the resource value of one of the contract's
-        requirements (e.g. "FE" for a contract requiring 2 FE)
+      - `apply_elevator` is True (callers that want plain reqs pass False)
 
-    If `elevator_target` is None, the function falls back to discounting the
-    FIRST requirement on the contract — useful for AI players that don't pick.
-    Floor at 0.
+    Space Elevator is always-on (no per-turn limit). `elevator_target` is
+    the resource value of one of the contract's requirements (e.g. "FE");
+    if None, defaults to the LARGEST requirement (best auto-pick). Floor at 0.
     """
     if not apply_elevator or _count_buildings(player, "Space Elevator") == 0:
         return list(contract.requirements)
@@ -1629,7 +1623,7 @@ def effective_contract_requirements(
                 target_idx = i
                 break
     else:
-        # AI: discount the largest requirement
+        # Default: discount the largest requirement
         best_amount = -1
         for i, req in enumerate(contract.requirements):
             if req.amount > best_amount:
@@ -1642,14 +1636,6 @@ def effective_contract_requirements(
         else:
             out.append(ResourceAmount(resource=req.resource, amount=req.amount))
     return out
-
-
-def can_use_space_elevator(player: Player) -> bool:
-    """True iff the player owns a Space Elevator and hasn't used it this turn."""
-    return (
-        _count_buildings(player, "Space Elevator") > 0
-        and not player.has_used_space_elevator_this_turn
-    )
 
 
 def can_use_launch_pad(player: Player) -> bool:
@@ -2089,7 +2075,12 @@ def do_news_bulletin(state: GameState, active_player: Player) -> str:
 def do_draw_building_card(state: GameState) -> str:
     """Refresh the pool by drawing a fresh card from the building deck.
 
-    Pool size stays at POOL_SIZE: the new card replaces the oldest pool slot.
+    Pool size stays at POOL_SIZE. The new card replaces the oldest pool
+    card with the SAME slot as the drawn card (so a slot-2 draw always
+    replaces a slot-2 pool card). If no pool card matches the drawn
+    card's slot, fall back to evicting the oldest pool card (FIFO).
+    Both the drawn slot and the index of the replacement are recorded in
+    the structured event data for the debug log.
     """
     if not state.deck.cards and not state.deck.discard:
         _record_event_line(state, kind="header", text="Draw Building Card (deck empty)")
@@ -2100,17 +2091,61 @@ def do_draw_building_card(state: GameState) -> str:
         return "draw building card (deck empty)"
     new_card = drawn[0]
     evicted_name = None
+    evicted_slot: int | None = None
+    replaced_pool_idx: int | None = None
+    replaced_via_fallback = False
     if state.pool:
-        evicted = state.pool.pop(0)
-        state.deck.discard.append(evicted)
+        # Find the first pool card whose slot matches the drawn card's
+        # slot. This keeps the pool visually stable: a slot-2 draw
+        # replaces a slot-2 card in place. If nothing matches, fall back
+        # to FIFO eviction of the oldest pool card.
+        slot_match_idx = next(
+            (i for i, c in enumerate(state.pool) if c.slot == new_card.slot),
+            None,
+        )
+        if slot_match_idx is not None:
+            evict_idx = slot_match_idx
+        else:
+            evict_idx = 0  # FIFO fallback — no matching slot in pool
+            replaced_via_fallback = True
+        evicted = state.pool[evict_idx]
         evicted_name = evicted.building
-    state.pool.append(new_card)
-    evict_text = f" (replaced {evicted_name})" if evicted_name else ""
-    _record_event_line(state, kind="header", text=f"Drew {new_card.building} into pool{evict_text}")
+        evicted_slot = evicted.slot
+        replaced_pool_idx = evict_idx
+        # Swap in place so the pool slot order stays stable. CardZone
+        # logs this as a single-index mutation, matching the event's
+        # actual semantics better than pop+append.
+        state.pool[evict_idx] = new_card
+        state.deck.discard.append(evicted)
+    else:
+        state.pool.append(new_card)
+    evict_text = (
+        f" (replaced {evicted_name} @slot {evicted_slot})"
+        if evicted_name is not None
+        else ""
+    )
+    _record_event_line(
+        state, kind="header",
+        text=f"Drew {new_card.building} (slot {new_card.slot}) into pool{evict_text}",
+    )
+    # Debug line so the mutation log makes the slot mapping obvious.
+    if replaced_pool_idx is not None:
+        fallback_note = " [fallback: no slot match, FIFO]" if replaced_via_fallback else ""
+        _record_event_line(
+            state, kind="detail",
+            text=(
+                f"  slot {new_card.slot} → pool[{replaced_pool_idx}] "
+                f"(evicted slot {evicted_slot}){fallback_note}"
+            ),
+        )
     # Store structured data
     state._draw_card_data = {
         "card_drawn": new_card.building,
+        "card_drawn_slot": new_card.slot,
         "card_replaced": evicted_name,
+        "card_replaced_slot": evicted_slot,
+        "pool_idx": replaced_pool_idx,
+        "replaced_via_fallback": replaced_via_fallback,
         "rates": [{
             "resource": ra.resource.value,
             "amount": ra.amount,
@@ -2348,6 +2383,18 @@ def _patent_to_dict(patent: Card) -> dict:
     }
 
 
+def _is_terminal_event(event: EventCard) -> bool:
+    """True for END_ROUND / END_GAME events, which stop redraw chains.
+
+    A redraw chain never consumes the terminal card: the terminal card
+    is always its own player turn. If the chain is allowed to eat the
+    terminal, a 2-player game can end up with an odd number of player
+    turns in a round, skipping one player's last turn AND bypassing the
+    end-of-round reshuffle (because the primary event wasn't END_ROUND).
+    """
+    return event.type in (EventType.END_ROUND, EventType.END_GAME)
+
+
 def execute_event_with_redraws(
     state: GameState,
     event: EventCard,
@@ -2360,8 +2407,9 @@ def execute_event_with_redraws(
     long as each fired card has `redraws=True`. The deck is sized in
     build_event_deck to account for these extra consumptions.
 
-    Redraws may chain into END_GAME, which fires its effects inline as part
-    of the same player-turn. The detail string concatenates each fired event.
+    Redraw chains STOP before END_ROUND / END_GAME: the terminal card
+    stays in the deck and becomes the next player's turn. This keeps
+    player-turn counts even and preserves round-end reshuffle.
 
     Mid-event interruptions: if any event in the chain needs human input
     (via _event_needs_prompt), the function pauses by setting
@@ -2384,6 +2432,9 @@ def execute_event_with_redraws(
     detail = execute_event(state, event, active_player)
     while event.redraws and state.event_idx < len(state.event_deck):
         next_event = state.event_deck[state.event_idx]
+        # Never chain into a terminal event — leave it for its own turn.
+        if _is_terminal_event(next_event):
+            break
         # Pause-check before firing the next chained event
         next_prompt = _event_needs_prompt(state, next_event)
         if next_prompt is not None and _has_human_player(state):
@@ -2427,6 +2478,9 @@ def resume_pending_event(state: GameState, active_player: Player) -> str:
     # If the suspended event was a redraw card, continue the chain
     while chain_active and state.event_idx < len(state.event_deck):
         next_event = state.event_deck[state.event_idx]
+        # Never chain into a terminal event — leave it for its own turn.
+        if _is_terminal_event(next_event):
+            break
         next_prompt = _event_needs_prompt(state, next_event)
         if next_prompt is not None and _has_human_player(state):
             state.event_idx += 1
@@ -2453,7 +2507,11 @@ def _build_event_structured(
     if event_type == EventType.DRAW_BUILDING_CARD:
         draw_data = getattr(state, "_draw_card_data", None) or {}
         d["card_drawn"] = draw_data.get("card_drawn", "")
+        d["card_drawn_slot"] = draw_data.get("card_drawn_slot")
         d["card_replaced"] = draw_data.get("card_replaced")
+        d["card_replaced_slot"] = draw_data.get("card_replaced_slot")
+        d["pool_idx"] = draw_data.get("pool_idx")
+        d["replaced_via_fallback"] = draw_data.get("replaced_via_fallback", False)
         d["card_rates"] = draw_data.get("rates", [])
         d["card_costs"] = draw_data.get("costs", [])
         d["card_effect"] = draw_data.get("effect")
@@ -2608,7 +2666,6 @@ def _execute_action(state: GameState, player: Player, action: Action) -> ActionR
             player,
             action.contract_card,
             action.contract_idx,
-            use_elevator=action.use_elevator,
             use_launch_pad=action.use_launch_pad,
             elevator_target=action.elevator_target or None,
         )
@@ -2922,7 +2979,6 @@ def reset_per_turn_flags(player: Player) -> None:
     begin_human_turn, and step_ai_turn (play adapter).
     """
     player.has_built_this_turn = False
-    player.has_used_space_elevator_this_turn = False
     player.has_used_launch_pad_this_turn = False
     player.has_used_optimization_center_this_turn = False
     player.has_used_water_engine_this_turn = False
@@ -3068,9 +3124,14 @@ def run_game(
 
         # Chain redraw events: execute event only (no actions).
         # Merge chained event details into the parent turn's history record.
+        # Chains stop before END_ROUND/END_GAME — the terminal is always its
+        # own player turn so reshuffle/turn counts stay correct.
         event = primary_event
         while event.redraws and state.event_idx < len(state.event_deck):
-            event = state.event_deck[state.event_idx]
+            peek = state.event_deck[state.event_idx]
+            if _is_terminal_event(peek):
+                break
+            event = peek
             state.event_idx += 1
             chain_detail = execute_event(state, event, player)
             if state.history:

@@ -242,17 +242,69 @@ class TestNewsBulletin:
 
 
 class TestDrawBuildingCard:
-    def test_draw_building_replaces_pool_slot(self):
-        """A draw_building_card event swaps the oldest pool card for a new one."""
+    def test_draw_building_replaces_matching_slot_in_place(self):
+        """A draw_building_card event replaces an existing pool card with
+        the SAME slot as the drawn card, in place. With a controlled
+        pool and a stacked deck we can verify the exact slot-based
+        eviction behavior and the structured debug data."""
+        from my_project.models import Card as _Card
         cards, contracts = _load()
         state = GameState.create(cards, contracts)
-        oldest = state.pool[0]
-        old_pool_size = len(state.pool)
-        draw = _ec(EventType.DRAW_BUILDING_CARD)
-        execute_event(state, draw, state.players[0])
-        assert len(state.pool) == old_pool_size  # size preserved
-        # The oldest card is no longer at position 0
-        assert state.pool[0] is not oldest
+
+        # Build a controlled pool: [slot1, slot2, slot3, slot4] so each
+        # slot is represented exactly once.
+        def _mk(slot: int, name: str) -> _Card:
+            return _Card(
+                alternate="H2O/FE", slot=slot, building=name,
+                costs=[], rates=[], effect="",
+                can_sell=[Resource.H2O], can_fulfill_contract=False,
+            )
+        state.pool.replace([_mk(1, "S1"), _mk(2, "S2"), _mk(3, "S3"), _mk(4, "S4")])
+
+        # Stack the deck so the next draw is a slot-3 card
+        forced = _mk(3, "S3_new")
+        state.deck.cards.append(forced)
+
+        execute_event(state, _ec(EventType.DRAW_BUILDING_CARD), state.players[0])
+
+        # The slot-3 card was replaced IN PLACE at index 2
+        assert len(state.pool) == 4
+        assert state.pool[0].building == "S1"
+        assert state.pool[1].building == "S2"
+        assert state.pool[2].building == "S3_new"
+        assert state.pool[3].building == "S4"
+        # Structured data exposes the slot info for the debug log
+        data = state._last_event_data
+        assert data["card_drawn_slot"] == 3
+        assert data["card_replaced_slot"] == 3
+        assert data["pool_idx"] == 2
+        assert data["replaced_via_fallback"] is False
+
+    def test_draw_building_falls_back_to_fifo_when_no_slot_match(self):
+        """If no pool card shares the drawn card's slot, fall back to
+        evicting the oldest pool card (index 0)."""
+        from my_project.models import Card as _Card
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts)
+
+        def _mk(slot: int, name: str) -> _Card:
+            return _Card(
+                alternate="H2O/FE", slot=slot, building=name,
+                costs=[], rates=[], effect="",
+                can_sell=[Resource.H2O], can_fulfill_contract=False,
+            )
+        # Pool has only slot-1 cards; drawn card is slot 3 → no match
+        state.pool.replace([_mk(1, "A"), _mk(1, "B"), _mk(1, "C"), _mk(1, "D")])
+        state.deck.cards.append(_mk(3, "S3"))
+
+        execute_event(state, _ec(EventType.DRAW_BUILDING_CARD), state.players[0])
+
+        # FIFO: index 0 evicted
+        assert state.pool[0].building == "S3"
+        assert state.pool[1].building == "B"
+        data = state._last_event_data
+        assert data["replaced_via_fallback"] is True
+        assert data["pool_idx"] == 0
 
 
 # --- Redraw cascade ---
@@ -294,8 +346,11 @@ class TestRedrawCascade:
         execute_event_with_redraws(state, event, state.players[0])
         assert state.event_idx == 1  # only the no-op consumed
 
-    def test_redraw_chain_can_reach_end_game(self):
-        """If a redraw card is the second-to-last in the deck, it chains into END_GAME."""
+    def test_redraw_chain_stops_before_end_game(self):
+        """Redraw chains never consume END_GAME/END_ROUND — the terminal
+        card is always its own player turn. This prevents 2-player games
+        from skipping a player's last turn when a redraw happens to land
+        immediately before the terminal."""
         cards, contracts = _load()
         custom = [
             _ec(EventType.NO_EVENT, redraws=True),
@@ -305,8 +360,27 @@ class TestRedrawCascade:
         event = state.event_deck[state.event_idx]
         state.event_idx += 1
         detail = execute_event_with_redraws(state, event, state.players[0])
-        assert "END GAME" in detail
-        assert state.event_idx == 2
+        # The chain fired the NO_EVENT redraw card but did NOT chain into END_GAME.
+        assert "END GAME" not in detail
+        # event_idx advanced past the redraw but NOT past the terminal
+        assert state.event_idx == 1
+
+    def test_redraw_chain_stops_before_end_round(self):
+        """Same behavior for END_ROUND: a redraw chain leaves the terminal
+        in the deck so the next player's turn gets it (and reshuffle fires)."""
+        cards, contracts = _load()
+        custom = [
+            _ec(EventType.NO_EVENT, redraws=True),
+            _ec(EventType.END_ROUND),
+            _ec(EventType.END_GAME),
+        ]
+        state = GameState.create(cards, contracts, num_players=3, event_deck=custom)
+        event = state.event_deck[state.event_idx]
+        state.event_idx += 1
+        detail = execute_event_with_redraws(state, event, state.players[0])
+        assert "END OF ROUND" not in detail
+        # event_idx advanced past the redraw but NOT past END_ROUND
+        assert state.event_idx == 1
 
 
 # --- PATENT_AUCTION (silent auction with bid heuristic) ---
