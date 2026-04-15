@@ -390,17 +390,28 @@ class PlayableGame:
         Call AFTER executing the primary event. Captures the primary
         event's structured data before chaining overwrites it.
 
+        Chains STOP before END_ROUND / END_GAME: the terminal card stays
+        in the deck and becomes the next player's turn. This keeps
+        player-turn counts even and preserves round-end reshuffle
+        (which only fires when the primary event of a turn is END_ROUND).
+
         Returns (combined_detail_string, chained_event_dicts, primary_structured_data).
         """
         # Capture primary event's structured data before chaining overwrites it
         primary_data = getattr(self.state, "_last_event_data", None)
         primary_structured = dict(primary_data) if primary_data else {}
 
-        from my_project.simulation import _event_needs_prompt, _has_human_player
+        from my_project.simulation import (
+            _event_needs_prompt, _has_human_player, _is_terminal_event,
+        )
         details = []
         chained_events = []
         while event.redraws and self.state.event_idx < len(self.state.event_deck):
-            event = self.state.event_deck[self.state.event_idx]
+            peek = self.state.event_deck[self.state.event_idx]
+            # Never chain into a terminal event — leave it for its own turn.
+            if _is_terminal_event(peek):
+                break
+            event = peek
 
             # Check if this chained event needs a prompt BEFORE executing.
             # If so, suspend and let resume_pending_event handle it.
@@ -522,7 +533,6 @@ class PlayableGame:
         if atype == "contract":
             card_idx = action.get("card_idx", -1)
             contract_idx = action.get("contract_idx", -1)
-            use_elevator = bool(action.get("use_elevator", False))
             use_launch_pad = bool(action.get("use_launch_pad", False))
             elevator_target = action.get("elevator_target") or None
             # Card-spend check (Launch Pad is free; hand card costs 1)
@@ -547,7 +557,6 @@ class PlayableGame:
                 player,
                 card_idx,
                 contract_idx,
-                use_elevator=use_elevator,
                 use_launch_pad=use_launch_pad,
                 elevator_target=elevator_target,
             )
@@ -1061,18 +1070,20 @@ class PlayableGame:
     def state_for_seat(self, seat_idx: int) -> dict:
         """Serialize game state filtered for a specific seat's perspective.
 
-        Reveals hand only when it's that seat's turn and the seat is human.
-        Used by the multiplayer host to send per-client state.
+        The seat's OWN hand is always revealed (so the client view matches
+        the host view for that player — the player can see their own hand
+        regardless of whose turn it is). Other human players' hands stay
+        hidden. Used by the multiplayer host to send per-client state.
         """
         s = self.state
-        cur_idx = self.current_player_index() if not self.is_over() else -1
         d = self.state_dict()
-        # Re-build players list with hand reveal filtered for this seat
+        # Re-build players list with hand reveal filtered for this seat.
+        # Reveal only this seat's own hand, always (not just on their turn).
         d["players"] = [
             _player_dict(
                 p,
                 is_human=(i in self._human_indices),
-                reveal_hand=(i == seat_idx and i == cur_idx and i in self._human_indices),
+                reveal_hand=(i == seat_idx and i in self._human_indices),
             )
             for i, p in enumerate(s.players)
         ]
@@ -1104,7 +1115,7 @@ class PlayableGame:
                 "affordable_single_builds": [],
                 "can_sell": [],
                 "can_contract": [],
-                "space_elevator_status": {"owned": False, "used": False, "available": False},
+                "space_elevator_status": {"owned": False},
                 "launch_pad_status": {"owned": False, "used": False, "available": False},
                 "hacker_array_status": {"owned": False},
                 "optimization_center_status": {
@@ -1166,7 +1177,6 @@ class PlayableGame:
 
         # Special-building consumable status
         se_owned = _count_buildings(player, "Space Elevator") > 0
-        se_used = player.has_used_space_elevator_this_turn
         lp_owned = _count_buildings(player, "Launch Pad") > 0
         lp_used = player.has_used_launch_pad_this_turn
         ha_owned = _count_buildings(player, "Hacker Array") > 0
@@ -1177,28 +1187,34 @@ class PlayableGame:
             if r != Resource.PWR and player.rate(r) > 0
         ]
 
-        # Contract-fulfillable combinations. Each entry includes flags for
-        # which special-building paths it requires. With the new SE semantics
-        # (-1 to ONE resource), we enumerate per-resource elevator picks too.
-        # Path A (hand card) costs 1 AP; Path B (Launch Pad) is free, so LP
-        # entries are emitted regardless of AP.
+        # Contract-fulfillable combinations. Space Elevator is always-on
+        # (no per-turn limit, applies automatically to every fulfillment
+        # when the player owns one). For multi-resource contracts we
+        # enumerate a valid_elevator_targets list so the UI can prompt the
+        # player to pick. Path A (hand card) costs 1 AP; Path B (Launch
+        # Pad) is free so LP entries are emitted regardless of AP.
         can_contract: list[dict] = []
         for j, contract in enumerate(self.state.available_contracts):
-            plain_reqs = effective_contract_requirements(player, contract, apply_elevator=False)
-            plain_ok = all(player.rate(req.resource) >= req.amount for req in plain_reqs)
-
-            # Per-resource SE picks: which targets make this contract affordable?
-            se_targets: list[str] = []
-            if se_owned and not se_used:
+            # Is this contract affordable using the player's best SE pick
+            # (or no SE at all if they don't own one)?
+            if se_owned:
+                # Try each per-resource pick; valid ones let the UI prompt.
+                valid_targets: list[str] = []
                 for req in contract.requirements:
                     target = req.resource.value
                     disc_reqs = effective_contract_requirements(
                         player, contract, apply_elevator=True, elevator_target=target
                     )
                     if all(r.amount == 0 or player.rate(r.resource) >= r.amount for r in disc_reqs):
-                        se_targets.append(target)
-
-            if not plain_ok and not se_targets:
+                        valid_targets.append(target)
+                contract_affordable = len(valid_targets) > 0
+            else:
+                valid_targets = []
+                contract_affordable = all(
+                    player.rate(req.resource) >= req.amount
+                    for req in contract.requirements
+                )
+            if not contract_affordable:
                 continue
 
             # Path A — hand cards (spends 1 card)
@@ -1206,32 +1222,18 @@ class PlayableGame:
                 for i, card in enumerate(player.hand):
                     if not card.can_fulfill_contract:
                         continue
-                    if plain_ok:
-                        can_contract.append({
-                            "card_idx": i, "contract_idx": j,
-                            "use_elevator": False, "use_launch_pad": False,
-                            "elevator_target": "",
-                        })
-                    for target in se_targets:
-                        can_contract.append({
-                            "card_idx": i, "contract_idx": j,
-                            "use_elevator": True, "use_launch_pad": False,
-                            "elevator_target": target,
-                        })
+                    can_contract.append({
+                        "card_idx": i, "contract_idx": j,
+                        "use_launch_pad": False,
+                        "valid_elevator_targets": valid_targets,
+                    })
             # Path B — Launch Pad (FREE, no AP cost; still gated by per-turn flag)
             if lp_owned and not lp_used:
-                if plain_ok:
-                    can_contract.append({
-                        "card_idx": -1, "contract_idx": j,
-                        "use_elevator": False, "use_launch_pad": True,
-                        "elevator_target": "",
-                    })
-                for target in se_targets:
-                    can_contract.append({
-                        "card_idx": -1, "contract_idx": j,
-                        "use_elevator": True, "use_launch_pad": True,
-                        "elevator_target": target,
-                    })
+                can_contract.append({
+                    "card_idx": -1, "contract_idx": j,
+                    "use_launch_pad": True,
+                    "valid_elevator_targets": valid_targets,
+                })
 
         # Active patent status (Water Engine, Nanotechnology, Teleportation)
         # Each entry: owned + available (owned & not used & any other gates).
@@ -1283,7 +1285,7 @@ class PlayableGame:
             "affordable_single_builds": affordable,
             "can_sell": can_sell,
             "can_contract": can_contract,
-            "space_elevator_status": {"owned": se_owned, "used": se_used, "available": se_owned and not se_used},
+            "space_elevator_status": {"owned": se_owned},
             "launch_pad_status": {"owned": lp_owned, "used": lp_used, "available": lp_owned and not lp_used},
             "hacker_array_status": {"owned": ha_owned},
             "optimization_center_status": {

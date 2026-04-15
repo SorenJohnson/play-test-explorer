@@ -205,14 +205,26 @@ class TestDefaultAiBid:
         assert bid % 5 == 0
 
     def test_bid_scales_with_patent_value(self):
-        """Higher-rate patents draw bigger bids."""
+        """Higher-rate patents draw bigger bids, averaged over several
+        samples so per-call jitter in _default_ai_bid (±$10 noise) can't
+        flip the comparison when a low-value patent's target rounds up
+        to meet a high-value patent's lower-bound."""
+        import random as _random
         cards, contracts = _load()
         state = GameState.create(cards, contracts, num_players=3)
         state.players[0].money = 100
         state.players[0].debt = 0
-        weak = _default_ai_bid(state, state.players[0], _patent("Weak", rates=[(Resource.PWR, 1)]))
-        strong = _default_ai_bid(state, state.players[0], _patent("Strong", rates=[(Resource.PWR, 4)]))
-        assert strong > weak
+        _random.seed(12345)
+        samples = 20
+        weak_total = sum(
+            _default_ai_bid(state, state.players[0], _patent("Weak", rates=[(Resource.PWR, 1)]))
+            for _ in range(samples)
+        )
+        strong_total = sum(
+            _default_ai_bid(state, state.players[0], _patent("Strong", rates=[(Resource.PWR, 4)]))
+            for _ in range(samples)
+        )
+        assert strong_total > weak_total
 
     def test_minimum_bid_floor(self):
         """A patent with positive rates always gets at least the $5 minimum bid."""

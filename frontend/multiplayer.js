@@ -617,12 +617,24 @@ function handleRemoteEndTurn(peerId) {
 
   const result = game.end_human_turn().toJs({dict_converter: Object.fromEntries});
   const snap = game.state_dict().toJs({dict_converter: Object.fromEntries});
+  const playerSnaps = snap.players.map(p => ({name: p.name, money: p.money, debt: p.debt, net_worth: p.net_worth}));
+  const evData = result.structured || snap.last_event_data || {};
   addEventFeedEntries(
     result.detail || "Turn ended",
-    (snap.last_event_lines || []).map(l => Object.assign({}, l)),
-    snap.players.map(p => ({name: p.name, money: p.money, debt: p.debt, net_worth: p.net_worth})),
-    snap.last_event_data || {},
+    (result.lines || snap.last_event_lines || []).map(l => Object.assign({}, l)),
+    playerSnaps,
+    evData,
   );
+  // Render chained (redraw) events as separate feed entries. Missing this
+  // on the remote-end-turn path meant redraws never showed up on either
+  // the host feed or the client feed when a remote player ended their turn.
+  const chained = result.chained_events || [];
+  for (const ce of chained) {
+    const ceData = ce.structured || {};
+    ceData._is_redraw = true;
+    const ceLines = ce.lines || [];
+    addEventFeedEntries(ce.detail, ceLines, playerSnaps, ceData);
+  }
 
   if (result.awaiting_prompt) {
     hostRefreshState();
@@ -1252,6 +1264,9 @@ function renderContracts(s) {
         const ci = parseInt(el.dataset.ci);
         selectedContract = selectedContract === ci ? -1 : ci;
         renderContracts(s);
+        // Re-render actions so the Space Elevator resource picker
+        // updates to reflect the newly-selected contract's requirements.
+        renderActions(s);
       });
     });
   }
@@ -1304,19 +1319,17 @@ function renderHand(s) {
     return `<div class="hand-card ${sel} ${inactive}" data-hi="${i}">${renderCard(c)}</div>`;
   }).join("");
 
-  // Build cost estimate
+  // Build cost estimate — computed locally so the host and client views
+  // match. Mirrors compute_build_deficit in simulation.py.
   const estimateEl = document.getElementById("mp-build-estimate");
-  if (selectedCards.size > 0 && myTurn && role === "host") {
-    try {
-      const indices = [...selectedCards];
-      const est = game.estimate_build_cost(pyodide.toPy(indices)).toJs({dict_converter: Object.fromEntries});
-      if (est.ok) {
-        const defParts = Object.entries(est.deficit || {}).map(([r, a]) => `${a} ${r}`).join(", ");
-        estimateEl.innerHTML = `Build cost: <strong>$${est.cost}</strong>${defParts ? ` (buy ${defParts})` : ' (free)'}`;
-      } else {
-        estimateEl.innerHTML = `<span style="color:#f85149">${est.reason || 'Cannot build'}</span>`;
-      }
-    } catch { estimateEl.textContent = ""; }
+  if (selectedCards.size > 0 && myTurn) {
+    const est = estimateBuildCostLocal(s, [...selectedCards]);
+    if (est.ok) {
+      const defParts = Object.entries(est.deficit || {}).map(([r, a]) => `${a} ${r}`).join(", ");
+      estimateEl.innerHTML = `Build cost: <strong>$${est.cost}</strong>${defParts ? ` (buy ${defParts})` : ' (free)'}`;
+    } else {
+      estimateEl.innerHTML = `<span style="color:#f85149">${est.reason || 'Cannot build'}</span>`;
+    }
   } else {
     estimateEl.textContent = "";
   }
@@ -1356,6 +1369,43 @@ function executePoolSwap(handIdx, poolIdx) {
     animateCard(handRect, poolRect, handHtml);
     animateCard(poolRect, handRect, poolHtml);
   }
+}
+
+// Mirrors compute_build_deficit() in simulation.py. Runs on both host and
+// client so build cost estimates render identically regardless of role.
+function estimateBuildCostLocal(state, indices) {
+  const me = state?.players?.[mySeat];
+  if (!me) return {ok: false, reason: "No state"};
+  if (state.human_already_built && !currentLegal?.matter_replication) {
+    return {ok: false, reason: "Already built this turn"};
+  }
+  if (!indices.length) return {ok: false, reason: "No cards selected"};
+  const cards = indices.map(i => me.hand?.[i]).filter(Boolean);
+  if (cards.length !== indices.length) return {ok: false, reason: "Invalid selection"};
+
+  // Sum cost resources across selected cards
+  const combined = {};
+  for (const c of cards) {
+    for (const ra of (c.costs || [])) {
+      combined[ra.resource] = (combined[ra.resource] || 0) + ra.amount;
+    }
+  }
+  // Deduct player rate (floor at 0 — negative rates don't help)
+  const deficit = {};
+  for (const [res, total] of Object.entries(combined)) {
+    const rate = Math.max(0, me.rates?.[res] || 0);
+    const d = Math.max(0, total - rate);
+    if (d > 0) deficit[res] = d;
+  }
+  let cost = 0;
+  for (const [res, amount] of Object.entries(deficit)) {
+    const price = state.market?.[res] || 0;
+    cost += price * amount;
+  }
+  if (cost > (me.money || 0)) {
+    return {ok: false, reason: "Cannot afford", cost};
+  }
+  return {ok: true, cost, deficit};
 }
 
 function renderCard(c) {
@@ -1590,14 +1640,40 @@ function renderSpecialToggles(s) {
   if (!myTurn || !currentLegal) { host.innerHTML = ""; return; }
 
   const parts = [];
+  // Space Elevator is always-on when owned. For a selected contract with
+  // more than one requirement, show a picker so the player chooses which
+  // resource gets the -1. For single-req contracts (or no selection),
+  // just show the status so the player knows it will apply.
   const se = currentLegal.space_elevator_status;
   if (se?.owned) {
-    parts.push(`
-      <label class="toggle-label">
-        <input type="checkbox" id="toggle-se" ${se.available ? "" : "disabled"}>
-        Space Elevator (reduce 1 contract req)
-      </label>
-    `);
+    const contract = selectedContract >= 0
+      ? s.available_contracts?.[selectedContract]
+      : null;
+    const reqs = contract?.requirements || [];
+    if (reqs.length > 1) {
+      const opts = reqs.map(r =>
+        `<option value="${r.resource}">-1 ${r.resource} (was ${r.amount})</option>`
+      ).join("");
+      parts.push(`
+        <div class="toggle-label">
+          <strong>Space Elevator</strong> &mdash; reduce
+          <select id="se-target" class="toggle-select">${opts}</select>
+          by 1
+        </div>
+      `);
+    } else if (reqs.length === 1) {
+      parts.push(`
+        <div class="toggle-label">
+          <strong>Space Elevator</strong> &mdash; auto -1 ${reqs[0].resource}
+        </div>
+      `);
+    } else {
+      parts.push(`
+        <div class="toggle-label">
+          <strong>Space Elevator</strong> &mdash; always-on (-1 to a contract req)
+        </div>
+      `);
+    }
   }
   const lp = currentLegal.launch_pad_status;
   if (lp?.owned) {
@@ -1989,10 +2065,20 @@ function renderFeedEntry(e) {
     // Build rich expandable detail from structured data
     let detailHtml = "";
 
-    // Draw building card: show card details + what was replaced
+    // Draw building card: show card details + what was replaced.
+    // Slot info is included so the debug log makes it clear which pool
+    // location the drawn card went to.
     if (ed.event_type === "draw_building_card") {
-      detailHtml += `<div class="feed-line-note">Drew <strong>${ed.card_drawn || "?"}</strong> into pool</div>`;
-      if (ed.card_replaced) detailHtml += `<div class="feed-line-note">Replaced: ${ed.card_replaced}</div>`;
+      const slotLabel = ed.card_drawn_slot != null ? ` (slot ${ed.card_drawn_slot})` : "";
+      detailHtml += `<div class="feed-line-note">Drew <strong>${ed.card_drawn || "?"}</strong>${slotLabel} into pool</div>`;
+      if (ed.pool_idx != null) {
+        const fallback = ed.replaced_via_fallback ? ' <em>(no slot match — FIFO)</em>' : '';
+        detailHtml += `<div class="feed-line-note">→ pool[${ed.pool_idx}]${fallback}</div>`;
+      }
+      if (ed.card_replaced) {
+        const rSlot = ed.card_replaced_slot != null ? ` (slot ${ed.card_replaced_slot})` : "";
+        detailHtml += `<div class="feed-line-note">Replaced: ${ed.card_replaced}${rSlot}</div>`;
+      }
       if (ed.card_rates?.length) {
         const rates = ed.card_rates.map(r => `<span class="${r.amount > 0 ? 'rate-pos' : 'rate-neg'}">${r.amount > 0 ? '+' : ''}${r.amount} ${r.resource}</span>`).join(" ");
         detailHtml += `<div class="feed-line-note">Rates: ${rates}</div>`;
@@ -2305,7 +2391,6 @@ function wireGameButtons() {
     const cardRect = el?.getBoundingClientRect();
     const cardHtml = el?.innerHTML || "";
 
-    const useSE = document.getElementById("toggle-se")?.checked || false;
     const useLP = document.getElementById("toggle-lp")?.checked || false;
     const action = {type: "contract", contract_idx: selectedContract};
     if (useLP) {
@@ -2313,7 +2398,11 @@ function wireGameButtons() {
     } else if (cardIdx >= 0) {
       action.card_idx = cardIdx;
     }
-    if (useSE) action.use_space_elevator = true;
+    // Space Elevator is always-on — the engine applies the discount
+    // automatically when the player owns one. We only send the resource
+    // pick so the player controls which requirement gets the -1.
+    const seTargetEl = document.getElementById("se-target");
+    if (seTargetEl?.value) action.elevator_target = seTargetEl.value;
     const contractForAnim = currentState?.available_contracts?.[selectedContract];
     clearSelection();
     const ok = sendAction(action);
