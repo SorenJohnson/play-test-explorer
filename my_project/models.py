@@ -278,7 +278,7 @@ class CardZone:
 RESOURCE_COLORS = {
     Resource.PWR: "#e74c3c",
     Resource.H2O: "#2c3e80",
-    Resource.FE: "#2c2c2c",
+    Resource.FE: "#888888",
     Resource.C: "#8e44ad",
     Resource.SI: "#f1c40f",
     Resource.O2: "#ecf0f1",

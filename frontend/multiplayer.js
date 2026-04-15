@@ -6,8 +6,8 @@
 
 const RESOURCE_ORDER = ["PWR","H2O","FE","C","SI","O2","FOOD","GLS","ELX"];
 const RESOURCE_COLORS = {
-  PWR:"#e74c3c",H2O:"#2c3e80",FE:"#555555",C:"#8e44ad",
-  SI:"#f1c40f",O2:"#bdc3c7",FOOD:"#27ae60",GLS:"#5dade2",ELX:"#e67e22"
+  PWR:"#e74c3c",H2O:"#2c3e80",FE:"#888888",C:"#8e44ad",
+  SI:"#f1c40f",O2:"#ecf0f1",FOOD:"#27ae60",GLS:"#5dade2",ELX:"#e67e22"
 };
 const PLAYER_COLORS = ["#58a6ff","#f0883e","#3fb950","#d2a8ff"];
 
@@ -1604,6 +1604,87 @@ function renderSpecialToggles(s) {
   host.innerHTML = parts.join("");
 }
 
+function _buildRateNumberLine(rates) {
+  const entries = RESOURCE_ORDER.map(r => ({
+    res: r,
+    val: rates[r] || 0,
+    color: RESOURCE_COLORS[r],
+  }));
+
+  // Two rows sharing 11 columns: 5 4 3 2 1 | 0 | 1 2 3 4 5
+  // Top row = 1s (abs % 5, or abs if ≤5), bottom row = 5s (floor(abs/5))
+  const onesSlots = Array.from({length: 11}, () => []);
+  const fivesSlots = Array.from({length: 11}, () => []);
+
+  for (const e of entries) {
+    const abs = Math.abs(e.val);
+    const neg = e.val < 0;
+    const ones = abs <= 5 ? abs : abs % 5;
+    const fives = Math.floor(abs / 5);
+
+    // Place ones dot
+    let onesSlot = 5; // zero
+    if (ones > 0) onesSlot = neg ? 5 - ones : 5 + ones;
+    onesSlots[onesSlot].push(e);
+
+    // Place fives dot (only if fives > 0)
+    if (fives > 0) {
+      let fivesSlot = neg ? 5 - fives : 5 + fives;
+      fivesSlot = Math.max(0, Math.min(10, fivesSlot));
+      fivesSlots[fivesSlot].push(e);
+    }
+  }
+
+  const labels = [5,4,3,2,1,0,1,2,3,4,5];
+  function renderOnesRow(slots) {
+    return slots.map((dots, i) => {
+      const isZero = i === 5;
+      const dotHtml = dots.map(e =>
+        `<span class="rnl-dot" style="background:${e.color}" title="${e.res}: ${e.val > 0 ? '+' : ''}${e.val}">${e.res}</span>`
+      ).join("");
+      return `<div class="rnl-slot-wrap ${isZero ? 'rnl-zero' : ''}">
+        <div class="rnl-slot">${dotHtml}</div>
+      </div>`;
+    }).join("");
+  }
+
+  function renderFivesRow(slots) {
+    return slots.map((dots, i) => {
+      const isZero = i === 5;
+      const dotHtml = dots.map(e =>
+        `<span class="rnl-dot-sm" style="background:${e.color}" title="${e.res}: ${e.val > 0 ? '+' : ''}${e.val}"></span>`
+      ).join("");
+      return `<div class="rnl-slot-wrap ${isZero ? 'rnl-zero' : ''}">
+        <div class="rnl-slot rnl-slot-sm">${dotHtml}</div>
+      </div>`;
+    }).join("");
+  }
+
+  const labelsHtml = labels.map((l, i) =>
+    `<div class="rnl-slot-wrap ${i === 5 ? 'rnl-zero' : ''}"><div class="rnl-slot-label">${l}</div></div>`
+  ).join("");
+
+  return `<div class="rate-number-line">
+    <div class="rnl-row-label">1s</div>
+    <div class="rnl-track">
+      <div class="rnl-side-label rnl-neg-label">\u2212</div>
+      ${renderOnesRow(onesSlots)}
+      <div class="rnl-side-label rnl-pos-label">+</div>
+    </div>
+    <div class="rnl-row-label">5s</div>
+    <div class="rnl-track">
+      <div class="rnl-side-label rnl-neg-label">\u2212</div>
+      ${renderFivesRow(fivesSlots)}
+      <div class="rnl-side-label rnl-pos-label">+</div>
+    </div>
+    <div class="rnl-track rnl-labels-row">
+      <div class="rnl-side-label"></div>
+      ${labelsHtml}
+      <div class="rnl-side-label"></div>
+    </div>
+  </div>`;
+}
+
 function renderPlayerPanel(s) {
   const me = s.players[mySeat];
   if (!me) return;
@@ -1618,6 +1699,9 @@ function renderPlayerPanel(s) {
     const cls = v > 0 ? "rate-pos" : v < 0 ? "rate-neg" : "rate-zero";
     return `<div class="rate-chip ${cls}"><span class="rate-res" style="color:${RESOURCE_COLORS[r]}">${r}</span><span class="rate-val">${v > 0 ? "+" : ""}${v}</span></div>`;
   }).join("");
+
+  // Build rate number line — ones track (0-9 each side) + tens track if needed
+  const rateNumberLine = _buildRateNumberLine(me.rates || {});
 
   const builtCards = me.built_cards || [];
   const buildings = builtCards.filter(c => !c.effect && c.slot !== 5).map(c => c.building);
@@ -1637,6 +1721,7 @@ function renderPlayerPanel(s) {
         <span> | Contracts: <strong>${me.contracts_fulfilled || 0}</strong></span>
       </div>
       <div class="player-rates-grid">${ratesGrid}</div>
+      ${rateNumberLine}
       <div class="player-stats-buildings">${buildingList}</div>
       ${specialList ? `<div class="player-stats-specials">${specialList}</div>` : ''}
       ${patentList ? `<div class="player-stats-specials">${patentList}</div>` : ''}
@@ -2023,6 +2108,32 @@ function renderFeed() {
   container.scrollTop = 0;
 }
 
+// ===== Patent Office Picker =====
+
+function showPatentOfficePicker(patents, onPick) {
+  const titleEl = document.getElementById("prompt-title");
+  const bodyEl = document.getElementById("prompt-body");
+  titleEl.textContent = "Patent Office — Choose a Patent";
+  bodyEl.innerHTML = `
+    <p style="color:#8b949e;margin-bottom:12px">You drew 2 patents. Pick one to keep — the other goes back.</p>
+    <div style="display:flex;gap:12px;justify-content:center">
+      ${patents.map((p, i) => `
+        <button class="patent-pick-btn action-btn" data-pick="${i}" style="flex:1;padding:12px;text-align:center">
+          <div style="font-weight:600;font-size:1rem;margin-bottom:4px">${p.name}</div>
+          <div style="font-size:0.8rem;color:#a371f7">${p.effect || ''}</div>
+        </button>
+      `).join("")}
+    </div>
+  `;
+  document.getElementById("prompt-modal").style.display = "flex";
+  bodyEl.querySelectorAll(".patent-pick-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.getElementById("prompt-modal").style.display = "none";
+      onPick(parseInt(btn.dataset.pick));
+    });
+  });
+}
+
 // ===== Prompt Modal =====
 
 function showPrompt(prompt) {
@@ -2154,11 +2265,31 @@ function wireGameButtons() {
     const destRect = document.getElementById("mp-your-stats")?.getBoundingClientRect();
 
     const buildCards = [...selectedCards].map(Number);
-    clearSelection();
-    sendAction({type: "build", build_cards: buildCards});
 
-    // Animate cards flying to buildings area
-    if (destRect) {
+    // Check if Patent Office is in the build — needs patent pick
+    const hand = currentState?.players[mySeat]?.hand || [];
+    const hasPatentOffice = buildCards.some(i => hand[i]?.building === "Patent Office");
+
+    if (hasPatentOffice && role === "host") {
+      const patents = game.peek_patent_office_patents().toJs({dict_converter: Object.fromEntries});
+      if (patents.length >= 2) {
+        showPatentOfficePicker(patents, (pickIdx) => {
+          clearSelection();
+          const ok = sendAction({type: "build", build_cards: buildCards, patent_office_pick: pickIdx});
+          if (ok && destRect) {
+            cardRects.forEach((c, i) => {
+              setTimeout(() => animateCard(c.rect, destRect, c.html), i * 80);
+            });
+          }
+        });
+        return;
+      }
+    }
+
+    clearSelection();
+    const ok = sendAction({type: "build", build_cards: buildCards});
+
+    if (ok && destRect) {
       cardRects.forEach((c, i) => {
         setTimeout(() => animateCard(c.rect, destRect, c.html), i * 80);
       });
@@ -2182,10 +2313,9 @@ function wireGameButtons() {
       action.hacker_direction = parseInt(hDir?.value || "1");
     }
     clearSelection();
-    sendAction(action);
+    const ok = sendAction(action);
 
-    // Animate fade out
-    if (cardRect) animateFadeOut(cardRect, cardHtml);
+    if (ok && cardRect) animateFadeOut(cardRect, cardHtml);
   });
   document.getElementById("mp-contract-btn").addEventListener("click", () => {
     if (selectedContract < 0) return;
@@ -2204,14 +2334,13 @@ function wireGameButtons() {
       action.card_idx = cardIdx;
     }
     if (useSE) action.use_space_elevator = true;
+    const contractForAnim = currentState?.available_contracts?.[selectedContract];
     clearSelection();
-    sendAction(action);
+    const ok = sendAction(action);
 
-    // Animate fade + reward
-    if (cardRect) {
+    if (ok && cardRect) {
       animateFadeOut(cardRect, cardHtml);
-      const contract = currentState?.available_contracts?.[selectedContract];
-      if (contract) animateReward(cardRect, `+$${contract.reward}`);
+      if (contractForAnim) animateReward(cardRect, `+$${contractForAnim.reward}`);
     }
   });
   document.getElementById("mp-pass-btn").addEventListener("click", () => {
@@ -2271,7 +2400,6 @@ function sendAction(action) {
     if (result.ok) {
       humanTurnActions.push(result);
       hostRefreshState();
-      // Animate rate changes on your panel (after DOM paints)
       if (result.rates_gained) {
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
@@ -2297,12 +2425,15 @@ function sendAction(action) {
         playerBefore: playerBefore,
         playerAfter: playerAfter,
       });
+      return true;
     } else {
       alert(result.reason || "Action failed");
       hostRefreshState();
+      return false;
     }
   } else {
     hostConn.send(JSON.stringify({type: "action", action}));
+    return true; // assume success for clients (host validates)
   }
 }
 
@@ -2460,8 +2591,7 @@ class StateTracker {
     const lines = [];
     lines.push('<div class="mut-snapshot">');
     const mktParts = RESOURCE_ORDER
-      .map(r => { const pos = this.market[r]; return pos ? `${r}:${pos}` : null; })
-      .filter(Boolean);
+      .map(r => `${r}:${this.market[r]}`);
     lines.push(`<div class="mut-snap-row"><span class="mut-snap-label">MKT</span> ${mktParts.join(" ")}</div>`);
     for (const p of this.players) {
       if (!p.name) continue;

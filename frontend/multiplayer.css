@@ -567,6 +567,83 @@ body {
 .player-rates-grid .rate-chip .rate-res { font-size: 0.75rem; font-weight: 600; }
 .player-rates-grid .rate-chip .rate-val { font-size: 1rem; font-weight: 800; }
 
+/* Rate number line — two-row tracker (1s + 5s) */
+.rate-number-line { margin: 6px 0 8px; }
+.rnl-track {
+  display: flex;
+  gap: 2px;
+}
+.rnl-row-label {
+  font-size: 0.5rem;
+  color: #484f58;
+  margin-bottom: 1px;
+  padding-left: 20px;
+}
+.rnl-slot-wrap {
+  flex: 1;
+  min-width: 0;
+}
+.rnl-slot-wrap.rnl-zero { flex: 1.5; }
+.rnl-slot {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  padding: 3px 2px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-content: start;
+  gap: 2px;
+  min-height: 56px;
+}
+.rnl-slot.rnl-slot-sm {
+  min-height: 20px;
+  padding: 2px 1px;
+}
+.rnl-slot-wrap.rnl-zero .rnl-slot { border-color: #484f58; }
+.rnl-slot-label {
+  text-align: center;
+  font-size: 0.55rem;
+  color: #484f58;
+  margin-top: 2px;
+}
+.rnl-slot-wrap.rnl-zero .rnl-slot-label { color: #8b949e; font-weight: bold; }
+.rnl-labels-row { gap: 2px; margin-top: 0; }
+.rnl-labels-row .rnl-slot-wrap { display: flex; justify-content: center; }
+.rnl-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.4rem;
+  font-weight: 700;
+  color: #000;
+  line-height: 1;
+}
+.rnl-dot-sm {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.33rem;
+  font-weight: 700;
+  color: #000;
+  line-height: 1;
+}
+.rnl-side-label {
+  font-size: 0.7rem;
+  font-weight: bold;
+  padding: 0 3px;
+  align-self: center;
+  min-width: 12px;
+}
+.rnl-neg-label { color: #f85149; }
+.rnl-pos-label { color: #3fb950; }
+
 /* ===== Modals ===== */
 .modal-overlay {
   position: fixed;

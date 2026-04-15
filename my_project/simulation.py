@@ -77,10 +77,27 @@ class Market:
     positions: dict[Resource, int] = field(default_factory=dict)
     _log: GameLog | None = field(default=None, init=False, repr=False, compare=False)
 
+    # Per-resource starting positions on PRICE_TRACK (tiered by resource complexity)
+    DEFAULT_POSITIONS: ClassVar[dict[Resource, int]] = {
+        Resource.PWR: 3,   # $2
+        Resource.H2O: 3,   # $2
+        Resource.FE: 3,    # $2
+        Resource.C: 6,     # $3
+        Resource.SI: 6,    # $3
+        Resource.O2: 8,    # $4
+        Resource.FOOD: 8,  # $4
+        Resource.GLS: 10,  # $5
+        Resource.ELX: 10,  # $5
+    }
+
     @classmethod
-    def create(cls, start_position: int = 10) -> Market:
-        """All resources start at the same position (default index 4 = price $2)."""
-        return cls(positions={r: start_position for r in Resource})
+    def create(cls, start_position: int | None = None) -> Market:
+        """Create market with tiered starting prices per resource."""
+        if start_position is not None:
+            positions = {r: start_position for r in Resource}
+        else:
+            positions = dict(cls.DEFAULT_POSITIONS)
+        return cls(positions=positions)
 
     def _record(self, resource: Resource, old_pos: int, new_pos: int) -> None:
         if self._log and old_pos != new_pos:
@@ -724,9 +741,10 @@ class GameState:
     def _log_setup(self) -> None:
         """Record the initial game state as a 'setup' action entry."""
         self.log.begin("setup", "", -1, "Game setup")
-        # Market positions
+        # Market positions (from default tier, before any randomization)
         for r in Resource:
-            self.log.record(f"market.{r.value}", 0, self.market.positions[r])
+            pos = self.market.positions[r]
+            self.log.record(f"market.{r.value}", 0, pos)
         # Pool
         self.log.record("pool", [], [CardZone._card_desc(c) for c in self.pool])
         # Players
@@ -761,7 +779,7 @@ class GameState:
         all_contracts: list[Contract],
         num_players: int = 1,
         start_money: int = DEFAULT_START_MONEY,
-        start_market_pos: int = DEFAULT_MARKET_POS,
+        start_market_pos: int | None = None,
         randomize_market: bool = False,
         max_turns: int = DEFAULT_MAX_TURNS,
         corporation_rates: list[dict[Resource, int]] | None = None,
@@ -772,11 +790,6 @@ class GameState:
         num_rounds: int = 1,
     ) -> GameState:
         market = Market.create(start_market_pos)
-
-        if randomize_market:
-            for r in Resource:
-                roll = random.choice([3, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, -2, -2, -2, -3, -3, -4, -4, 0])
-                market.adjust(r, roll)
 
         # All cards from Cards.csv are playable. Cards with an `effect`
         # column have their mechanical effects wired up via patent/build
@@ -857,6 +870,16 @@ class GameState:
         )
         state._event_pool = _event_pool
         state._init_observables()
+
+        # Randomize market AFTER observables are wired so the d20 rolls
+        # are captured as individual market mutations in the log.
+        if randomize_market:
+            state.log.begin("market_roll", "", -1, "Market randomization")
+            for r in Resource:
+                roll = random.choice([3, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, -2, -2, -2, -3, -3, -4, -4, 0])
+                state.market.adjust(r, roll)
+            state.log.end()
+
         return state
 
 
