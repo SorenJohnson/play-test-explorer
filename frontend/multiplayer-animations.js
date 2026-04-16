@@ -187,15 +187,15 @@
     }
 
     const EVENT_COLORS = {
-      power_bill: "#e74c3c",
-      debt_collection: "#f85149",
-      futures_trading: "#d29922",
-      patent_auction: "#a371f7",
-      draw_building_card: "#58a6ff",
-      news_bulletin: "#3fb950",
-      news: "#3fb950",
-      end_round: "#f0883e",
-      end_game: "#f0883e",
+      power_bill: "var(--res-pwr)",
+      debt_collection: "var(--accent-red)",
+      futures_trading: "var(--accent-yellow)",
+      patent_auction: "var(--accent-violet)",
+      draw_building_card: "var(--accent-blue)",
+      news_bulletin: "var(--accent-green)",
+      news: "var(--accent-green)",
+      end_round: "var(--accent-orange)",
+      end_game: "var(--accent-orange)",
     };
 
     el.style.display = "block";
@@ -203,18 +203,18 @@
       <div class="deck-viewer-inner">
         <div class="deck-viewer-header">
           <strong>Event Deck</strong> — ${remaining.length} cards left, ${nonRedraw.length} player turns (${Math.floor(nonRedraw.length / numPlayers)} per player)
-          <span style="margin-left:auto;cursor:pointer;color:#8b949e" onclick="MP.anim.toggleDeckViewer()">close</span>
+          <span style="margin-left:auto;cursor:pointer;color:var(--text-muted)" onclick="MP.anim.toggleDeckViewer()">close</span>
         </div>
         <div class="deck-viewer-summary">
           ${Object.entries(counts).map(([type, n]) => {
             const baseType = type.replace(" (redraw)", "");
-            const color = EVENT_COLORS[baseType] || "#8b949e";
+            const color = EVENT_COLORS[baseType] || "var(--text-muted)";
             return `<span class="deck-chip" style="border-color:${color}">${type}: ${n}</span>`;
           }).join("")}
         </div>
         <div class="deck-viewer-list">
           ${remaining.map((e, i) => {
-            const color = EVENT_COLORS[e.type] || "#8b949e";
+            const color = EVENT_COLORS[e.type] || "var(--text-muted)";
             const flags = [];
             if (e.redraws) flags.push("redraw");
             if (e.pwr_adjust) flags.push("PWR adj");
@@ -254,7 +254,7 @@
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
-      borderColor: "#f0883e",
+      borderColor: "var(--accent-orange)",
     });
     document.body.appendChild(flyCard);
 

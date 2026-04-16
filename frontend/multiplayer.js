@@ -18,6 +18,12 @@ const RESOURCE_ORDER = ["PWR","H2O","FE","C","SI","O2","FOOD","GLS","ELX"];
 // lives in one place, not scattered across CSS + JS. Resolved at script
 // load; the stylesheet is already attached because this script tag sits
 // at the bottom of <body>.
+//
+// Modules that render inline-style HTML strings can reference `var(--name)`
+// directly in the style attribute — browsers resolve those. Modules that
+// pass colors to Chart.js or set element.style.X where a canvas/WebGL
+// consumer won't resolve CSS vars use MP.cssVar("--name") to get the
+// resolved hex value at call time.
 const _cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const RESOURCE_COLORS = Object.fromEntries(
   RESOURCE_ORDER.map(r => [r, _cssVar(`--res-${r.toLowerCase()}`)])
@@ -62,6 +68,11 @@ Object.assign(window.MP, {
   marketChart: null,
 });
 const MP = window.MP;
+
+// Exposed so sibling modules (whose IIFEs close over their own MP alias)
+// can resolve CSS vars for Chart.js and element.style.X assignments,
+// which don't resolve var() references themselves.
+MP.cssVar = _cssVar;
 
 // ===== Lobby button wiring =====
 

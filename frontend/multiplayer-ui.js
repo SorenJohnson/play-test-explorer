@@ -197,6 +197,10 @@
       MP.marketChart.data.datasets = datasets;
       MP.marketChart.update("none");
     } else {
+      // Chart.js renders to canvas — it can't resolve var(--*) references,
+      // so we resolve palette colors eagerly via MP.cssVar.
+      const axisText = MP.cssVar("--text-muted");
+      const gridLine = MP.cssVar("--bg-subtle");
       MP.marketChart = new Chart(canvas, {
         type: "line",
         data: {labels, datasets},
@@ -205,8 +209,8 @@
           maintainAspectRatio: false,
           plugins: {legend: {display: false}},
           scales: {
-            x: {display: true, ticks: {color: "#8b949e", font: {size: 9}}, grid: {color: "#21262d"}},
-            y: {display: true, ticks: {color: "#8b949e", font: {size: 9}, callback: v => "$" + v}, grid: {color: "#21262d"}},
+            x: {display: true, ticks: {color: axisText, font: {size: 9}}, grid: {color: gridLine}},
+            y: {display: true, ticks: {color: axisText, font: {size: 9}, callback: v => "$" + v}, grid: {color: gridLine}},
           },
         },
       });
@@ -278,7 +282,7 @@
     const myTurn = isMyTurn(s);
   
     if (hand.length === 0) {
-      grid.innerHTML = `<div style="color:#8b949e;padding:12px">Hand is empty</div>`;
+      grid.innerHTML = `<div style="color:var(--text-muted);padding:12px">Hand is empty</div>`;
       document.getElementById("mp-build-estimate").textContent = "";
       return;
     }
@@ -302,7 +306,7 @@
         const defParts = Object.entries(est.deficit || {}).map(([r, a]) => `${a} ${r}`).join(", ");
         estimateEl.innerHTML = `Build cost: <strong>$${est.cost}</strong>${defParts ? ` (buy ${defParts})` : ' (free)'}`;
       } else {
-        estimateEl.innerHTML = `<span style="color:#f85149">${est.reason || 'Cannot build'}</span>`;
+        estimateEl.innerHTML = `<span style="color:var(--accent-red)">${est.reason || 'Cannot build'}</span>`;
       }
     } else {
       estimateEl.textContent = "";
@@ -440,7 +444,7 @@
               const rate = me.rates?.[r] || 0;
               const rev = rate > 0 ? rate * (s.market[r] || 0) : 0;
               if (rev > bestRev) { bestRev = rev; bestRes = r; }
-              const color = RESOURCE_COLORS[r] || "#8b949e";
+              const color = RESOURCE_COLORS[r] || "var(--text-muted)";
               return `<button class="sell-res-btn" data-res="${r}">
                 <span class="sell-res-name" style="color:${color}">${r}</span>
                 <span class="sell-res-detail">rate ${rate} · $${rev}</span>
@@ -452,7 +456,7 @@
         if (MP.currentLegal?.hacker_array_status?.owned) {
           const resOpts = RESOURCE_ORDER.filter(r => r !== "PWR").map(r => `<option value="${r}">${r}</option>`).join("");
           hackerHtml = `<div class="sell-hacker-row">
-            <span style="font-size:0.75rem;color:#8b949e">Hacker Array:</span>
+            <span style="font-size:0.75rem;color:var(--text-muted)">Hacker Array:</span>
             <select id="mp-hacker-target" class="toggle-select">${resOpts}</select>
             <select id="mp-hacker-dir" class="toggle-select">
               <option value="1">+3 (raise)</option>
@@ -555,7 +559,7 @@
       `);
     }
   
-    host.innerHTML = parts.length ? `<h4 style="color:#8b949e;font-size:0.75rem;margin:8px 0 4px">Patent Actions</h4>${parts.join("")}` : "";
+    host.innerHTML = parts.length ? `<h4 style="color:var(--text-muted);font-size:0.75rem;margin:8px 0 4px">Patent Actions</h4>${parts.join("")}` : "";
   
     // Wire buttons
     document.getElementById("pa-oc-btn")?.addEventListener("click", () => {
@@ -728,7 +732,7 @@
     // Set zone title with NW
     const title = document.getElementById("player-zone-title");
     if (title) {
-      const nwColor = me.net_worth >= 0 ? '#3fb950' : '#f85149';
+      const nwColor = me.net_worth >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
       title.innerHTML = `<span>${me.name}${me.corporation ? ` \u2014 ${me.corporation}` : ''}</span><span class="player-zone-nw" style="color:${nwColor}">NW $${me.net_worth}</span>`;
     }
   
@@ -752,7 +756,7 @@
     panel.innerHTML = `
       <div class="player-stats">
         <div class="player-stats-money">
-          Cash $${me.money}${me.debt > 0 ? ` | <span style="color:#f85149">Debt $${me.debt}</span>` : ''}${me.credit > 0 ? ` | <span style="color:#d29922">Credit $${me.credit}</span>` : ''} | ${me.contracts_fulfilled || 0} contracts
+          Cash $${me.money}${me.debt > 0 ? ` | <span style="color:var(--accent-red)">Debt $${me.debt}</span>` : ''}${me.credit > 0 ? ` | <span style="color:var(--accent-yellow)">Credit $${me.credit}</span>` : ''} | ${me.contracts_fulfilled || 0} contracts
         </div>
         <div class="player-rates-grid">${ratesGrid}</div>
         ${rateNumberLine}
@@ -790,10 +794,10 @@
         <div class="opponent-card ${isActive ? 'active-turn' : ''}" style="border-left:3px solid ${color}">
           <div class="opponent-header">
             <span class="opponent-name" style="color:${color}">${p.name}${p.is_human ? '' : ' (AI)'}</span>
-            <span class="opponent-nw" style="color:${p.net_worth >= 0 ? '#3fb950' : '#f85149'}">NW $${p.net_worth}</span>
+            <span class="opponent-nw" style="color:${p.net_worth >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'}">NW $${p.net_worth}</span>
           </div>
           <div class="opponent-money">
-            Cash $${p.money}${p.debt > 0 ? ` | <span style="color:#f85149">Debt $${p.debt}</span>` : ''}${p.credit > 0 ? ` | <span style="color:#d29922">Credit $${p.credit}</span>` : ''} | ${p.contracts_fulfilled || 0} contracts
+            Cash $${p.money}${p.debt > 0 ? ` | <span style="color:var(--accent-red)">Debt $${p.debt}</span>` : ''}${p.credit > 0 ? ` | <span style="color:var(--accent-yellow)">Credit $${p.credit}</span>` : ''} | ${p.contracts_fulfilled || 0} contracts
           </div>
           <div class="opponent-rates-grid">${ratesGrid}</div>
           <div class="opponent-buildings">${buildingList}</div>
@@ -919,7 +923,7 @@
       const colonIdx = (e.text || "").indexOf(":");
       const playerName = colonIdx > 0 ? e.text.substring(0, colonIdx) : "";
       const playerIdx = MP.currentState?.players?.findIndex(p => p.name === playerName) ?? -1;
-      const color = playerIdx >= 0 ? PLAYER_COLORS[playerIdx % PLAYER_COLORS.length] : "#8b949e";
+      const color = playerIdx >= 0 ? PLAYER_COLORS[playerIdx % PLAYER_COLORS.length] : "var(--text-muted)";
       const title = playerName || "Turn";
       const summary = colonIdx > 0 ? e.text.substring(colonIdx + 1).trim() : e.text;
   
@@ -998,7 +1002,7 @@
         if (ed.card_costs?.length) {
           detailHtml += `<div class="feed-line-note">Costs: ${ed.card_costs.map(c => c.amount + " " + c.resource).join(", ")}</div>`;
         }
-        if (ed.card_effect) detailHtml += `<div class="feed-line-note" style="color:#a371f7">${ed.card_effect}</div>`;
+        if (ed.card_effect) detailHtml += `<div class="feed-line-note" style="color:var(--accent-violet)">${ed.card_effect}</div>`;
       }
   
       // Futures trading: show who caused the market moves
@@ -1006,7 +1010,7 @@
         if (ed.market_changes?.length) {
           detailHtml += `<div class="feed-line-header">Market Changes</div>`;
           for (const c of ed.market_changes) {
-            const color = RESOURCE_COLORS[c.resource] || "#8b949e";
+            const color = RESOURCE_COLORS[c.resource] || "var(--text-muted)";
             detailHtml += `<div class="feed-line-note"><span style="color:${color}">${c.resource}</span>: +${c.units} units → $${c.price_before} → $${c.price_after}</div>`;
           }
         }
@@ -1093,12 +1097,12 @@
     const bodyEl = document.getElementById("prompt-body");
     titleEl.textContent = "Patent Office — Choose a Patent";
     bodyEl.innerHTML = `
-      <p style="color:#8b949e;margin-bottom:12px">You drew 2 patents. Pick one to keep — the other goes back.</p>
+      <p style="color:var(--text-muted);margin-bottom:12px">You drew 2 patents. Pick one to keep — the other goes back.</p>
       <div style="display:flex;gap:12px;justify-content:center">
         ${patents.map((p, i) => `
           <button class="patent-pick-btn action-btn" data-pick="${i}" style="flex:1;padding:12px;text-align:center">
             <div style="font-weight:600;font-size:1rem;margin-bottom:4px">${p.name}</div>
-            <div style="font-size:0.8rem;color:#a371f7">${p.effect || ''}</div>
+            <div style="font-size:0.8rem;color:var(--accent-violet)">${p.effect || ''}</div>
           </button>
         `).join("")}
       </div>
@@ -1128,7 +1132,7 @@
           <label>Your bid ($5 increments):</label>
           <input type="number" class="prompt-bid-input" data-seat-idx="${MP.mySeat}" min="0" max="500" step="5" value="0">
         </div>
-        <p style="color:#8b949e;font-size:0.8rem">Bid 0 to pass. Highest bidder wins; pays runner-up + $5 as debt.</p>
+        <p style="color:var(--text-muted);font-size:0.8rem">Bid 0 to pass. Highest bidder wins; pays runner-up + $5 as debt.</p>
       `;
     } else if (prompt.kind === "debt_paydown") {
       titleEl.textContent = "Debt Collection - Pay Down Debt";
@@ -1177,9 +1181,9 @@
       const color = PLAYER_COLORS[MP.currentState.players.indexOf(p) % PLAYER_COLORS.length];
       const isYou = MP.currentState.players.indexOf(p) === MP.mySeat;
       return `
-        <div style="display:flex;justify-content:space-between;padding:8px 12px;margin:4px 0;background:#0d1117;border-radius:6px;border-left:3px solid ${color}${isYou ? ';border:1px solid #58a6ff' : ''}">
+        <div style="display:flex;justify-content:space-between;padding:8px 12px;margin:4px 0;background:var(--bg-canvas);border-radius:6px;border-left:3px solid ${color}${isYou ? ';border:1px solid var(--accent-blue)' : ''}">
           <span>${i + 1}. ${p.name}${isYou ? ' (You)' : ''}${p.is_human ? '' : ' (AI)'}</span>
-          <span style="font-weight:bold;color:${p.net_worth >= 0 ? '#3fb950' : '#f85149'}">NW: $${p.net_worth} | $${p.money} cash | ${p.contracts_fulfilled || 0} contracts</span>
+          <span style="font-weight:bold;color:${p.net_worth >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'}">NW: $${p.net_worth} | $${p.money} cash | ${p.contracts_fulfilled || 0} contracts</span>
         </div>
       `;
     }).join("");
@@ -1203,6 +1207,11 @@
       tension: 0.3,
     }));
     if (endgameNwChart) endgameNwChart.destroy();
+    // Chart.js renders to canvas — it can't resolve var(--*) references,
+    // so we resolve palette colors eagerly via MP.cssVar.
+    const labelText = MP.cssVar("--text-primary");
+    const axisText = MP.cssVar("--text-muted");
+    const gridLine = MP.cssVar("--bg-subtle");
     endgameNwChart = new Chart(canvas, {
       type: "line",
       data: {labels, datasets},
@@ -1210,12 +1219,12 @@
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
-          legend: {labels: {boxWidth: 12, font: {size: 11}, color: "#c9d1d9"}},
-          title: {display: true, text: "Net Worth Over Time", color: "#8b949e"},
+          legend: {labels: {boxWidth: 12, font: {size: 11}, color: labelText}},
+          title: {display: true, text: "Net Worth Over Time", color: axisText},
         },
         scales: {
-          x: {ticks: {color: "#8b949e"}, grid: {color: "#21262d"}},
-          y: {ticks: {color: "#8b949e", callback: v => "$" + v}, grid: {color: "#21262d"}},
+          x: {ticks: {color: axisText}, grid: {color: gridLine}},
+          y: {ticks: {color: axisText, callback: v => "$" + v}, grid: {color: gridLine}},
         },
       },
     });

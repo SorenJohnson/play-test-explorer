@@ -59,7 +59,7 @@
       return `
         <div class="seat-card ${claimed ? 'claimed' : ''}">
           <div class="seat-label">Seat ${i + 1}${isHost ? ' (You)' : ''}</div>
-          ${isHost ? `<div style="color:#3fb950">Host</div>` : `
+          ${isHost ? `<div style="color:var(--accent-green)">Host</div>` : `
             <select data-seat="${i}" class="seat-type-select" ${MP.game ? 'disabled' : ''}>
               <option value="human-remote" ${s.type==='human-remote'?'selected':''}>Human (Remote)</option>
               <option value="optimal" ${s.type==='optimal'?'selected':''}>AI - Optimal</option>

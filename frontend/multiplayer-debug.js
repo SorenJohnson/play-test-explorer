@@ -56,11 +56,11 @@
     const a = actionLog[step];
     if (a) {
       const cls = _mutTypeClass(a.type);
-      const pColor = a.player_idx >= 0 ? PLAYER_COLORS[a.player_idx % PLAYER_COLORS.length] : "#8b949e";
+      const pColor = a.player_idx >= 0 ? PLAYER_COLORS[a.player_idx % PLAYER_COLORS.length] : "var(--text-muted)";
       const playerLabel = a.player || "GLOBAL";
       info.innerHTML = `
         <div><strong>#${a.id}</strong> <span class="mut-type ${cls}">${a.type}</span> <span style="color:${pColor}">${playerLabel}</span></div>
-        <div style="margin-top:4px;color:#c9d1d9">${a.summary}</div>
+        <div style="margin-top:4px;color:var(--text-primary)">${a.summary}</div>
       `;
     } else {
       info.innerHTML = "<div>No data</div>";
@@ -69,7 +69,7 @@
     // Content: mutations + metadata + snapshot for the current entry
     const container = document.getElementById("debug-content");
     if (!container) return;
-    if (!a) { container.innerHTML = '<div style="color:#6e7681;padding:12px">No actions yet.</div>'; return; }
+    if (!a) { container.innerHTML = '<div style="color:var(--text-dim);padding:12px">No actions yet.</div>'; return; }
 
     // Replay state up to current step
     const tracker = new StateTracker();
@@ -85,7 +85,7 @@
         html.push(`<div><span class="mut-field">${m.field}</span> <span class="mut-old">${formatMutValue(m.old)}</span> <span class="mut-arrow">\u2192</span> <span class="mut-new">${formatMutValue(m.new)}</span></div>`);
       }
     } else {
-      html.push('<div style="color:#484f58;font-size:0.68rem">No mutations</div>');
+      html.push('<div style="color:var(--text-subtle);font-size:0.68rem">No mutations</div>');
     }
 
     // Metadata
