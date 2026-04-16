@@ -174,13 +174,21 @@
     delete MP.connections[peerId];
     const seatIdx = MP.clientSeats[peerId];
     if (seatIdx !== undefined) {
+      const seatName = MP.seatConfig[seatIdx]?.name || `Seat ${seatIdx + 1}`;
       MP.seatConfig[seatIdx].peerId = null;
       delete MP.clientSeats[peerId];
-      // TODO: AI takeover for disconnected player
       if (!MP.game) {
         renderSeatGrid();
         broadcastLobbyState();
         updateStartButton();
+      } else {
+        // Mid-game disconnect: surface it in the host's feed and console.
+        // Full AI-takeover would require restructuring PlayableGame.human_indices
+        // at runtime and isn't supported yet — if it becomes the disconnected
+        // seat's turn, the game stalls until they reconnect.
+        MP.disconnectedSeats.add(seatIdx);
+        MP.core.addFeedEntry({kind: "round-marker", text: `\u26A0 ${seatName} disconnected`});
+        console.warn(`[mp] Seat ${seatIdx} (${seatName}) disconnected mid-game. Game will stall on their turn until they rejoin.`);
       }
     }
     updateHostStatus();
@@ -213,6 +221,14 @@
   }
 
   function handleClientMessage(msg) {
+    // Late-joiner guard: drop game-state messages until we've received a
+    // game_start. Lobby-time messages (lobby_state, seat_claimed) and
+    // game_start itself always pass through.
+    const lobbyPhase = msg.type === "lobby_state" || msg.type === "seat_claimed" || msg.type === "game_start";
+    if (!MP.gameStarted && !lobbyPhase) {
+      console.warn(`[mp] Dropping ${msg.type} before game_start`);
+      return;
+    }
     switch (msg.type) {
       case "lobby_state":
         renderClientLobby(msg.seats);
@@ -222,6 +238,7 @@
         document.getElementById("join-status").textContent = `Seat ${MP.mySeat + 1} claimed. Waiting for host to start...`;
         break;
       case "game_start":
+        MP.gameStarted = true;
         MP.mySeat = msg.your_seat;
         MP.core.showGameScreen();
         break;
@@ -246,7 +263,13 @@
         break;
       case "feed":
         MP.core.addFeedEntry(msg.entry);
-        if (msg.entry.kind === "event") MP.anim.showEventBanner(formatEventTitle(msg.entry.text || "Event"));
+        // Event feed entries carry structured eventData; the banner label
+        // comes from MP.ui.buildEventCardLabel. (The pre-split code here
+        // called a non-existent `formatEventTitle` — a latent ReferenceError
+        // that would crash any client receiving an event-kind feed entry.)
+        if (msg.entry.kind === "event") {
+          MP.anim.showEventBanner(MP.ui.buildEventCardLabel(msg.entry.eventData || {}));
+        }
         break;
       case "game_over":
         MP.currentState = msg.state;

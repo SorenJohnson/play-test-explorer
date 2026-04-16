@@ -86,7 +86,8 @@ game
 `;
     MP.game = MP.pyodide.runPython(createCode);
 
-    // Notify clients
+    // Notify clients + flip our own gameStarted flag
+    MP.gameStarted = true;
     for (const [peerId, seatIdx] of Object.entries(MP.clientSeats)) {
       const mappedSeat = seatMap[seatIdx];
       if (mappedSeat !== undefined && MP.connections[peerId]) {

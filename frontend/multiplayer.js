@@ -32,11 +32,15 @@ Object.assign(window.MP, {
   connections: {},    // {peerId: DataConnection} (host tracks all clients)
   hostConn: null,     // DataConnection to host (client only)
   mySeat: -1,         // this player's seat index
+  gameStarted: false, // set true when game_start fires (host issues / client receives).
+                      // Gates client-side game-state messages — late joiners silently drop
+                      // game_state/your_turn/prompt until they see game_start.
   // host-only
   pyodide: null,
   game: null,         // PlayableGame Python object
   seatConfig: [],     // [{type: "human-local"|"human-remote"|"optimal"|"smart"|"random", name: "", peerId: null}]
   clientSeats: {},    // {peerId: seatIdx} — which client claimed which seat
+  disconnectedSeats: new Set(),  // host-only: seats that dropped mid-game (for visibility)
   // shared game state (received from host, or generated locally by host)
   currentState: null,
   currentLegal: null,
