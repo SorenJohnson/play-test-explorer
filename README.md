@@ -6,7 +6,7 @@ A board game about building a Mars colony: playable in the browser, backed by a 
 
 ## Play
 
-[play.html](https://rtjeannier.github.io/play-test-explorer/play.html) — browser-based hot-seat game powered by Pyodide. Configure seats with any mix of humans and AI strategies (Smart, Greedy, Random), set player names and round count, then play.
+[multiplayer.html](https://rtjeannier.github.io/play-test-explorer/multiplayer.html) — browser-based game powered by Pyodide for the rules engine and WebRTC (via PeerJS) for peer-to-peer multiplayer. Any seat can be human (local or remote) or AI (Random, Greedy, Smart, Optimal). The host runs the Python engine and broadcasts filtered state to each client; no server required.
 
 ## Analytics
 
@@ -18,18 +18,20 @@ A board game about building a Mars colony: playable in the browser, backed by a 
 uv sync                                         # Install dependencies
 uv run python -m my_project simulate-all        # Run all standard scenarios (5 x 500 games)
 uv run python -m my_project analyze             # Generate analysis.json from sim data
-uv run python -m my_project sync-play           # Copy Python sources to frontend for Pyodide
+uv run python -m my_project sync-play           # Copy Python sources into frontend/data/game/ for Pyodide
 ```
 
 See `uv run python -m my_project --help` for single-scenario runs and other options.
 
+`sync-play` is run automatically by the devcontainer on create and by the deploy workflow on every push to `main`. Run it manually after editing any file under `my_project/` that you want to see in the browser playable.
+
 ## Development
 
 ```bash
-uv run pytest                                   # Run tests
+uv run pytest                                   # Run tests (CI gates PRs on this)
 ```
 
-Rules summary and design notes are in [context/DESIGN-DOC.md](context/DESIGN-DOC.md).
+Architecture, module responsibilities, and the Pyodide/PeerJS wire protocol are documented in [context/DESIGN-DOC.md](context/DESIGN-DOC.md). Known AI strategy gaps are in [context/AI-CARD-GAPS.md](context/AI-CARD-GAPS.md).
 
 ### Development environment (Codespaces / devcontainer)
 
