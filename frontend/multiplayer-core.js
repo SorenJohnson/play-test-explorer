@@ -18,7 +18,7 @@
   // ===== Game Start (Host) =====
 
   const PY_FILES = [
-    "__init__.py","play_adapter.py","simulation.py","models.py",
+    "__init__.py","play_adapter.py","simulation.py","events.py","models.py",
     "strategies.py","parsing.py","accounting.py"
   ];
   const DATA_FILES = [

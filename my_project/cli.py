@@ -176,7 +176,7 @@ def cmd_sync_play() -> None:
     (dst_root / "data").mkdir(parents=True, exist_ok=True)
 
     py_files = [
-        "__init__.py", "accounting.py", "models.py", "parsing.py",
+        "__init__.py", "accounting.py", "events.py", "models.py", "parsing.py",
         "play_adapter.py", "simulation.py", "strategies.py",
     ]
     for name in py_files:
