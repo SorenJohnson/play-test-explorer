@@ -1451,25 +1451,29 @@ function renderActions(s) {
   const canSell = myTurn && sellCard?.can_sell?.length > 0 && cr >= 1;
   sellBtn.disabled = !canSell;
 
-  // Sell resource picker — buttons below action bar
+  // Sell resource picker + Hacker Array controls
   const sellPicker = document.getElementById("mp-sell-picker");
   if (sellPicker) {
-    if (canSell && sellCard.can_sell.length > 1) {
+    if (canSell) {
       const me = s.players[mySeat];
-      // Auto-select best resource (highest revenue)
+      let resBtnsHtml = "";
       let bestRes = sellCard.can_sell[0];
-      let bestRev = 0;
-      const btns = sellCard.can_sell.map(r => {
-        const rate = me.rates?.[r] || 0;
-        const rev = rate > 0 ? rate * (s.market[r] || 0) : 0;
-        if (rev > bestRev) { bestRev = rev; bestRes = r; }
-        const color = RESOURCE_COLORS[r] || "#8b949e";
-        return `<button class="sell-res-btn" data-res="${r}">
-          <span class="sell-res-name" style="color:${color}">${r}</span>
-          <span class="sell-res-detail">rate ${rate} · $${rev}</span>
-        </button>`;
-      }).join("");
-      // Hacker Array picker
+
+      if (sellCard.can_sell.length > 1) {
+        let bestRev = 0;
+        resBtnsHtml = `<div class="sell-res-label">Sell resource:</div><div class="sell-res-btns">` +
+          sellCard.can_sell.map(r => {
+            const rate = me.rates?.[r] || 0;
+            const rev = rate > 0 ? rate * (s.market[r] || 0) : 0;
+            if (rev > bestRev) { bestRev = rev; bestRes = r; }
+            const color = RESOURCE_COLORS[r] || "#8b949e";
+            return `<button class="sell-res-btn" data-res="${r}">
+              <span class="sell-res-name" style="color:${color}">${r}</span>
+              <span class="sell-res-detail">rate ${rate} · $${rev}</span>
+            </button>`;
+          }).join("") + `</div>`;
+      }
+
       let hackerHtml = "";
       if (currentLegal?.hacker_array_status?.owned) {
         const resOpts = RESOURCE_ORDER.filter(r => r !== "PWR").map(r => `<option value="${r}">${r}</option>`).join("");
@@ -1482,22 +1486,22 @@ function renderActions(s) {
           </select>
         </div>`;
       }
-      sellPicker.innerHTML = `
-        <div class="sell-res-label">Sell resource:</div>
-        <div class="sell-res-btns">${btns}</div>
-        ${hackerHtml}
-        <input type="hidden" id="mp-sell-resource" value="${bestRes}">
-      `;
-      sellPicker.style.display = "block";
-      // Wire click handlers and highlight default
-      sellPicker.querySelectorAll(".sell-res-btn").forEach(btn => {
-        if (btn.dataset.res === bestRes) btn.classList.add("selected");
-        btn.addEventListener("click", () => {
-          sellPicker.querySelectorAll(".sell-res-btn").forEach(b => b.classList.remove("selected"));
-          btn.classList.add("selected");
-          document.getElementById("mp-sell-resource").value = btn.dataset.res;
+
+      if (resBtnsHtml || hackerHtml) {
+        sellPicker.innerHTML = `${resBtnsHtml}${hackerHtml}<input type="hidden" id="mp-sell-resource" value="${bestRes}">`;
+        sellPicker.style.display = "block";
+        sellPicker.querySelectorAll(".sell-res-btn").forEach(btn => {
+          if (btn.dataset.res === bestRes) btn.classList.add("selected");
+          btn.addEventListener("click", () => {
+            sellPicker.querySelectorAll(".sell-res-btn").forEach(b => b.classList.remove("selected"));
+            btn.classList.add("selected");
+            document.getElementById("mp-sell-resource").value = btn.dataset.res;
+          });
         });
-      });
+      } else {
+        sellPicker.style.display = "none";
+        sellPicker.innerHTML = "";
+      }
     } else {
       sellPicker.style.display = "none";
       sellPicker.innerHTML = "";
