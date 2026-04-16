@@ -10,7 +10,8 @@
       "WebSearch",
       "Bash(claude mcp:*)",
       "Read(//home/vscode/.claude/**)",
-      "Bash(chmod +x /workspaces/play-test-explorer/.devcontainer/post-create.sh)"
+      "Bash(chmod +x /workspaces/play-test-explorer/.devcontainer/post-create.sh)",
+      "Read(//workspaces/play-test-explorer/**)"
     ]
   }
 }
