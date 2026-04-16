@@ -1,0 +1,40 @@
+name: Tests
+
+# Runs pytest + the sync-play smoke check on every PR and every push. The
+# deploy-pages workflow does NOT gate on this; if you need that, add
+# `needs: test` to the deploy job (or flip the repo setting that requires
+# this workflow to pass before merge).
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python (pinned via uv)
+        run: uv python install 3.10
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Run pytest
+        run: uv run pytest
+
+      - name: Smoke-check the Pyodide sync pipeline
+        # Run sync-play and verify it produces output the playable game would
+        # actually use. Catches a broken cli.py even before the drift guard
+        # kicks in (the deploy workflow runs sync-play on every push).
+        run: |
+          uv run python -m my_project.cli sync-play
+          test -f frontend/data/game/my_project/simulation.py
+          test -f frontend/data/game/my_project/data/Cards.csv
