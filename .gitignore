@@ -14,3 +14,6 @@ frontend/data/full/
 
 # Claude Code personal (per-user) approvals — team-shared perms live in .claude/settings.json
 .claude/settings.local.json
+
+# Playwright MCP server session artifacts (console logs, page snapshots)
+.playwright-mcp/
