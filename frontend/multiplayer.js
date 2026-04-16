@@ -12,11 +12,22 @@
 // it references has already registered its public surface on window.MP.
 
 const RESOURCE_ORDER = ["PWR","H2O","FE","C","SI","O2","FOOD","GLS","ELX"];
-const RESOURCE_COLORS = {
-  PWR:"#e74c3c",H2O:"#2c3e80",FE:"#888888",C:"#8e44ad",
-  SI:"#f1c40f",O2:"#ecf0f1",FOOD:"#27ae60",GLS:"#5dade2",ELX:"#e67e22"
-};
-const PLAYER_COLORS = ["#58a6ff","#f0883e","#3fb950","#d2a8ff"];
+
+// Palette is sourced from CSS custom properties defined in multiplayer.css
+// (:root block). Keeping a single source of truth means a visual tweak
+// lives in one place, not scattered across CSS + JS. Resolved at script
+// load; the stylesheet is already attached because this script tag sits
+// at the bottom of <body>.
+const _cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const RESOURCE_COLORS = Object.fromEntries(
+  RESOURCE_ORDER.map(r => [r, _cssVar(`--res-${r.toLowerCase()}`)])
+);
+const PLAYER_COLORS = [
+  _cssVar("--accent-blue"),
+  _cssVar("--accent-orange"),
+  _cssVar("--accent-green"),
+  _cssVar("--accent-purple"),
+];
 
 // ===== State (shared via window.MP namespace) =====
 // All mutable cross-module state lives on window.MP so modules extracted from
