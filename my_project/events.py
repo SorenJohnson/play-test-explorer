@@ -563,6 +563,7 @@ def settle_silent_auction(
     state: GameState,
     patent: Card,
     bids: dict[int, int],
+    active_player: Player,
 ) -> tuple[int, int] | None:
     """Resolve a silent auction given a {player_idx: bid} map.
 
@@ -570,7 +571,10 @@ def settle_silent_auction(
 
     Rules:
       - Highest bidder wins
-      - Ties broken by turn order (lower index first)
+      - Ties broken by turn order RELATIVE TO the player who drew the
+        event (`active_player`): they win first, then the next player
+        clockwise in seat order, and so on. This matches the table-top
+        intuition — you trigger the auction, so you get the edge.
       - Winner pays runner_up + $5, UNLESS they tied (same bid as
         runner-up), in which case they pay their own bid exactly
       - If only one player bids, they pay $5 (since runner_up = 0)
@@ -579,8 +583,16 @@ def settle_silent_auction(
     if not positive_bids:
         return None
 
-    # Sort by (-bid, idx) so highest bid first, ties broken by lower seat
-    sorted_bidders = sorted(positive_bids.items(), key=lambda kv: (-kv[1], kv[0]))
+    # Tie-break: rank seats by distance from the event drawer's seat.
+    num_players = len(state.players)
+    initiator_idx = state.players.index(active_player)
+    def _turn_rank(seat_idx: int) -> int:
+        return (seat_idx - initiator_idx) % num_players
+
+    sorted_bidders = sorted(
+        positive_bids.items(),
+        key=lambda kv: (-kv[1], _turn_rank(kv[0])),
+    )
     winner_idx, winner_bid = sorted_bidders[0]
     runner_up_bid = sorted_bidders[1][1] if len(sorted_bidders) > 1 else 0
 
@@ -598,13 +610,14 @@ def settle_silent_auction(
     return (winner_idx, amount_paid)
 
 
-def do_patent_auction(state: GameState) -> str:
+def do_patent_auction(state: GameState, active_player: Player) -> str:
     """Run a silent patent auction.
 
     Draws the top patent from the pile, collects bids, settles, applies the
     result. The bid for each player is taken from `state.pending_bids` if
     set (used by the play adapter to inject human-supplied bids); otherwise
-    falls back to a heuristic AI bid.
+    falls back to a heuristic AI bid. `active_player` is the player who
+    drew the event — used for tie-breaking (see settle_silent_auction).
     """
     patent = _draw_patent(state)
     if patent is None:
@@ -638,7 +651,7 @@ def do_patent_auction(state: GameState) -> str:
         state.players[idx].name: amt for idx, amt in bids.items()
     })
 
-    result = settle_silent_auction(state, patent, bids)
+    result = settle_silent_auction(state, patent, bids, active_player)
 
     if result is not None:
         state.log.annotate("winner", state.players[result[0]].name)
@@ -975,7 +988,7 @@ def execute_event(state: GameState, event: EventCard, active_player: Player) -> 
         case EventType.DRAW_BUILDING_CARD:
             detail = do_draw_building_card(state)
         case EventType.PATENT_AUCTION:
-            detail = do_patent_auction(state)
+            detail = do_patent_auction(state, active_player)
         case EventType.END_ROUND:
             _record_event_line(state, kind="header", text="END OF ROUND")
             do_power_bill(state)

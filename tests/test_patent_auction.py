@@ -61,14 +61,14 @@ class TestSettleSilentAuction:
         cards, contracts = _load()
         state = GameState.create(cards, contracts, num_players=3)
         patent = _patent("Test")
-        result = settle_silent_auction(state, patent, bids={0: 0, 1: 0, 2: 0})
+        result = settle_silent_auction(state, patent, bids={0: 0, 1: 0, 2: 0}, active_player=state.players[0])
         assert result is None
 
     def test_highest_bidder_wins(self):
         cards, contracts = _load()
         state = GameState.create(cards, contracts, num_players=3)
         patent = _patent("Test")
-        result = settle_silent_auction(state, patent, bids={0: 5, 1: 20, 2: 10})
+        result = settle_silent_auction(state, patent, bids={0: 5, 1: 20, 2: 10}, active_player=state.players[0])
         assert result is not None
         winner_idx, amount = result
         assert winner_idx == 1
@@ -79,17 +79,52 @@ class TestSettleSilentAuction:
         cards, contracts = _load()
         state = GameState.create(cards, contracts, num_players=3)
         patent = _patent("Test")
-        result = settle_silent_auction(state, patent, bids={0: 20, 1: 20, 2: 5})
+        result = settle_silent_auction(state, patent, bids={0: 20, 1: 20, 2: 5}, active_player=state.players[0])
         winner_idx, amount = result
-        assert winner_idx == 0  # earlier seat wins ties
+        assert winner_idx == 0  # seat 0 drew the event, so they win the tie
         # Tied bids: winner pays their own bid (not runner_up + $5)
         assert amount == 20
+
+    def test_ties_break_from_initiator_not_seat_zero(self):
+        """Tie-break rank is relative to the player who drew the event.
+
+        Regression: previously ties broke by raw seat index, so seat 0 always
+        won ties regardless of whose turn triggered the auction. Now, the
+        player who drew the event gets first crack, then the next player in
+        turn order, and so on.
+        """
+        cards, contracts = _load()
+        state = GameState.create(cards, contracts, num_players=3)
+        patent = _patent("Test")
+        # P0 and P1 tied at 20. If P2 drew the event, tie-break order is
+        # P2 -> P0 -> P1, so P0 wins the tie (distance 1 from initiator)
+        # over P1 (distance 2).
+        result = settle_silent_auction(
+            state, patent, bids={0: 20, 1: 20, 2: 0}, active_player=state.players[2],
+        )
+        assert result[0] == 0
+
+        # Now ties between P1 and P2 with P1 drawing — P1 wins (distance 0)
+        # even though P2 has a lower "next in turn order" distance than the
+        # old bug-compat seat-0 tiebreak would have favored.
+        state2 = GameState.create(cards, contracts, num_players=3)
+        result2 = settle_silent_auction(
+            state2, patent, bids={0: 0, 1: 15, 2: 15}, active_player=state2.players[1],
+        )
+        assert result2[0] == 1
+
+        # And P0 wins when P0 draws a tie with P2 (distance 0 vs 2)
+        state3 = GameState.create(cards, contracts, num_players=3)
+        result3 = settle_silent_auction(
+            state3, patent, bids={0: 10, 1: 0, 2: 10}, active_player=state3.players[0],
+        )
+        assert result3[0] == 0
 
     def test_only_one_bidder_pays_5(self):
         cards, contracts = _load()
         state = GameState.create(cards, contracts, num_players=3)
         patent = _patent("Test")
-        result = settle_silent_auction(state, patent, bids={0: 25, 1: 0, 2: 0})
+        result = settle_silent_auction(state, patent, bids={0: 25, 1: 0, 2: 0}, active_player=state.players[0])
         winner_idx, amount = result
         assert winner_idx == 0
         assert amount == 5  # runner_up = 0, so pays 0 + 5 = 5
@@ -100,7 +135,7 @@ class TestSettleSilentAuction:
         patent = _patent("Test", rates=[(Resource.PWR, 1), (Resource.FE, 2)])
         rate_pwr_before = state.players[1].rate(Resource.PWR)
         rate_fe_before = state.players[1].rate(Resource.FE)
-        settle_silent_auction(state, patent, bids={0: 10, 1: 20})
+        settle_silent_auction(state, patent, bids={0: 10, 1: 20}, active_player=state.players[0])
         assert patent in state.players[1].buildings_played
         assert state.players[1].rate(Resource.PWR) == rate_pwr_before + 1
         assert state.players[1].rate(Resource.FE) == rate_fe_before + 2
@@ -111,7 +146,7 @@ class TestSettleSilentAuction:
         patent = _patent("Test")
         money_before = state.players[1].money
         debt_before = state.players[1].debt
-        settle_silent_auction(state, patent, bids={0: 10, 1: 20})
+        settle_silent_auction(state, patent, bids={0: 10, 1: 20}, active_player=state.players[0])
         assert state.players[1].money == money_before  # cash unchanged
         assert state.players[1].debt == debt_before + 15  # debt grows by 10+5
 
@@ -124,7 +159,7 @@ class TestDoPatentAuction:
         cards, contracts = _load()
         state = GameState.create(cards, contracts, num_players=3)
         # patent_pile defaults to empty
-        detail = do_patent_auction(state)
+        detail = do_patent_auction(state, state.players[0])
         assert "no patents" in detail.lower()
 
     def test_runs_silent_auction_with_ai_bids(self):
@@ -133,7 +168,7 @@ class TestDoPatentAuction:
         state = GameState.create(cards, contracts, num_players=3, patent_pile=patents)
         # With default cash, every player should bid the same heuristic amount,
         # and ties go to seat 0.
-        detail = do_patent_auction(state)
+        detail = do_patent_auction(state, state.players[0])
         assert "AlphaPatent" in detail
         # The patent should now be in some player's buildings_played
         winners = [
@@ -148,7 +183,7 @@ class TestDoPatentAuction:
         patents = [_patent("BetaPatent")]
         state = GameState.create(cards, contracts, num_players=3, patent_pile=patents)
         state.pending_bids = {0: 0, 1: 50, 2: 0}  # P1 bids high, others pass
-        detail = do_patent_auction(state)
+        detail = do_patent_auction(state, state.players[0])
         assert any(c.building == "BetaPatent" for c in state.players[1].buildings_played)
         # Pending bids should be cleared after consumption
         assert state.pending_bids == {}
@@ -158,8 +193,8 @@ class TestDoPatentAuction:
         cards, contracts = _load()
         patents = [_patent("First"), _patent("Second"), _patent("Third")]
         state = GameState.create(cards, contracts, num_players=3, patent_pile=patents)
-        detail1 = do_patent_auction(state)
-        detail2 = do_patent_auction(state)
+        detail1 = do_patent_auction(state, state.players[0])
+        detail2 = do_patent_auction(state, state.players[0])
         # The exact patent that wins depends on shuffle order at create time,
         # but each auction should consume distinct patents.
         assert state.patent_idx == 2
@@ -304,3 +339,58 @@ class TestAuctionPrompt:
         assert not game.is_awaiting_prompt()
         # P0 should have won (only positive bid)
         assert any(c.building == "Test" for c in game.state.players[0].buildings_played)
+
+    def test_chain_suspended_auction_does_not_skip_next_turn(self):
+        """When a chained redraw lands on a patent auction, the *current*
+        player's turn must stay in progress until the auction resolves —
+        the auction must NOT leak into the next player's turn.
+
+        Regression: end_human_turn used to unconditionally call
+        _finalize_human_turn after _chain_redraws. If the chain had
+        suspended on a prompt, the next player's begin_human_turn would
+        then re-show the stale prompt and resolve_pending_prompt would
+        consume THEIR turn to settle the auction — the next player never
+        got to build/sell/contract.
+        """
+        game = PlayableGame(seed=42, max_turns=8)
+        game.state.patent_pile = [_patent("ChainedPatent", rates=[(Resource.PWR, 1)])]
+        game.state.patent_idx = 0
+
+        # Seed the deck so the human's primary event is a redraws=True
+        # news card and the NEXT event (which the chain will peek) is a
+        # patent auction. Replace the existing two slots rather than
+        # inserting, so event_idx math matches what begin_human_turn /
+        # end_human_turn expect.
+        start = game.state.event_idx
+        news_redraw = _ec(EventType.NEWS_BULLETIN, redraws=True)
+        auction_event = _ec(EventType.PATENT_AUCTION)
+        game.state.event_deck[start : start + 2] = [news_redraw, auction_event]
+
+        game.begin_human_turn()
+        game.apply_human_action({"type": "pass"})
+        result = game.end_human_turn()
+
+        # Must return awaiting_prompt WITHOUT finalizing. Turn is still in
+        # progress for the original player.
+        assert result.get("awaiting_prompt") is True, (
+            "end_human_turn returned a finalized result even though the "
+            "redraw chain suspended on a prompt — next player's turn will "
+            "be consumed by the stale auction."
+        )
+        assert game.human_turn_in_progress is True
+        assert game.is_awaiting_prompt()
+        assert game.pending_prompt()["kind"] == "patent_auction"
+        # Resolve and confirm the turn finalizes cleanly, without touching
+        # the next player's turn.
+        turn_count_before = game._turn_count
+        resolve_result = game.resolve_pending_prompt({"bids": {0: 10}})
+        assert resolve_result["ok"]
+        assert not game.is_awaiting_prompt()
+        # The same player's turn finalized — _turn_count should not have
+        # advanced past what begin_human_turn set it to.
+        assert game._turn_count == turn_count_before
+        # And the current player's buildings_played should include the patent
+        # (they were the only bidder).
+        assert any(
+            c.building == "ChainedPatent" for c in game.state.players[0].buildings_played
+        )

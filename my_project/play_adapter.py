@@ -324,9 +324,9 @@ class PlayableGame:
         """Complete the human turn: draw back to hand size, fire the event.
 
         Returns a dict describing the fired event so the UI can render it.
-        If the event needs human input (auction bid, OC pick), pauses with
-        a pending_prompt and the turn finalization happens later when the
-        prompt is resolved.
+        If the event needs human input (auction bid, debt paydown), pauses
+        with a pending_prompt and the turn finalization happens later when
+        the prompt is resolved via resolve_pending_prompt.
         """
         if not self.human_turn_in_progress:
             raise RuntimeError("begin_human_turn was not called")
@@ -348,41 +348,115 @@ class PlayableGame:
         self.state.event_idx += 1
         self.state.last_event_lines = []
 
-        # Check if this event needs human input (patent auction bid) before firing.
+        suspended, detail, lines, chained_events, primary_structured = (
+            self._fire_event_with_chain(event, player)
+        )
+        if suspended:
+            # DO NOT finalize — the turn is still in progress waiting on the
+            # human's prompt answer. resolve_pending_prompt will resume and
+            # then finalize. Historically end_human_turn finalized here
+            # regardless, which caused the prompt to leak into the next
+            # player's turn and silently consume it.
+            return {
+                "type": event.type.value,
+                "detail": detail,
+                "lines": lines,
+                "structured": primary_structured,
+                "chained_events": chained_events,
+                "awaiting_prompt": True,
+            }
+
+        result = self._finalize_human_turn(event, detail)
+        result["chained_events"] = chained_events
+        result["structured"] = primary_structured
+        return result
+
+    # --- Shared event + prompt helpers (used by both human and AI paths) ---
+
+    def _fire_event_with_chain(
+        self,
+        event: "EventCard",
+        player: "Player",
+    ) -> tuple[bool, str, list[dict], list[dict], dict]:
+        """Fire the turn's primary event and any redraw chain.
+
+        Returns (suspended, detail, lines, chained_events, primary_structured).
+        If `suspended` is True, a prompt needs a human answer — the caller
+        MUST NOT finalize the turn. Three suspension paths are collapsed
+        into this single helper so the two callers (end_human_turn and
+        step_ai_turn) can't diverge:
+
+          1. The primary event itself needs a prompt BEFORE firing
+             (patent_auction drawn directly; debt_collection with live debt).
+          2. Execution of the primary event triggers a nested prompt (rare).
+          3. A chained redraw event needs a prompt BEFORE firing (e.g. a
+             News Bulletin with redraws chains into a Patent Auction).
+
+        In every path we set state.pending_prompt / _suspended_event /
+        _suspended_chain_active so resolve_pending_prompt can pick the
+        suspended event up later.
+        """
         from my_project.simulation import _event_needs_prompt, _has_human_player
+
+        # (1) Pre-firing prompt check on the primary event.
         prompt = _event_needs_prompt(self.state, event)
         if prompt is not None and _has_human_player(self.state):
             self.state.pending_prompt = prompt
             self.state._suspended_event = event
             self.state._suspended_chain_active = False
-            self.last_event = f"awaiting prompt: {prompt['kind']}"
-            return {
-                "type": event.type.value,
-                "detail": self.last_event,
-                "lines": [],
-                "awaiting_prompt": True,
-            }
+            detail = f"awaiting prompt: {prompt['kind']}"
+            self.last_event = detail
+            return (True, detail, [], [], {})
 
-        # Execute the event, then chain redraws.
+        # Fire the primary event.
         event_detail = execute_event(self.state, event, player)
+        primary_data = getattr(self.state, "_last_event_data", None)
+        primary_structured = dict(primary_data) if primary_data else {}
+
+        # (2) Did execution itself trigger a nested prompt?
         if self.state.pending_prompt is not None:
-            primary_data = getattr(self.state, "_last_event_data", None)
             self.last_event = event_detail
-            return {
-                "type": event.type.value,
-                "detail": event_detail,
-                "lines": list(self.state.last_event_lines),
-                "structured": dict(primary_data) if primary_data else {},
-                "awaiting_prompt": True,
-            }
-        # Chain redraw events — also captures primary structured data
-        chain_detail, chained_events, primary_structured = self._chain_redraws(player, event)
-        if chain_detail:
-            event_detail = f"{event_detail} | {chain_detail}"
-        result = self._finalize_human_turn(event, event_detail)
-        result["chained_events"] = chained_events
-        result["structured"] = primary_structured
-        return result
+            return (
+                True,
+                event_detail,
+                list(self.state.last_event_lines),
+                [],
+                primary_structured,
+            )
+
+        # (3) Chain redraws — may internally set pending_prompt via
+        # _chain_redraws when it peeks a chained event that needs input.
+        chain_detail, chained_events, chain_primary = self._chain_redraws(player, event)
+        if chain_primary:
+            primary_structured = chain_primary
+        full_detail = event_detail + (" | " + chain_detail if chain_detail else "")
+        lines = list(self.state.last_event_lines)
+
+        suspended = self.state.pending_prompt is not None
+        if suspended:
+            self.last_event = full_detail
+
+        return (suspended, full_detail, lines, chained_events, primary_structured)
+
+    def _resume_after_prompt(
+        self,
+        player: "Player",
+    ) -> tuple[bool, str, list[dict]]:
+        """Resume a suspended event after the prompt has been answered.
+
+        Returns (still_paused, full_detail, lines). If still_paused is
+        True, the resumed chain hit ANOTHER prompt — caller should return
+        a pause result instead of finalizing.
+        """
+        from my_project.simulation import resume_pending_event
+        detail = resume_pending_event(self.state, player)
+        old_detail = self.last_event or ""
+        full_detail = (old_detail + " | " + detail) if old_detail else detail
+        lines = list(self.state.last_event_lines)
+        if self.state.pending_prompt is not None:
+            self.last_event = full_detail
+            return (True, full_detail, lines)
+        return (False, full_detail, lines)
 
     def _chain_redraws(self, player, event) -> tuple[str, list[dict], dict]:
         """If the event has redraws, keep drawing and executing events.
@@ -758,39 +832,23 @@ class PlayableGame:
                 seat_idx = int(seat_idx_raw)
                 self.state.pending_debt_paydowns[seat_idx] = max(0, int(amount))
 
-        # Resume the suspended event
+        # Resume the suspended event — single code path regardless of
+        # whether the suspension came from a human or AI turn.
         if self.human_turn_in_progress:
             player = self.state.players[self._active_player_idx]
             event = self.state._suspended_event
-            detail = resume_pending_event(self.state, player)
-            old_detail = self.last_event or ""
-            full_detail = (old_detail + " | " + detail) if old_detail else detail
-            # If the resume hit ANOTHER prompt, we're still paused
-            if self.state.pending_prompt is not None:
-                self.last_event = full_detail
-                return {
-                    "ok": True,
-                    "awaiting_prompt": True,
-                    "detail": full_detail,
-                    "lines": list(self.state.last_event_lines),
-                }
+            paused, full_detail, lines = self._resume_after_prompt(player)
+            if paused:
+                return {"ok": True, "awaiting_prompt": True, "detail": full_detail, "lines": lines}
             finalized = self._finalize_human_turn(event, full_detail)
             return {"ok": True, **finalized}
-        elif self._suspended_ai_turn is not None:
+        if self._suspended_ai_turn is not None:
             ai_state = self._suspended_ai_turn
             player = self.state.players[ai_state["acting_player_idx"]]
             event = ai_state["event"]
-            detail = resume_pending_event(self.state, player)
-            old_detail = self.last_event or ""
-            full_detail = (old_detail + " | " + detail) if old_detail else detail
-            if self.state.pending_prompt is not None:
-                self.last_event = full_detail
-                return {
-                    "ok": True,
-                    "awaiting_prompt": True,
-                    "detail": full_detail,
-                    "lines": list(self.state.last_event_lines),
-                }
+            paused, full_detail, lines = self._resume_after_prompt(player)
+            if paused:
+                return {"ok": True, "awaiting_prompt": True, "detail": full_detail, "lines": lines}
             finalized = self._finalize_ai_turn(
                 ai_state["acting_player_idx"],
                 ai_state["actions_log"],
@@ -881,46 +939,18 @@ class PlayableGame:
         event = self.state.event_deck[self.state.event_idx]
         self.state.event_idx += 1
         self.state.last_event_lines = []
-        # Check for prompt before firing (e.g. patent auction).
-        from my_project.simulation import _event_needs_prompt, _has_human_player
-        prompt = _event_needs_prompt(self.state, event)
-        if prompt is not None and _has_human_player(self.state):
-            self.state.pending_prompt = prompt
-            self.state._suspended_event = event
-            self.state._suspended_chain_active = False
-            self.last_event = f"awaiting prompt: {prompt['kind']}"
-            self.last_ai_actions = actions_log
-            self._suspended_ai_turn = {
-                "acting_player_idx": acting_player_idx,
-                "actions_log": actions_log,
-                "event": event,
-            }
-            return {
-                "ok": True,
-                "player_index": acting_player_idx,
-                "actions": actions_log,
-                "event": {
-                    "type": event.type.value,
-                    "detail": self.last_event,
-                    "lines": [],
-                },
-                "awaiting_prompt": True,
-            }
 
-        event_detail = execute_event(self.state, event, player)
-        # Chain redraw events — also captures primary structured data
-        chain_detail, chained_events, primary_structured = self._chain_redraws(player, event)
+        suspended, event_detail, lines, chained_events, primary_structured = (
+            self._fire_event_with_chain(event, player)
+        )
         self._primary_event_data = primary_structured
-        if chain_detail:
-            event_detail = f"{event_detail} | {chain_detail}"
-        self.last_event = event_detail
         self.last_ai_actions = actions_log
         self._last_chained_events = chained_events
 
-        if self.state.pending_prompt is not None:
-            # An AI's event needs human input (e.g. an auction event fired
-            # mid-AI-turn but a human in the game must bid). Pause here; the
-            # play UI will resolve the prompt and then call resume_ai_turn().
+        if suspended:
+            # Pause the AI turn so resolve_pending_prompt can finish it
+            # once the human(s) answer. Preserving actions_log means the
+            # feed can still show what the AI did before the prompt.
             self._suspended_ai_turn = {
                 "acting_player_idx": acting_player_idx,
                 "actions_log": actions_log,
@@ -933,7 +963,7 @@ class PlayableGame:
                 "event": {
                     "type": event.type.value,
                     "detail": event_detail,
-                    "lines": list(self.state.last_event_lines),
+                    "lines": lines,
                 },
                 "awaiting_prompt": True,
             }

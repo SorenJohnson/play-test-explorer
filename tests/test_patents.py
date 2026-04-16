@@ -438,7 +438,7 @@ class TestEnergyVault:
         state = GameState.create(cards, contracts, num_players=3)
         p = state.players[0]
         patent = _patent("Energy Vault")
-        settle_silent_auction(state, patent, bids={0: 5})
+        settle_silent_auction(state, patent, bids={0: 5}, active_player=state.players[0])
         assert p.patent_state.get("energy_vault") == 10
 
     def test_shields_negative_power_bill(self):
@@ -658,7 +658,7 @@ class TestThinkingMachines:
         p = state.players[0]
         hand_before = len(p.hand)
         patent = _patent("Thinking Machines")
-        settle_silent_auction(state, patent, bids={0: 5})
+        settle_silent_auction(state, patent, bids={0: 5}, active_player=state.players[0])
         # Drew 1 card → hand grew by 1
         assert len(p.hand) == hand_before + 1
 
@@ -668,7 +668,7 @@ class TestThinkingMachines:
         p = state.players[0]
         hand_size_before = p.hand_size
         patent = _patent("Thinking Machines")
-        settle_silent_auction(state, patent, bids={0: 5})
+        settle_silent_auction(state, patent, bids={0: 5}, active_player=state.players[0])
         assert p.hand_size == hand_size_before + 1
 
     def test_apply_patent_acquisition_directly(self):
