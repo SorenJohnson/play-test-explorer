@@ -564,7 +564,6 @@ function renderGameBrowser() {
           ${nwCells}
           <td>${totalContracts}</td>
           <td>${g.turn_count}</td>
-          <td><a href="game.html?file=${g._file}&game=${g._idx}" style="color:#58a6ff; font-size:0.75rem">Inspect →</a></td>
         </tr>`;
       })
       .join("");
