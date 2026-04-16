@@ -11,3 +11,6 @@ my_project/data/*
 !my_project/data/*.md
 frontend/data/full/
 .DS_Store
+
+# Claude Code personal (per-user) approvals — team-shared perms live in .claude/settings.json
+.claude/settings.local.json

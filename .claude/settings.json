@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git tag:*)",
+      "Bash(git merge:*)",
+      "Bash(grep -n \"class Player\\\\|class GameState\" /workspaces/play-test-explorer/my_project/*.py)",
+      "Bash(git branch:*)",
+      "Bash(git fetch:*)",
+      "Bash(git pull:*)",
+      "WebSearch",
+      "Bash(claude mcp:*)",
+      "Read(//home/vscode/.claude/**)",
+      "Bash(chmod +x /workspaces/play-test-explorer/.devcontainer/post-create.sh)"
+    ]
+  }
+}

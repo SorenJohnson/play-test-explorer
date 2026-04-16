@@ -31,6 +31,25 @@ uv run pytest                                   # Run tests
 
 Rules summary and design notes are in [context/DESIGN-DOC.md](context/DESIGN-DOC.md).
 
+### Development environment (Codespaces / devcontainer)
+
+The repo ships a [devcontainer](.devcontainer/devcontainer.json) so the full workflow — Python env, frontend serving, and AI-assisted browser testing — reproduces in one click via **GitHub Codespaces** or any devcontainer-compatible editor.
+
+**What you get automatically:**
+- Python 3.14 + `uv sync` (project deps)
+- Node.js + pre-installed Playwright Chromium
+- `gh` CLI, live-server (for serving `frontend/` locally)
+- Claude Code VS Code extension (see [anthropic.claude-code](https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code))
+- Playwright MCP server wired up via [.mcp.json](.mcp.json) — lets Claude Code drive a headless Chromium to click through the UI, read console logs, and take screenshots
+
+**One-time setup after the Codespace boots:**
+1. Open the Claude Code panel in the sidebar and sign in with your Anthropic account
+2. When Claude Code prompts to approve the `playwright` MCP server (from [.mcp.json](.mcp.json)), accept it
+3. Serve the frontend: right-click any `frontend/*.html` file → **Open with Live Server**
+4. Ask Claude Code to test the game — e.g. *"Open [multiplayer.html](frontend/multiplayer.html) in the browser, start a 2-player game, and verify the sell picker shows Hacker Array controls."*
+
+**Local (non-Codespace) use:** Open the repo in VS Code with the Dev Containers extension → *"Reopen in Container"*. Same result.
+
 ## What's implemented (v0.2.0)
 
 **Core game**
