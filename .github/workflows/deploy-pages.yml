@@ -21,6 +21,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # frontend/data/game/my_project/ is a generated Pyodide bundle — it lives
+      # in .gitignore and must be materialized here before the static upload.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Set up Python
+        run: uv python install 3.10
+      - name: Install dependencies
+        run: uv sync --all-extras
+      - name: Sync Python sources into frontend/data/game/ for Pyodide
+        run: uv run python -m my_project.cli sync-play
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

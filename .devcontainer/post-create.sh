@@ -5,6 +5,13 @@ set -euo pipefail
 echo "==> Installing Python dependencies with uv"
 uv sync
 
+echo "==> Materializing the Pyodide copy of my_project/ for the browser game"
+# frontend/data/game/my_project/ is gitignored — generated here so Live
+# Server can serve a working multiplayer.html out of the box. Devs must
+# re-run this after any edit to my_project/ that they want to see in the
+# browser (the CI deploy workflow regenerates it automatically).
+uv run python -m my_project.cli sync-play
+
 echo "==> Configuring gh CLI git helper"
 gh auth setup-git || true
 
