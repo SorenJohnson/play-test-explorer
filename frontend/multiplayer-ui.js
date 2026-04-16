@@ -1,0 +1,1432 @@
+// ===== UI Rendering + Feed Formatting + Game Controls =====
+//
+// Wrapped in an IIFE; public API on MP.ui.
+// Depends on: window.MP; top-level constants from multiplayer.js
+// (RESOURCE_ORDER, RESOURCE_COLORS, PLAYER_COLORS) resolved at call time.
+// Calls into MP.anim.* / MP.core.* / MP.network.* for cross-module work;
+// those are already namespaced in the function bodies below.
+
+(function () {
+  const MP = window.MP = window.MP || {};
+
+  // ===== Selection helpers =====
+  
+  function clearSelection() {
+    MP.selectedCards.clear();
+    MP.selectedContract = -1;
+    MP.pendingPoolSwap = -1;
+  }
+  
+  // ===== Rendering =====
+  
+  function isMyTurn(s) {
+    s = s || MP.currentState;
+    return s && s.current_player_index === MP.mySeat && !s.is_over;
+  }
+  
+  function renderGame() {
+    if (!MP.currentState) return;
+    const s = MP.currentState;
+    const myTurn = isMyTurn(s);
+  
+    // Status bar
+    const roundStr = s.num_rounds > 1 ? `${s.round} (Rd ${s.deck_round || 1}/${s.num_rounds})` : `${s.round || "-"}`;
+    document.getElementById("mp-round").textContent = roundStr;
+    document.getElementById("mp-turn").textContent = `${(s.turn_index || 0) + 1} / ${s.total_turns || "?"}`;
+    const activeP = s.players[s.current_player_index];
+    const activeLabel = activeP ? `${activeP.name}${s.current_player_index === MP.mySeat ? " (You)" : ""}` : "-";
+    document.getElementById("mp-active").textContent = activeLabel;
+    document.getElementById("mp-cards-left").textContent = s.cards_in_deck ?? "-";
+  
+    // Cards remaining / AP display
+    const apEl = document.getElementById("mp-ap-display");
+    if (apEl) {
+      if (myTurn && MP.currentLegal) {
+        const cr = MP.currentLegal.cards_remaining ?? 2;
+        const builtMsg = s.human_already_built ? " (built)" : "";
+        apEl.textContent = `Cards: ${cr}/2${builtMsg}`;
+        apEl.className = "status-value " + (cr >= 2 ? "ap-full" : cr >= 1 ? "ap-half" : "ap-empty");
+      } else {
+        apEl.textContent = "-";
+        apEl.className = "status-value";
+      }
+    }
+  
+    const banner = document.getElementById("turn-banner");
+    banner.style.display = myTurn ? "block" : "none";
+  
+    renderMarket(s);
+    renderContracts(s);
+    renderPool(s);
+    renderHand(s);
+    renderActions(s);
+    renderPlayerPanel(s);
+    renderOpponents(s);
+    MP.anim.renderDeckViewer();
+  }
+  
+  const PRICE_TRACK = [1,1,1,2,2,2,3,3,4,4,5,5,6,7,8,9,10];
+  let expandedMarketResource = null;
+  
+  function stepsAtSamePrice(pos, direction) {
+    // Count remaining positions in direction with the SAME price (not including current)
+    const curPrice = PRICE_TRACK[pos];
+    let steps = 0;
+    let p = pos + direction;
+    while (p >= 0 && p < PRICE_TRACK.length && PRICE_TRACK[p] === curPrice) {
+      steps++;
+      p += direction;
+    }
+    return steps;
+  }
+  
+  function renderMarket(s) {
+    const grid = document.getElementById("mp-market-grid");
+    const positions = s.market_positions || {};
+  
+    grid.innerHTML = RESOURCE_ORDER.map(r => {
+      const price = s.market[r] || 0;
+      const pos = positions[r] ?? 9;
+      const stepsDown = stepsAtSamePrice(pos, -1);
+      const stepsUp = stepsAtSamePrice(pos, 1);
+      const dotsLeft = stepsDown > 0 ? Array(stepsDown).fill('<span class="step-dot"></span>').join("") : "";
+      const dotsRight = stepsUp > 0 ? Array(stepsUp).fill('<span class="step-dot"></span>').join("") : "";
+      const isExpanded = expandedMarketResource === r;
+      return `
+        <div class="market-cell ${isExpanded ? 'expanded' : ''}" data-res="${r}">
+          <div class="res-name" style="color:${RESOURCE_COLORS[r]}">${r}</div>
+          <div class="res-price-wrap">
+            <span class="dots-down" title="${stepsDown} step${stepsDown !== 1 ? 's' : ''} down">${dotsLeft}</span>
+            <span class="res-price">$${price}</span>
+            <span class="dots-up" title="${stepsUp} step${stepsUp !== 1 ? 's' : ''} up">${dotsRight}</span>
+          </div>
+        </div>
+      `;
+    }).join("");
+  
+    // Wire click to expand ruler + toggle chart line
+    grid.querySelectorAll(".market-cell").forEach(el => {
+      el.addEventListener("click", () => {
+        const r = el.dataset.res;
+        const wasSelected = expandedMarketResource === r;
+        expandedMarketResource = wasSelected ? null : r;
+        renderMarketRuler(s);
+        // Toggle chart visibility: isolate clicked resource or show all
+        if (MP.marketChart) {
+          RESOURCE_ORDER.forEach((res, i) => {
+            if (wasSelected) {
+              MP.marketChart.setDatasetVisibility(i, true);
+            } else {
+              MP.marketChart.setDatasetVisibility(i, res === r);
+            }
+          });
+          MP.marketChart.update();
+        }
+        // Dim/undim market cells
+        grid.querySelectorAll(".market-cell").forEach(cell => {
+          if (wasSelected) {
+            cell.style.opacity = "1";
+          } else {
+            cell.style.opacity = cell.dataset.res === r ? "1" : "0.4";
+          }
+        });
+      });
+    });
+  
+    renderMarketRuler(s);
+    renderMarketChart(s);
+  }
+  
+  function renderMarketRuler(s) {
+    const ruler = document.getElementById("mp-market-ruler");
+    if (!ruler) return;
+    ruler.style.display = "block";
+  
+    const positions = s.market_positions || {};
+    const selectedRes = expandedMarketResource;
+    const selectedPos = selectedRes ? (positions[selectedRes] ?? 9) : -1;
+    const selectedColor = selectedRes ? RESOURCE_COLORS[selectedRes] : "#888";
+  
+    // Build position → list of resources at that position
+    const resourcesAtPos = {};
+    for (const r of RESOURCE_ORDER) {
+      const pos = positions[r] ?? 9;
+      if (!resourcesAtPos[pos]) resourcesAtPos[pos] = [];
+      resourcesAtPos[pos].push(r);
+    }
+  
+    ruler.innerHTML = `
+      <div class="ruler-track">
+        ${PRICE_TRACK.map((p, i) => {
+          const isCurrent = i === selectedPos;
+          const resHere = resourcesAtPos[i] || [];
+          const dots = resHere.map(r => {
+            const isSelected = r === selectedRes;
+            return `<span class="ruler-res-dot ${isSelected ? 'selected' : ''}" style="background:${RESOURCE_COLORS[r]}" title="${r}"></span>`;
+          }).join("");
+          return `<span class="ruler-pip ${isCurrent ? 'current' : ''}" style="${isCurrent ? 'border-color:' + selectedColor : ''}">
+            <span class="ruler-dots-row">${dots}</span>
+            <span class="ruler-price">$${p}</span>
+          </span>`;
+        }).join("")}
+      </div>
+    `;
+  }
+  
+  function renderMarketChart(s) {
+    let history = s.market_history || [];
+    // Prepend current market as turn 0 if history is empty or missing the start
+    if (history.length === 0 && s.market) {
+      history = [{turn: 0, market: s.market}];
+    }
+    if (history.length < 1) return;
+    const canvas = document.getElementById("mp-market-chart");
+    if (!canvas) return;
+    const labels = history.map(h => h.turn);
+    const datasets = RESOURCE_ORDER.map(r => ({
+      label: r,
+      data: history.map(h => h.market?.[r] || 0),
+      borderColor: RESOURCE_COLORS[r],
+      backgroundColor: "transparent",
+      borderWidth: 1.5,
+      pointRadius: 0,
+      tension: 0.3,
+    }));
+    if (MP.marketChart) {
+      MP.marketChart.data.labels = labels;
+      MP.marketChart.data.datasets = datasets;
+      MP.marketChart.update("none");
+    } else {
+      MP.marketChart = new Chart(canvas, {
+        type: "line",
+        data: {labels, datasets},
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {legend: {display: false}},
+          scales: {
+            x: {display: true, ticks: {color: "#8b949e", font: {size: 9}}, grid: {color: "#21262d"}},
+            y: {display: true, ticks: {color: "#8b949e", font: {size: 9}, callback: v => "$" + v}, grid: {color: "#21262d"}},
+          },
+        },
+      });
+    }
+  }
+  
+  function renderContracts(s) {
+    const grid = document.getElementById("mp-contracts-grid");
+    const me = s.players[MP.mySeat];
+    const myTurn = isMyTurn(s);
+    grid.innerHTML = (s.available_contracts || []).map((c, ci) => {
+      const reqs = (c.requirements || []).map(r => {
+        const have = me?.rates?.[r.resource] || 0;
+        const met = have >= r.amount;
+        return `<span class="contract-req ${met ? 'met' : 'unmet'}">${r.amount} ${r.resource}</span>`;
+      }).join(", ");
+      const sel = ci === MP.selectedContract ? "selected" : "";
+      const inactive = !myTurn ? "inactive" : "";
+      return `
+        <div class="contract-card ${sel} ${inactive}" data-ci="${ci}">
+          <div class="contract-reward">$${c.reward}</div>
+          <div>${reqs}</div>
+        </div>
+      `;
+    }).join("");
+    if (myTurn) {
+      grid.querySelectorAll(".contract-card").forEach(el => {
+        el.addEventListener("click", () => {
+          const ci = parseInt(el.dataset.ci);
+          MP.selectedContract = MP.selectedContract === ci ? -1 : ci;
+          renderContracts(s);
+          // Re-render actions so the Space Elevator resource picker
+          // updates to reflect the newly-selected contract's requirements.
+          renderActions(s);
+        });
+      });
+    }
+  }
+  
+  function renderPool(s) {
+    const grid = document.getElementById("mp-pool-grid");
+    const myTurn = isMyTurn(s);
+    const canSwap = myTurn && s.can_pool_swap && MP.selectedCards.size === 1;
+    const poolInactive = myTurn && !canSwap ? "inactive" : "";
+    grid.innerHTML = (s.pool || []).map((c, i) => {
+      const swappable = canSwap ? "swap-target" : "";
+      return `<div class="pool-card ${swappable} ${poolInactive}" data-pi="${i}">${renderCard(c)}</div>`;
+    }).join("");
+    if (canSwap) {
+      grid.querySelectorAll(".pool-card").forEach(el => {
+        el.addEventListener("click", () => {
+          const pi = parseInt(el.dataset.pi);
+          const hi = Array.from(MP.selectedCards)[0];
+          executePoolSwap(hi, pi);
+          // Keep the swapped-in card selected at the same hand index
+          MP.selectedCards.clear();
+          MP.selectedCards.add(hi);
+          MP.selectedContract = -1;
+          MP.pendingPoolSwap = -1;
+        });
+      });
+    }
+  }
+  
+  function renderHand(s) {
+    const grid = document.getElementById("mp-hand-grid");
+    const me = s.players[MP.mySeat];
+    const hand = me?.hand || [];
+    const myTurn = isMyTurn(s);
+  
+    if (hand.length === 0) {
+      grid.innerHTML = `<div style="color:#8b949e;padding:12px">Hand is empty</div>`;
+      document.getElementById("mp-build-estimate").textContent = "";
+      return;
+    }
+  
+    // Affordability hints from legal actions
+    const affordableSet = new Set(MP.currentLegal?.affordable_single_builds || []);
+    const cr = MP.currentLegal?.cards_remaining ?? 2;
+  
+    const inactive = !myTurn ? "inactive" : "";
+    grid.innerHTML = hand.map((c, i) => {
+      const sel = MP.selectedCards.has(i) ? "selected" : "";
+      return `<div class="hand-card ${sel} ${inactive}" data-hi="${i}">${renderCard(c)}</div>`;
+    }).join("");
+  
+    // Build cost estimate — computed locally so the host and client views
+    // match. Mirrors compute_build_deficit in simulation.py.
+    const estimateEl = document.getElementById("mp-build-estimate");
+    if (MP.selectedCards.size > 0 && myTurn) {
+      const est = estimateBuildCostLocal(s, [...MP.selectedCards]);
+      if (est.ok) {
+        const defParts = Object.entries(est.deficit || {}).map(([r, a]) => `${a} ${r}`).join(", ");
+        estimateEl.innerHTML = `Build cost: <strong>$${est.cost}</strong>${defParts ? ` (buy ${defParts})` : ' (free)'}`;
+      } else {
+        estimateEl.innerHTML = `<span style="color:#f85149">${est.reason || 'Cannot build'}</span>`;
+      }
+    } else {
+      estimateEl.textContent = "";
+    }
+  
+    if (myTurn) {
+      grid.querySelectorAll(".hand-card:not(.disabled)").forEach(el => {
+        el.addEventListener("click", () => {
+          const hi = parseInt(el.dataset.hi);
+          if (MP.selectedCards.has(hi)) MP.selectedCards.delete(hi);
+          else if (MP.selectedCards.size < Math.max(cr, 1)) MP.selectedCards.add(hi);
+          renderHand(s);
+          renderPool(s);
+          renderActions(s);
+        });
+      });
+    }
+  }
+  
+  function executePoolSwap(handIdx, poolIdx) {
+    // Capture positions before swap
+    const handEl = document.querySelectorAll("#mp-hand-grid .hand-card")[handIdx];
+    const poolEl = document.querySelectorAll("#mp-pool-grid .pool-card")[poolIdx];
+    const handRect = handEl?.getBoundingClientRect();
+    const poolRect = poolEl?.getBoundingClientRect();
+    const handHtml = handEl?.innerHTML || "";
+    const poolHtml = poolEl?.innerHTML || "";
+  
+    if (MP.role === "host") {
+      MP.game.human_pool_swap(parseInt(handIdx), parseInt(poolIdx));
+      MP.core.hostRefreshState();
+    } else {
+      MP.hostConn.send(JSON.stringify({type: "pool_swap", hand_idx: parseInt(handIdx), pool_idx: parseInt(poolIdx)}));
+    }
+  
+    // Cross-swap animation
+    if (handRect && poolRect) {
+      MP.anim.animateCard(handRect, poolRect, handHtml);
+      MP.anim.animateCard(poolRect, handRect, poolHtml);
+    }
+  }
+  
+  // Mirrors compute_build_deficit() in simulation.py. Runs on both host and
+  // client so build cost estimates render identically regardless of MP.role.
+  function estimateBuildCostLocal(state, indices) {
+    const me = state?.players?.[MP.mySeat];
+    if (!me) return {ok: false, reason: "No state"};
+    if (state.human_already_built && !MP.currentLegal?.matter_replication) {
+      return {ok: false, reason: "Already built this turn"};
+    }
+    if (!indices.length) return {ok: false, reason: "No cards selected"};
+    const cards = indices.map(i => me.hand?.[i]).filter(Boolean);
+    if (cards.length !== indices.length) return {ok: false, reason: "Invalid selection"};
+  
+    // Sum cost resources across selected cards
+    const combined = {};
+    for (const c of cards) {
+      for (const ra of (c.costs || [])) {
+        combined[ra.resource] = (combined[ra.resource] || 0) + ra.amount;
+      }
+    }
+    // Deduct player rate (floor at 0 — negative rates don't help)
+    const deficit = {};
+    for (const [res, total] of Object.entries(combined)) {
+      const rate = Math.max(0, me.rates?.[res] || 0);
+      const d = Math.max(0, total - rate);
+      if (d > 0) deficit[res] = d;
+    }
+    let cost = 0;
+    for (const [res, amount] of Object.entries(deficit)) {
+      const price = state.market?.[res] || 0;
+      cost += price * amount;
+    }
+    if (cost > (me.money || 0)) {
+      return {ok: false, reason: "Cannot afford", cost};
+    }
+    return {ok: true, cost, deficit};
+  }
+  
+  function renderCard(c) {
+    // Returns full card HTML: costs → name → rates → effect → sell/contract
+    const costs = (c.costs || []).map(r => `${r.amount} ${r.resource}`).join(", ");
+    const rates = (c.rates || []).map(r =>
+      `<span class="${r.amount > 0 ? 'rate-pos' : 'rate-neg'}">${r.amount > 0 ? '+' : ''}${r.amount} ${r.resource}</span>`
+    ).join(" ");
+    const sell = (c.can_sell || []).join("/");
+    const canContract = c.can_fulfill_contract;
+    let html = "";
+    if (costs) html += `<div class="card-costs">${costs}</div>`;
+    html += `<div class="card-name">${c.building}</div>`;
+    if (rates) html += `<div class="card-rates">${rates}</div>`;
+    if (c.effect) html += `<div class="card-effect">${c.effect}</div>`;
+    const bottomParts = [];
+    if (sell) bottomParts.push(`<span class="card-sell">Sell: ${sell}</span>`);
+    if (canContract) bottomParts.push(`<span class="card-contract">\u{1F4CB}</span>`);
+    if (bottomParts.length) html += `<div class="card-bottom">${bottomParts.join(" ")}</div>`;
+    return html;
+  }
+  
+  function renderActions(s) {
+    const myTurn = isMyTurn(s);
+    const cr = MP.currentLegal?.cards_remaining ?? 0;
+    const alreadyBuilt = s.human_already_built;
+    const buildBtn = document.getElementById("mp-build-btn");
+    const sellBtn = document.getElementById("mp-sell-btn");
+    const contractBtn = document.getElementById("mp-contract-btn");
+    const passBtn = document.getElementById("mp-pass-btn");
+  
+    const canBuild = myTurn && MP.selectedCards.size > 0 && (!alreadyBuilt || MP.currentLegal?.matter_replication);
+    buildBtn.disabled = !canBuild;
+    if (alreadyBuilt && !MP.currentLegal?.matter_replication) {
+      buildBtn.title = "Already built this turn";
+    } else {
+      buildBtn.title = "";
+    }
+  
+    // Sell: need exactly 1 card selected and it must be sellable
+    const sellCardIdx = MP.selectedCards.size === 1 ? Array.from(MP.selectedCards)[0] : -1;
+    const sellCard = sellCardIdx >= 0 ? (s.players[MP.mySeat]?.hand || [])[sellCardIdx] : null;
+    const canSell = myTurn && sellCard?.can_sell?.length > 0 && cr >= 1;
+    sellBtn.disabled = !canSell;
+  
+    // Sell resource picker + Hacker Array controls
+    const sellPicker = document.getElementById("mp-sell-picker");
+    if (sellPicker) {
+      if (canSell) {
+        const me = s.players[MP.mySeat];
+        let resBtnsHtml = "";
+        let bestRes = sellCard.can_sell[0];
+  
+        if (sellCard.can_sell.length > 1) {
+          let bestRev = 0;
+          resBtnsHtml = `<div class="sell-res-label">Sell resource:</div><div class="sell-res-btns">` +
+            sellCard.can_sell.map(r => {
+              const rate = me.rates?.[r] || 0;
+              const rev = rate > 0 ? rate * (s.market[r] || 0) : 0;
+              if (rev > bestRev) { bestRev = rev; bestRes = r; }
+              const color = RESOURCE_COLORS[r] || "#8b949e";
+              return `<button class="sell-res-btn" data-res="${r}">
+                <span class="sell-res-name" style="color:${color}">${r}</span>
+                <span class="sell-res-detail">rate ${rate} · $${rev}</span>
+              </button>`;
+            }).join("") + `</div>`;
+        }
+  
+        let hackerHtml = "";
+        if (MP.currentLegal?.hacker_array_status?.owned) {
+          const resOpts = RESOURCE_ORDER.filter(r => r !== "PWR").map(r => `<option value="${r}">${r}</option>`).join("");
+          hackerHtml = `<div class="sell-hacker-row">
+            <span style="font-size:0.75rem;color:#8b949e">Hacker Array:</span>
+            <select id="mp-hacker-target" class="toggle-select">${resOpts}</select>
+            <select id="mp-hacker-dir" class="toggle-select">
+              <option value="1">+3 (raise)</option>
+              <option value="-1">-3 (lower)</option>
+            </select>
+          </div>`;
+        }
+  
+        if (resBtnsHtml || hackerHtml) {
+          sellPicker.innerHTML = `${resBtnsHtml}${hackerHtml}<input type="hidden" id="mp-sell-resource" value="${bestRes}">`;
+          sellPicker.style.display = "block";
+          sellPicker.querySelectorAll(".sell-res-btn").forEach(btn => {
+            if (btn.dataset.res === bestRes) btn.classList.add("selected");
+            btn.addEventListener("click", () => {
+              sellPicker.querySelectorAll(".sell-res-btn").forEach(b => b.classList.remove("selected"));
+              btn.classList.add("selected");
+              document.getElementById("mp-sell-resource").value = btn.dataset.res;
+            });
+          });
+        } else {
+          sellPicker.style.display = "none";
+          sellPicker.innerHTML = "";
+        }
+      } else {
+        sellPicker.style.display = "none";
+        sellPicker.innerHTML = "";
+      }
+    }
+  
+    // Contract needs: contract selected AND (hand card with contract icon + AP, OR Launch Pad available)
+    const lpAvail = MP.currentLegal?.launch_pad_status?.available;
+    const hasContractCard = MP.selectedCards.size === 1 && cr >= 1 &&
+      (s.players[MP.mySeat]?.hand || [])[Array.from(MP.selectedCards)[0]]?.can_fulfill_contract;
+    contractBtn.disabled = !myTurn || MP.selectedContract < 0 || (!hasContractCard && !lpAvail);
+    passBtn.disabled = !myTurn;
+  
+    renderPatentActions(s);
+    renderSpecialToggles(s);
+  }
+  
+  function renderPatentActions(s) {
+    const host = document.getElementById("mp-patent-actions");
+    if (!host) return;
+    const myTurn = isMyTurn(s);
+    const pa = MP.currentLegal?.patent_actions || {};
+    const oc = MP.currentLegal?.optimization_center_status || {};
+    const parts = [];
+  
+    if (oc.owned) {
+      const status = oc;
+      const opts = (status.valid_resources || []).map(r => `<option value="${r}">${r}</option>`).join("");
+      const canUse = myTurn && status.available && opts;
+      parts.push(`
+        <div class="patent-action-row">
+          <strong>Optimization Center</strong> &mdash; -1 PWR, +1 to a positive rate.
+          <select id="pa-oc-resource" class="toggle-select" ${canUse ? "" : "disabled"}>
+            ${opts || '<option value="">none</option>'}
+          </select>
+          <button id="pa-oc-btn" class="action-btn" ${canUse ? "" : "disabled"}>Use OC</button>
+        </div>
+      `);
+    }
+    if (pa.water_engine?.owned) {
+      const status = pa.water_engine;
+      const canUse = myTurn && status.available;
+      parts.push(`
+        <div class="patent-action-row">
+          <strong>Water Engine</strong> &mdash; -1 H2O, +2 PWR.
+          <button id="pa-we-btn" class="action-btn" ${canUse ? "" : "disabled"}>Use WE</button>
+        </div>
+      `);
+    }
+    if (pa.nanotechnology?.owned) {
+      const status = pa.nanotechnology;
+      const pool = s.pool || [];
+      const poolOpts = pool.map((c, i) => `<option value="${i}">${i + 1}: ${c.building}</option>`).join("");
+      const canUse = myTurn && status.available && pool.length > 0;
+      parts.push(`
+        <div class="patent-action-row">
+          <strong>Nanotechnology</strong> &mdash; replace a pool card with a deck draw.
+          <select id="pa-nano-card" class="toggle-select" ${canUse ? "" : "disabled"}>
+            ${poolOpts || '<option value="">empty</option>'}
+          </select>
+          <button id="pa-nano-btn" class="action-btn" ${canUse ? "" : "disabled"}>Replace</button>
+        </div>
+      `);
+    }
+    if (pa.teleportation?.owned) {
+      const status = pa.teleportation;
+      const opts = (status.valid_resources || []).map(r => `<option value="${r}">${r}</option>`).join("");
+      const canUse = myTurn && status.available && opts;
+      parts.push(`
+        <div class="patent-action-row">
+          <strong>Teleportation</strong> &mdash; sell any resource, -1 PWR.
+          <select id="pa-tele-resource" class="toggle-select" ${canUse ? "" : "disabled"}>
+            ${opts || '<option value="">none</option>'}
+          </select>
+          <button id="pa-tele-btn" class="action-btn" ${canUse ? "" : "disabled"}>Sell</button>
+        </div>
+      `);
+    }
+  
+    host.innerHTML = parts.length ? `<h4 style="color:#8b949e;font-size:0.75rem;margin:8px 0 4px">Patent Actions</h4>${parts.join("")}` : "";
+  
+    // Wire buttons
+    document.getElementById("pa-oc-btn")?.addEventListener("click", () => {
+      const r = document.getElementById("pa-oc-resource")?.value;
+      if (!r) return;
+      sendPatentAction("oc", {resource: r});
+    });
+    document.getElementById("pa-we-btn")?.addEventListener("click", () => {
+      sendPatentAction("water_engine", {});
+    });
+    document.getElementById("pa-nano-btn")?.addEventListener("click", () => {
+      const idx = parseInt(document.getElementById("pa-nano-card")?.value);
+      if (isNaN(idx)) return;
+      sendPatentAction("nanotech", {pool_idx: idx});
+    });
+    document.getElementById("pa-tele-btn")?.addEventListener("click", () => {
+      const r = document.getElementById("pa-tele-resource")?.value;
+      if (!r) return;
+      sendPatentAction("teleport", {resource: r});
+    });
+  }
+  
+  function sendPatentAction(action, params) {
+    if (MP.role === "host") {
+      let result;
+      switch (action) {
+        case "water_engine":
+          result = MP.game.use_water_engine(MP.mySeat).toJs({dict_converter: Object.fromEntries});
+          break;
+        case "nanotech":
+          result = MP.game.use_nanotechnology(MP.mySeat, params.pool_idx).toJs({dict_converter: Object.fromEntries});
+          break;
+        case "oc":
+          result = MP.game.use_optimization_center(MP.mySeat, params.resource).toJs({dict_converter: Object.fromEntries});
+          break;
+        case "teleport":
+          result = MP.game.use_teleportation(MP.mySeat, params.resource).toJs({dict_converter: Object.fromEntries});
+          break;
+      }
+      if (result?.ok) {
+        const pName = MP.currentState?.players[MP.mySeat]?.name || "You";
+        MP.core.addFeedEntry({kind: "free-action", text: `You: ${result.detail}`});
+        MP.network.broadcastFeed({kind: "free-action", text: `${pName}: ${result.detail}`});
+        MP.core.hostRefreshState();
+      } else if (result) {
+        alert(result.reason || "Patent action failed");
+        MP.core.hostRefreshState();
+      } else {
+        MP.core.hostRefreshState();
+      }
+    } else {
+      MP.hostConn.send(JSON.stringify({type: "patent_action", action, ...params}));
+    }
+  }
+  
+  function renderSpecialToggles(s) {
+    const host = document.getElementById("mp-special-toggles");
+    if (!host) return;
+    const myTurn = isMyTurn(s);
+    if (!myTurn || !MP.currentLegal) { host.innerHTML = ""; return; }
+  
+    const parts = [];
+    // Space Elevator is always-on when owned. For a selected contract with
+    // more than one requirement, show a picker so the player chooses which
+    // resource gets the -1. For single-req contracts (or no selection),
+    // just show the status so the player knows it will apply.
+    const se = MP.currentLegal.space_elevator_status;
+    if (se?.owned) {
+      const contract = MP.selectedContract >= 0
+        ? s.available_contracts?.[MP.selectedContract]
+        : null;
+      const reqs = contract?.requirements || [];
+      if (reqs.length > 1) {
+        const opts = reqs.map(r =>
+          `<option value="${r.resource}">-1 ${r.resource} (was ${r.amount})</option>`
+        ).join("");
+        parts.push(`
+          <div class="toggle-label">
+            <strong>Space Elevator</strong> &mdash; reduce
+            <select id="se-target" class="toggle-select">${opts}</select>
+            by 1
+          </div>
+        `);
+      } else if (reqs.length === 1) {
+        parts.push(`
+          <div class="toggle-label">
+            <strong>Space Elevator</strong> &mdash; auto -1 ${reqs[0].resource}
+          </div>
+        `);
+      } else {
+        parts.push(`
+          <div class="toggle-label">
+            <strong>Space Elevator</strong> &mdash; always-on (-1 to a contract req)
+          </div>
+        `);
+      }
+    }
+    const lp = MP.currentLegal.launch_pad_status;
+    if (lp?.owned) {
+      parts.push(`
+        <label class="toggle-label">
+          <input type="checkbox" id="toggle-lp" ${lp.available ? "" : "disabled"}>
+          Launch Pad (free contract, no card cost)
+        </label>
+      `);
+    }
+    host.innerHTML = parts.join("");
+  }
+  
+  function _buildRateNumberLine(rates) {
+    const entries = RESOURCE_ORDER.map(r => ({
+      res: r,
+      val: rates[r] || 0,
+      color: RESOURCE_COLORS[r],
+    }));
+  
+    // Two rows sharing 11 columns: -5 -4 -3 -2 -1 | 0 | +1 +2 +3 +4 +5
+    const onesSlots = Array.from({length: 11}, () => []);
+    const fivesSlots = Array.from({length: 11}, () => []);
+  
+    for (const e of entries) {
+      const abs = Math.abs(e.val);
+      const neg = e.val < 0;
+      const ones = abs <= 5 ? abs : abs % 5;
+      const fives = Math.floor(abs / 5);
+  
+      let onesSlot = 5;
+      if (ones > 0) onesSlot = neg ? 5 - ones : 5 + ones;
+      onesSlots[onesSlot].push(e);
+  
+      if (fives > 0) {
+        let fivesSlot = neg ? 5 - fives : 5 + fives;
+        fivesSlot = Math.max(0, Math.min(10, fivesSlot));
+        fivesSlots[fivesSlot].push(e);
+      }
+    }
+  
+    // Cell labels: 1s track shows -5..-1, 0, +1..+5; 5s track shows -25..-5, 0, +5..+25
+    const onesLabels = ["\u22125","\u22124","\u22123","\u22122","\u22121","0","+1","+2","+3","+4","+5"];
+    const fivesLabels = ["\u221225","\u221220","\u221215","\u221210","\u22125","0","+5","+10","+15","+20","+25"];
+  
+    function renderRow(slots, labels, dotClass, slotClass) {
+      return slots.map((dots, i) => {
+        const isZero = i === 5;
+        const isNeg = i < 5;
+        const hue = isZero ? "" : isNeg ? "rnl-cell-neg" : "rnl-cell-pos";
+        const dotHtml = dots.map(e =>
+          `<span class="${dotClass}" style="background:${e.color}" title="${e.res}: ${e.val > 0 ? '+' : ''}${e.val}">${dotClass === 'rnl-dot' ? e.res : ''}</span>`
+        ).join("");
+        return `<div class="rnl-slot-wrap ${isZero ? 'rnl-zero' : ''}">
+          <div class="rnl-slot ${hue} ${slotClass || ''}">
+            <span class="rnl-bg-num">${labels[i]}</span>
+            ${dotHtml}
+          </div>
+        </div>`;
+      }).join("");
+    }
+  
+    return `<div class="rate-number-line">
+      <div class="rnl-track">${renderRow(onesSlots, onesLabels, "rnl-dot", "")}</div>
+      <div class="rnl-track">${renderRow(fivesSlots, fivesLabels, "rnl-dot-sm", "rnl-slot-sm")}</div>
+    </div>`;
+  }
+  
+  function renderPlayerPanel(s) {
+    const me = s.players[MP.mySeat];
+    if (!me) return;
+    const panel = document.getElementById("mp-your-stats");
+  
+    // Set zone title with NW
+    const title = document.getElementById("player-zone-title");
+    if (title) {
+      const nwColor = me.net_worth >= 0 ? '#3fb950' : '#f85149';
+      title.innerHTML = `<span>${me.name}${me.corporation ? ` \u2014 ${me.corporation}` : ''}</span><span class="player-zone-nw" style="color:${nwColor}">NW $${me.net_worth}</span>`;
+    }
+  
+    const ratesGrid = RESOURCE_ORDER.map(r => {
+      const v = me.rates?.[r] || 0;
+      const cls = v > 0 ? "rate-pos" : v < 0 ? "rate-neg" : "rate-zero";
+      return `<div class="rate-chip ${cls}"><span class="rate-res" style="color:${RESOURCE_COLORS[r]}">${r}</span><span class="rate-val">${v > 0 ? "+" : ""}${v}</span></div>`;
+    }).join("");
+  
+    // Build rate number line — ones track (0-9 each side) + tens track if needed
+    const rateNumberLine = _buildRateNumberLine(me.rates || {});
+  
+    const builtCards = me.built_cards || [];
+    const buildings = builtCards.filter(c => !c.effect && c.slot !== 5).map(c => c.building);
+    const specials = builtCards.filter(c => c.effect && c.slot !== 5);
+    const patents = builtCards.filter(c => c.slot === 5);
+    const buildingList = buildings.length ? buildings.join(", ") : "none";
+    const specialList = specials.map(c => `<span class="opp-special">${c.building}</span>`).join(" ");
+    const patentList = patents.map(c => `<span class="opp-patent">${c.building}</span>`).join(" ");
+  
+    panel.innerHTML = `
+      <div class="player-stats">
+        <div class="player-stats-money">
+          Cash $${me.money}${me.debt > 0 ? ` | <span style="color:#f85149">Debt $${me.debt}</span>` : ''}${me.credit > 0 ? ` | <span style="color:#d29922">Credit $${me.credit}</span>` : ''} | ${me.contracts_fulfilled || 0} contracts
+        </div>
+        <div class="player-rates-grid">${ratesGrid}</div>
+        ${rateNumberLine}
+        <div class="player-stats-buildings">${buildingList}</div>
+        ${specialList ? `<div class="player-stats-specials">${specialList}</div>` : ''}
+        ${patentList ? `<div class="player-stats-specials">${patentList}</div>` : ''}
+      </div>
+    `;
+  }
+  
+  function renderOpponents(s) {
+    const strip = document.getElementById("mp-opponents");
+    strip.innerHTML = s.players.filter((_, i) => i !== MP.mySeat).map(p => {
+      const realIdx = s.players.indexOf(p);
+      const isActive = realIdx === s.current_player_index;
+      const color = PLAYER_COLORS[realIdx % PLAYER_COLORS.length];
+  
+      // Same rate-chip grid as player panel, slightly smaller
+      const ratesGrid = RESOURCE_ORDER.map(r => {
+        const v = p.rates?.[r] || 0;
+        const cls = v > 0 ? "rate-pos" : v < 0 ? "rate-neg" : "rate-zero";
+        return `<div class="rate-chip sm ${cls}"><span class="rate-res" style="color:${RESOURCE_COLORS[r]}">${r}</span><span class="rate-val">${v > 0 ? "+" : ""}${v}</span></div>`;
+      }).join("");
+  
+      // Buildings split into regular + specials + patents
+      const builtCards = p.built_cards || [];
+      const buildings = builtCards.filter(c => !c.effect && c.slot !== 5).map(c => c.building);
+      const specials = builtCards.filter(c => c.effect && c.slot !== 5);
+      const patents = builtCards.filter(c => c.slot === 5);
+      const buildingList = buildings.length ? buildings.join(", ") : "none";
+      const specialList = specials.map(c => `<span class="opp-special">${c.building}</span>`).join(" ");
+      const patentList = patents.map(c => `<span class="opp-patent">${c.building}</span>`).join(" ");
+  
+      return `
+        <div class="opponent-card ${isActive ? 'active-turn' : ''}" style="border-left:3px solid ${color}">
+          <div class="opponent-header">
+            <span class="opponent-name" style="color:${color}">${p.name}${p.is_human ? '' : ' (AI)'}</span>
+            <span class="opponent-nw" style="color:${p.net_worth >= 0 ? '#3fb950' : '#f85149'}">NW $${p.net_worth}</span>
+          </div>
+          <div class="opponent-money">
+            Cash $${p.money}${p.debt > 0 ? ` | <span style="color:#f85149">Debt $${p.debt}</span>` : ''}${p.credit > 0 ? ` | <span style="color:#d29922">Credit $${p.credit}</span>` : ''} | ${p.contracts_fulfilled || 0} contracts
+          </div>
+          <div class="opponent-rates-grid">${ratesGrid}</div>
+          <div class="opponent-buildings">${buildingList}</div>
+          ${specialList ? `<div class="opponent-specials">${specialList}</div>` : ''}
+          ${patentList ? `<div class="opponent-specials">${patentList}</div>` : ''}
+        </div>
+      `;
+    }).join("");
+  }
+  
+  
+  function buildEventCardLabel(ed) {
+    // Simple label for the discard card face — just the event type, no effects
+    if (!ed) return "";
+    switch (ed.event_type || "") {
+      case "draw_building_card": return "Draw Building Card";
+      case "news_bulletin": {
+        const name = ed.news_name || "?";
+        const effects = ed.news_effects || "";
+        return effects ? `News: ${name} (${effects})` : `News: ${name}`;
+      }
+      case "patent_auction": return "Patent Auction";
+      case "power_bill": return "Power Bill";
+      case "debt_collection": return "Debt Collection";
+      case "futures_trading": return "Futures Trading";
+      case "futures_settlement": return "Futures Settlement";
+      case "end_round": return "END OF ROUND";
+      case "end_game": return "END GAME";
+      default: return (ed.event_type || "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+    }
+  }
+  
+  function buildEventTitle(ed) {
+    if (!ed) return "";
+    const type = ed.event_type || "";
+    let title = "";
+  
+    switch (type) {
+      case "draw_building_card":
+        title = `Draw: ${ed.card_drawn || "?"}`;
+        break;
+      case "news_bulletin":
+        title = `News: ${ed.news_name || "?"}`;
+        break;
+      case "patent_auction":
+        title = `Patent Auction: ${ed.auction_result || ""}`;
+        break;
+      case "power_bill": title = "Power Bill"; break;
+      case "debt_collection": title = "Debt Collection"; break;
+      case "futures_trading": {
+        const changes = (ed.market_changes || []).map(c =>
+          `${c.resource} $${c.price_before}\u2192$${c.price_after}`
+        ).join(", ");
+        title = `Futures Trading${changes ? ": " + changes : ""}`;
+        break;
+      }
+      case "futures_settlement": title = "Futures Settlement"; break;
+      case "end_round": title = "END OF ROUND"; break;
+      case "end_game": title = "END GAME"; break;
+      default: title = type.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+    }
+  
+    // PWR adjust prepended before title (rendered before lightning icon)
+    if (ed.pwr_adjust) {
+      const rate = ed.pwr_adjust.rate;
+      const cls = rate >= 0 ? "pwr-up" : "pwr-down";
+      const sign = rate >= 0 ? "+" : "";
+      title = `<span class="${cls}">${sign}${rate} PWR</span> ${title}`;
+    }
+  
+    return title;
+  }
+  
+  function fmtMoney(text) {
+    if (!text) return "";
+    return text.replace(/\$(\d+)/g, '<span class="feed-money">$$$1</span>');
+  }
+  
+  function formatRates(rates) {
+    // {FE: 1, PWR: -1} → "+1 FE -1 PWR"
+    if (!rates || typeof rates !== "object") return "";
+    return Object.entries(rates)
+      .filter(([, v]) => v !== 0)
+      .map(([r, v]) => `<span class="${v > 0 ? 'rate-pos' : 'rate-neg'}">${v > 0 ? '+' : ''}${v} ${r}</span>`)
+      .join(" ");
+  }
+  
+  function formatActionSummary(a) {
+    // Build a concise one-line summary with rates
+    if (a.type === "build") {
+      const names = (a.buildings || []).join(", ");
+      const cost = a.build_money_spent > 0 ? ` ($${a.build_money_spent})` : "";
+      const rates = formatRates(a.rates_gained);
+      return `Built ${names}${cost}${rates ? " " + rates : ""}`;
+    }
+    if (a.type === "sell") {
+      return `Sold ${a.sell_amount || ""} ${a.sell_resource || ""} for $${a.sell_revenue || 0}`;
+    }
+    if (a.type === "contract") {
+      return `Contract ${a.contract_label || ""} for $${a.contract_reward || 0}`;
+    }
+    if (a.type === "free_action") {
+      return a.detail || "Free action";
+    }
+    return a.detail || a.type || "?";
+  }
+  
+  // formatEventTitle removed — all events now use structured data via buildEventTitle()
+  
+  function renderFeedEntry(e) {
+    if (e.kind === "turn-start") {
+      // Game kickoff or round marker
+      const detailLines = (e.details || "").split("\n").map(l => `<div>${fmtMoney(l)}</div>`).join("");
+      return `
+        <details class="feed-group kickoff">
+          <summary class="feed-group-title">${e.text}</summary>
+          <div class="feed-group-body">${detailLines}</div>
+        </details>
+      `;
+    }
+  
+    if (e.kind === "turn") {
+      const colonIdx = (e.text || "").indexOf(":");
+      const playerName = colonIdx > 0 ? e.text.substring(0, colonIdx) : "";
+      const playerIdx = MP.currentState?.players?.findIndex(p => p.name === playerName) ?? -1;
+      const color = playerIdx >= 0 ? PLAYER_COLORS[playerIdx % PLAYER_COLORS.length] : "#8b949e";
+      const title = playerName || "Turn";
+      const summary = colonIdx > 0 ? e.text.substring(colonIdx + 1).trim() : e.text;
+  
+      const actionList = e.actions || [];
+      const before = e.playerBefore;
+      const after = e.playerAfter;
+  
+      // Build structured detail: action table + before/after comparison
+      let detailHtml = "";
+      if (actionList.length > 0) {
+        detailHtml += `<table class="feed-action-table">`;
+        for (const a of actionList) {
+          const rates = formatRates(a.rates_gained);
+          const cost = a.build_money_spent > 0 ? `<span class="feed-money">-$${a.build_money_spent}</span>` : "";
+          const rev = a.sell_revenue > 0 ? `<span class="feed-money">+$${a.sell_revenue}</span>` : "";
+          const reward = a.contract_reward > 0 ? `<span class="feed-money">+$${a.contract_reward}</span>` : "";
+          const label = a.type === "build" ? (a.buildings || []).join(", ")
+            : a.type === "sell" ? `Sell ${a.sell_amount || ""} ${a.sell_resource || ""}`
+            : a.type === "contract" ? `Contract ${a.contract_label || ""}`
+            : a.detail || a.type;
+          detailHtml += `<tr><td class="feed-at-action">${label}</td><td class="feed-at-cash">${cost}${rev}${reward}</td><td class="feed-at-rates">${rates}</td></tr>`;
+        }
+        detailHtml += `</table>`;
+      }
+      // Before/after snapshot
+      if (before && after) {
+        const nwDelta = after.net_worth - before.net_worth;
+        const nwClass = nwDelta >= 0 ? "positive" : "negative";
+        detailHtml += `<div class="feed-before-after">`;
+        detailHtml += `<span>$${before.money}→$${after.money}</span>`;
+        if (after.debt > 0 || before.debt > 0) detailHtml += `<span class="negative">Debt $${before.debt}→$${after.debt}</span>`;
+        detailHtml += `<span class="${nwClass}">NW $${before.net_worth}→$${after.net_worth} (${nwDelta >= 0 ? "+" : ""}${nwDelta})</span>`;
+        detailHtml += `</div>`;
+      }
+  
+      if (detailHtml) {
+        return `
+          <details class="feed-group turn" style="border-left-color:${color}">
+            <summary class="feed-group-title"><span class="feed-player-name" style="color:${color}">${title}</span> ${fmtMoney(summary)} <span class="feed-time">${e.time}</span></summary>
+            <div class="feed-group-body">${detailHtml}</div>
+          </details>
+        `;
+      }
+      return `
+        <div class="feed-group turn" style="border-left-color:${color}">
+          <div class="feed-group-title"><span class="feed-player-name" style="color:${color}">${title}</span> ${fmtMoney(summary)} <span class="feed-time">${e.time}</span></div>
+        </div>
+      `;
+    }
+  
+    if (e.kind === "event") {
+      const ed = e.eventData || {};
+      const eventTitle = buildEventTitle(ed);
+  
+      // Build rich expandable detail from structured data
+      let detailHtml = "";
+  
+      // Draw building card: show card details + what was replaced.
+      // Slot info is included so the debug log makes it clear which pool
+      // location the drawn card went to.
+      if (ed.event_type === "draw_building_card") {
+        const slotLabel = ed.card_drawn_slot != null ? ` (slot ${ed.card_drawn_slot})` : "";
+        detailHtml += `<div class="feed-line-note">Drew <strong>${ed.card_drawn || "?"}</strong>${slotLabel} into pool</div>`;
+        if (ed.pool_idx != null) {
+          const fallback = ed.replaced_via_fallback ? ' <em>(no slot match — FIFO)</em>' : '';
+          detailHtml += `<div class="feed-line-note">→ pool[${ed.pool_idx}]${fallback}</div>`;
+        }
+        if (ed.card_replaced) {
+          const rSlot = ed.card_replaced_slot != null ? ` (slot ${ed.card_replaced_slot})` : "";
+          detailHtml += `<div class="feed-line-note">Replaced: ${ed.card_replaced}${rSlot}</div>`;
+        }
+        if (ed.card_rates?.length) {
+          const rates = ed.card_rates.map(r => `<span class="${r.amount > 0 ? 'rate-pos' : 'rate-neg'}">${r.amount > 0 ? '+' : ''}${r.amount} ${r.resource}</span>`).join(" ");
+          detailHtml += `<div class="feed-line-note">Rates: ${rates}</div>`;
+        }
+        if (ed.card_costs?.length) {
+          detailHtml += `<div class="feed-line-note">Costs: ${ed.card_costs.map(c => c.amount + " " + c.resource).join(", ")}</div>`;
+        }
+        if (ed.card_effect) detailHtml += `<div class="feed-line-note" style="color:#a371f7">${ed.card_effect}</div>`;
+      }
+  
+      // Futures trading: show who caused the market moves
+      if (ed.event_type === "futures_trading") {
+        if (ed.market_changes?.length) {
+          detailHtml += `<div class="feed-line-header">Market Changes</div>`;
+          for (const c of ed.market_changes) {
+            const color = RESOURCE_COLORS[c.resource] || "#8b949e";
+            detailHtml += `<div class="feed-line-note"><span style="color:${color}">${c.resource}</span>: +${c.units} units → $${c.price_before} → $${c.price_after}</div>`;
+          }
+        }
+        if (ed.player_contributions?.length) {
+          detailHtml += `<div class="feed-line-header">Caused By</div>`;
+          for (const p of ed.player_contributions) {
+            const rates = Object.entries(p.rates).map(([r, v]) => `<span class="rate-neg">${v} ${r}</span>`).join(" ");
+            detailHtml += `<div class="feed-line-player"><span class="feed-line-name">${p.name}</span> ${rates}</div>`;
+          }
+        }
+      }
+  
+      // News: show effects
+      if (ed.event_type === "news_bulletin" && ed.news_effects) {
+        detailHtml += `<div class="feed-line-note">${ed.news_effects}</div>`;
+      }
+  
+      // PWR adjust detail
+      if (ed.pwr_adjust) {
+        const pa = ed.pwr_adjust;
+        detailHtml += `<div class="feed-line-note">PWR price: $${pa.price_before} → $${pa.price_after}</div>`;
+      }
+  
+      // Event lines from the backend (power bill per-player details, etc.)
+      if (e.event_lines?.length > 0) {
+        detailHtml += e.event_lines.map(line => {
+          if (line.kind === "header") return `<div class="feed-line-header">${line.text}</div>`;
+          if (line.kind === "note") return `<div class="feed-line-note">${fmtMoney(line.text)}</div>`;
+          if (line.kind === "player") {
+            const nw = line.net_worth_after !== undefined ? `<span class="feed-nw-inline">NW $${line.net_worth_after}</span>` : '';
+            return `<div class="feed-line-player"><span class="feed-line-name">${line.name || ''}</span> ${fmtMoney(line.text)} ${nw}</div>`;
+          }
+          return `<div class="feed-line-note">${fmtMoney(line.text || '')}</div>`;
+        }).join("");
+      }
+  
+      // Player snapshots
+      if (e.player_snapshots?.length > 0) {
+        detailHtml += `<div class="feed-impact">${e.player_snapshots.map(p => {
+          const cls = p.net_worth >= 0 ? "positive" : "negative";
+          return `<span class="feed-nw-chip ${cls}">${p.name} $${p.net_worth}</span>`;
+        }).join("")}</div>`;
+      }
+  
+      const redrawIcon = ed.redraws ? '<span class="redraw-icon" title="Draws another event">&#8635;</span>' : '';
+      const isRedraw = ed._is_redraw ? '<span class="redraw-marker" title="Redrawn event">&#8627;</span> ' : '';
+  
+      // Always expandable for events
+      return `
+        <details class="feed-group event">
+          <summary class="feed-group-title">${isRedraw}${ed.pwr_adjust ? '<span class="feed-event-icon">&#9889;</span> ' : ''}${eventTitle} ${redrawIcon} <span class="feed-time">${e.time}</span></summary>
+          <div class="feed-group-body">${detailHtml || '<div class="feed-line-note">No additional details</div>'}</div>
+        </details>
+      `;
+    }
+  
+    if (e.kind === "action" || e.kind === "free-action") {
+      return `
+        <div class="feed-group ${e.kind}">
+          <div class="feed-group-title">${fmtMoney(e.text)} <span class="feed-time">${e.time}</span></div>
+        </div>
+      `;
+    }
+  
+    if (e.kind === "round-marker") {
+      return `<div class="feed-round-marker">${e.text}</div>`;
+    }
+  
+    // Fallback
+    return `<div class="feed-group"><div class="feed-group-title">${fmtMoney(e.text || '')} <span class="feed-time">${e.time || ''}</span></div></div>`;
+  }
+  
+  function renderFeed() {
+    const container = document.getElementById("feed-entries");
+    if (!container) return;
+    container.innerHTML = MP.feedEntries.slice(-80).reverse().map(renderFeedEntry).join("");
+    container.scrollTop = 0;
+  }
+  
+  // ===== Patent Office Picker =====
+  
+  function showPatentOfficePicker(patents, onPick) {
+    const titleEl = document.getElementById("prompt-title");
+    const bodyEl = document.getElementById("prompt-body");
+    titleEl.textContent = "Patent Office — Choose a Patent";
+    bodyEl.innerHTML = `
+      <p style="color:#8b949e;margin-bottom:12px">You drew 2 patents. Pick one to keep — the other goes back.</p>
+      <div style="display:flex;gap:12px;justify-content:center">
+        ${patents.map((p, i) => `
+          <button class="patent-pick-btn action-btn" data-pick="${i}" style="flex:1;padding:12px;text-align:center">
+            <div style="font-weight:600;font-size:1rem;margin-bottom:4px">${p.name}</div>
+            <div style="font-size:0.8rem;color:#a371f7">${p.effect || ''}</div>
+          </button>
+        `).join("")}
+      </div>
+    `;
+    document.getElementById("prompt-modal").style.display = "flex";
+    bodyEl.querySelectorAll(".patent-pick-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.getElementById("prompt-modal").style.display = "none";
+        onPick(parseInt(btn.dataset.pick));
+      });
+    });
+  }
+  
+  // ===== Prompt Modal =====
+  
+  function showPrompt(prompt) {
+    const titleEl = document.getElementById("prompt-title");
+    const bodyEl = document.getElementById("prompt-body");
+  
+    if (prompt.kind === "patent_auction") {
+      titleEl.textContent = "Patent Auction";
+      const patent = prompt.patent || {};
+      const ratesStr = (patent.rates || []).map(r => `${r.amount > 0 ? "+" : ""}${r.amount} ${r.resource}`).join(", ");
+      bodyEl.innerHTML = `
+        <p><strong>${patent.name}</strong> &mdash; ${patent.effect || ratesStr || "no effect"}</p>
+        <div class="prompt-row">
+          <label>Your bid ($5 increments):</label>
+          <input type="number" class="prompt-bid-input" data-seat-idx="${MP.mySeat}" min="0" max="500" step="5" value="0">
+        </div>
+        <p style="color:#8b949e;font-size:0.8rem">Bid 0 to pass. Highest bidder wins; pays runner-up + $5 as debt.</p>
+      `;
+    } else if (prompt.kind === "debt_paydown") {
+      titleEl.textContent = "Debt Collection - Pay Down Debt";
+      const me = (prompt.players || []).find(p => p.seat === MP.mySeat);
+      if (me) {
+        const maxPay = Math.floor(Math.min(me.debt, me.money) / 10) * 10;
+        bodyEl.innerHTML = `
+          <p>You have $${me.debt} debt and $${me.money} cash.</p>
+          <div class="prompt-row">
+            <label>Pay down ($10 increments):</label>
+            <input type="number" class="prompt-paydown-input" data-seat-idx="${MP.mySeat}" min="0" max="${maxPay}" step="10" value="${maxPay}">
+          </div>
+        `;
+      } else {
+        bodyEl.innerHTML = `<p>Waiting for other players...</p>`;
+        // Auto-submit empty answer since we have no debt
+        if (MP.role === "host") {
+          MP.core.setPromptAnswer(MP.mySeat, {});
+          MP.core.tryResolvePrompt();
+          return;
+        } else {
+          MP.hostConn.send(JSON.stringify({type: "prompt_answer", answers: {}}));
+          return;
+        }
+      }
+    } else {
+      titleEl.textContent = "Prompt";
+      bodyEl.innerHTML = `<p>${prompt.kind}</p>`;
+    }
+  
+    document.getElementById("prompt-modal").style.display = "flex";
+  }
+  
+  // ===== Endgame =====
+  
+  let endgameNwChart = null;
+  
+  let endgameShown = false;
+  function showEndgame() {
+    if (!MP.currentState || endgameShown) return;
+    endgameShown = true;
+    const overlay = document.getElementById("endgame-overlay");
+    const rankings = document.getElementById("endgame-rankings");
+    const sorted = [...MP.currentState.players].sort((a, b) => b.net_worth - a.net_worth);
+    rankings.innerHTML = sorted.map((p, i) => {
+      const color = PLAYER_COLORS[MP.currentState.players.indexOf(p) % PLAYER_COLORS.length];
+      const isYou = MP.currentState.players.indexOf(p) === MP.mySeat;
+      return `
+        <div style="display:flex;justify-content:space-between;padding:8px 12px;margin:4px 0;background:#0d1117;border-radius:6px;border-left:3px solid ${color}${isYou ? ';border:1px solid #58a6ff' : ''}">
+          <span>${i + 1}. ${p.name}${isYou ? ' (You)' : ''}${p.is_human ? '' : ' (AI)'}</span>
+          <span style="font-weight:bold;color:${p.net_worth >= 0 ? '#3fb950' : '#f85149'}">NW: $${p.net_worth} | $${p.money} cash | ${p.contracts_fulfilled || 0} contracts</span>
+        </div>
+      `;
+    }).join("");
+    renderEndgameChart();
+    overlay.style.display = "flex";
+  }
+  
+  function renderEndgameChart() {
+    const history = MP.currentState?.player_history || [];
+    if (history.length < 2) return;
+    const canvas = document.getElementById("endgame-nw-chart");
+    if (!canvas) return;
+    const labels = history.map(h => h.turn);
+    const datasets = (MP.currentState.players || []).map((p, idx) => ({
+      label: p.name,
+      data: history.map(h => h.players?.[idx]?.net_worth ?? 0),
+      borderColor: PLAYER_COLORS[idx % PLAYER_COLORS.length],
+      backgroundColor: "transparent",
+      borderWidth: 2,
+      pointRadius: 0,
+      tension: 0.3,
+    }));
+    if (endgameNwChart) endgameNwChart.destroy();
+    endgameNwChart = new Chart(canvas, {
+      type: "line",
+      data: {labels, datasets},
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {labels: {boxWidth: 12, font: {size: 11}, color: "#c9d1d9"}},
+          title: {display: true, text: "Net Worth Over Time", color: "#8b949e"},
+        },
+        scales: {
+          x: {ticks: {color: "#8b949e"}, grid: {color: "#21262d"}},
+          y: {ticks: {color: "#8b949e", callback: v => "$" + v}, grid: {color: "#21262d"}},
+        },
+      },
+    });
+  }
+  
+  // ===== Action Wiring =====
+  
+  function wireGameButtons() {
+    // Deck viewer toggle (click the deck card back)
+    document.getElementById("event-deck-card")?.addEventListener("click", MP.anim.toggleDeckViewer);
+  
+    // Market chart toggle
+    document.getElementById("market-toggle")?.addEventListener("click", () => {
+      const wrap = document.getElementById("market-chart-wrap");
+      if (wrap) wrap.style.display = wrap.style.display === "none" ? "block" : "none";
+    });
+  
+    document.getElementById("mp-build-btn").addEventListener("click", () => {
+      if (MP.selectedCards.size === 0) return;
+      // Capture card rects before action
+      const cardRects = [...MP.selectedCards].map(i => {
+        const el = document.querySelectorAll("#mp-hand-grid .hand-card")[i];
+        return el ? {rect: el.getBoundingClientRect(), html: el.innerHTML} : null;
+      }).filter(Boolean);
+      const destRect = document.getElementById("mp-your-stats")?.getBoundingClientRect();
+  
+      const buildCards = [...MP.selectedCards].map(Number);
+  
+      // Check if Patent Office is in the build — needs patent pick
+      const hand = MP.currentState?.players[MP.mySeat]?.hand || [];
+      const hasPatentOffice = buildCards.some(i => hand[i]?.building === "Patent Office");
+  
+      if (hasPatentOffice && MP.role === "host") {
+        const patents = MP.game.peek_patent_office_patents().toJs({dict_converter: Object.fromEntries});
+        if (patents.length >= 2) {
+          showPatentOfficePicker(patents, (pickIdx) => {
+            clearSelection();
+            const ok = sendAction({type: "build", build_cards: buildCards, patent_office_pick: pickIdx});
+            if (ok && destRect) {
+              cardRects.forEach((c, i) => {
+                setTimeout(() => MP.anim.animateCard(c.rect, destRect, c.html), i * 80);
+              });
+            }
+          });
+          return;
+        }
+      }
+  
+      clearSelection();
+      const ok = sendAction({type: "build", build_cards: buildCards});
+  
+      if (ok && destRect) {
+        cardRects.forEach((c, i) => {
+          setTimeout(() => MP.anim.animateCard(c.rect, destRect, c.html), i * 80);
+        });
+      }
+    });
+    document.getElementById("mp-sell-btn").addEventListener("click", () => {
+      if (MP.selectedCards.size !== 1) return;
+      const cardIdx = Number([...MP.selectedCards][0]);
+      // Capture card rect
+      const el = document.querySelectorAll("#mp-hand-grid .hand-card")[cardIdx];
+      const cardRect = el?.getBoundingClientRect();
+      const cardHtml = el?.innerHTML || "";
+  
+      const action = {type: "sell", card_idx: cardIdx};
+      const resSel = document.getElementById("mp-sell-resource");
+      if (resSel?.value) action.sell_resource = resSel.value;
+      const hTarget = document.getElementById("mp-hacker-target");
+      const hDir = document.getElementById("mp-hacker-dir");
+      if (hTarget?.value) {
+        action.hacker_target = hTarget.value;
+        action.hacker_direction = parseInt(hDir?.value || "1");
+      }
+      clearSelection();
+      const ok = sendAction(action);
+  
+      if (ok && cardRect) MP.anim.animateFadeOut(cardRect, cardHtml);
+    });
+    document.getElementById("mp-contract-btn").addEventListener("click", () => {
+      if (MP.selectedContract < 0) return;
+      const cardIdx = MP.selectedCards.size === 1 ? Number([...MP.selectedCards][0]) : -1;
+      // Capture card rect
+      const el = cardIdx >= 0 ? document.querySelectorAll("#mp-hand-grid .hand-card")[cardIdx] : null;
+      const cardRect = el?.getBoundingClientRect();
+      const cardHtml = el?.innerHTML || "";
+  
+      const useLP = document.getElementById("toggle-lp")?.checked || false;
+      const action = {type: "contract", contract_idx: MP.selectedContract};
+      if (useLP) {
+        action.use_launch_pad = true;
+      } else if (cardIdx >= 0) {
+        action.card_idx = cardIdx;
+      }
+      // Space Elevator is always-on — the engine applies the discount
+      // automatically when the player owns one. We only send the resource
+      // pick so the player controls which requirement gets the -1.
+      const seTargetEl = document.getElementById("se-target");
+      if (seTargetEl?.value) action.elevator_target = seTargetEl.value;
+      const contractForAnim = MP.currentState?.available_contracts?.[MP.selectedContract];
+      clearSelection();
+      const ok = sendAction(action);
+  
+      if (ok && cardRect) {
+        MP.anim.animateFadeOut(cardRect, cardHtml);
+        if (contractForAnim) MP.anim.animateReward(cardRect, `+$${contractForAnim.reward}`);
+      }
+    });
+    document.getElementById("mp-pass-btn").addEventListener("click", () => {
+      clearSelection();
+      // Log the pass/end turn
+      const playerName = MP.currentState?.players[MP.mySeat]?.name || "You";
+      MP.core.addFeedEntry({kind: "turn", text: `${playerName}: End Turn`});
+      MP.network.broadcastFeed({kind: "turn", text: `${playerName}: End Turn`});
+  
+      if (MP.role === "host") {
+        const result = MP.game.end_human_turn().toJs({dict_converter: Object.fromEntries});
+        humanTurnActions = [];
+  
+        // If awaiting prompt (patent auction, debt paydown), don't add event
+        // entry yet — the prompt resolution will add the complete event.
+        if (result.awaiting_prompt) {
+          MP.core.hostRefreshState();
+          MP.core.handleHostPrompt(MP.currentState.pending_prompt);
+          return;
+        }
+  
+        // Event resolved normally — add feed entry
+        const snapAfter = MP.game.state_dict().toJs({dict_converter: Object.fromEntries});
+        const playerSnapsAfter = snapAfter.players.map(p => ({name: p.name, money: p.money, debt: p.debt, net_worth: p.net_worth}));
+        const evData = result.structured || snapAfter.last_event_data || {};
+        MP.core.addEventFeedEntries(
+          result.detail || "Turn ended",
+          (result.lines || snapAfter.last_event_lines || []).map(l => Object.assign({}, l)),
+          playerSnapsAfter,
+          evData,
+        );
+        // Render chained (redraw) events as separate feed entries
+        const chained = result.chained_events || [];
+        for (const ce of chained) {
+          const ceData = ce.structured || {};
+          ceData._is_redraw = true;
+          const ceLines = ce.lines || [];
+          MP.core.addEventFeedEntries(ce.detail, ceLines, playerSnapsAfter, ceData);
+        }
+        MP.core.hostRefreshState();
+        MP.core.hostAdvanceGame();
+      } else {
+        MP.hostConn.send(JSON.stringify({type: "end_turn"}));
+      }
+    });
+  }
+  
+  // Accumulate human actions during their turn for a grouped feed entry
+  let humanTurnActions = [];
+  
+  function sendAction(action) {
+    if (MP.role === "host") {
+      const beforeSnap = MP.currentState?.players[MP.mySeat];
+      const playerBefore = beforeSnap ? {money: beforeSnap.money, debt: beforeSnap.debt, net_worth: beforeSnap.net_worth, rates: Object.assign({}, beforeSnap.rates)} : null;
+  
+      const result = MP.game.apply_human_action(MP.pyodide.toPy(action)).toJs({dict_converter: Object.fromEntries});
+      if (result.ok) {
+        humanTurnActions.push(result);
+        MP.core.hostRefreshState();
+        if (result.rates_gained) {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              MP.anim.animateRateChanges(result.rates_gained, ".player-panel-rates");
+            });
+          });
+        }
+        const afterSnap = MP.currentState?.players[MP.mySeat];
+        const playerAfter = afterSnap ? {money: afterSnap.money, debt: afterSnap.debt, net_worth: afterSnap.net_worth, rates: Object.assign({}, afterSnap.rates)} : null;
+        const playerName = MP.currentState?.players[MP.mySeat]?.name || "You";
+        const title = formatActionSummary(result);
+        MP.core.addFeedEntry({
+          kind: "turn",
+          text: `${playerName}: ${title}`,
+          actions: [result],
+          playerBefore: playerBefore,
+          playerAfter: playerAfter,
+        });
+        MP.network.broadcastFeed({
+          kind: "turn",
+          text: `${playerName}: ${title}`,
+          actions: [result],
+          playerBefore: playerBefore,
+          playerAfter: playerAfter,
+        });
+        return true;
+      } else {
+        alert(result.reason || "Action failed");
+        MP.core.hostRefreshState();
+        return false;
+      }
+    } else {
+      MP.hostConn.send(JSON.stringify({type: "action", action}));
+      return true; // assume success for clients (host validates)
+    }
+  }
+  
+
+  MP.ui = {
+    renderGame,
+    isMyTurn,
+    clearSelection,
+    showPrompt,
+    showEndgame,
+    wireGameButtons,
+    buildEventCardLabel,
+    renderFeed,
+  };
+})();
