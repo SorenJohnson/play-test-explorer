@@ -38,7 +38,7 @@ body.theme-v2 #game-layout {
 body.theme-v2 #game-area {
   display: grid;
   grid-template-columns: 160px minmax(120px, auto) minmax(300px, 2fr);
-  grid-template-rows: auto auto 1fr;        /* board content-sized, hand gets rest */
+  grid-template-rows: auto auto auto;        /* all rows content-sized              */
   overflow: hidden;
   gap: 0;
 }
