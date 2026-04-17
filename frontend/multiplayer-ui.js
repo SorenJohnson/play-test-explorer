@@ -539,6 +539,10 @@
   }
   
   function executePoolSwap(handIdx, poolIdx) {
+    // Reset sell state so the swapped-in card comes back clean
+    MP._v2SellResource = null;
+    MP._v2CardIntent = null;
+
     // Capture positions before swap
     const handEl = document.querySelectorAll("#mp-hand-grid .hand-card")[handIdx];
     const poolEl = document.querySelectorAll("#mp-pool-grid .pool-card")[poolIdx];
@@ -622,7 +626,7 @@
     const isV2 = document.body.classList.contains("theme-v2");
     const costs = (c.costs || []).map(r =>
       isV2
-        ? (r.amount > 4 ? `<span class="rate-num">${r.amount}</span>${resPip(r.resource)}` : resPip(r.resource).repeat(r.amount))
+        ? (r.amount > 4 ? `<span class="cost-num">${r.amount}</span>${resPip(r.resource)}` : resPip(r.resource).repeat(r.amount))
         : `${r.amount} ${r.resource}`
     ).join(isV2 ? " " : ", ");
     const rates = (c.rates || []).map(r =>

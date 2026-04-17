@@ -560,6 +560,13 @@ body.theme-v2 .card-rates {
   font-size: clamp(0.6rem, 1.2vh, 0.95rem);
   min-height: 1.3em;
 }
+/* Cost number (for >4 of one resource) */
+body.theme-v2 .cost-num {
+  font-weight: 700;
+  font-size: clamp(0.7rem, 1.2vh, 1rem);
+  margin-right: 2px;
+}
+
 /* Number + pip: fixed-width number so pips always align vertically */
 body.theme-v2 .rate-line {
   white-space: nowrap;
