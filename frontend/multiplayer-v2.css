@@ -488,12 +488,13 @@ body.theme-v2 .card-build-half {
 }
 
 body.theme-v2 .card-sell-half {
-  padding: 4px;
-  min-height: 44px;
+  padding: 6px;
+  min-height: 50px;
   display: flex;
   align-items: center;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 4px;
 }
 
@@ -539,10 +540,11 @@ body.theme-v2 .card-sell-rev {
   font-size: 0.72rem;
   color: var(--text-primary);
   font-weight: 700;
-  visibility: hidden;
+  display: none;                    /* hidden until sell intent active      */
 }
-body.theme-v2 .card-sell-pip-wrap:has(.chosen) .card-sell-rev {
-  visibility: visible;
+/* Only show revenue when the card has sell intent */
+body.theme-v2 .hand-card.intent-sell .card-sell-pip-wrap:has(.chosen) .card-sell-rev {
+  display: block;
 }
 /* Sell pips: colored background circles like tracker/ruler dots */
 body.theme-v2 .card-sell-btn {

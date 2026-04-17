@@ -408,18 +408,35 @@
               // Already selected — toggle off if clicking same half, switch intent otherwise
               if ((buildHalf && MP._v2CardIntent === "build") || (sellHalf && MP._v2CardIntent === "sell")) {
                 MP.selectedCards.delete(hi);
-                MP._v2CardIntent = null;
-                MP._v2SellResource = null;
+                if (MP.selectedCards.size === 0) {
+                  MP._v2CardIntent = null;
+                  MP._v2SellResource = null;
+                }
               } else if (sellHalf) {
+                // Switching to sell — sell is single-card only
+                MP.selectedCards.clear();
+                MP.selectedCards.add(hi);
                 MP._v2CardIntent = "sell";
               } else {
                 MP._v2CardIntent = "build";
               }
-            } else {
+            } else if (sellHalf) {
+              // Sell: single card only, clear others
               MP.selectedCards.clear();
               MP.selectedCards.add(hi);
-              MP._v2CardIntent = sellHalf ? "sell" : "build";
+              MP._v2CardIntent = "sell";
               MP._v2SellResource = null;
+            } else {
+              // Build: allow multi-select
+              if (MP._v2CardIntent === "sell") {
+                // Switching from sell to build — start fresh
+                MP.selectedCards.clear();
+                MP._v2SellResource = null;
+              }
+              MP._v2CardIntent = "build";
+              if (MP.selectedCards.size < Math.max(cr, 1)) {
+                MP.selectedCards.add(hi);
+              }
             }
           } else {
             if (MP.selectedCards.has(hi)) MP.selectedCards.delete(hi);
@@ -432,10 +449,8 @@
         });
       });
 
-      // V2: activate sell buttons on the selected card if it can sell.
-      // Auto-select the best-revenue resource; clicking a pip changes it.
-      // Pressing Sell executes with the chosen resource.
-      if (isV2 && MP.selectedCards.size === 1) {
+      // V2: activate sell buttons ONLY when intent is "sell".
+      if (isV2 && MP._v2CardIntent === "sell" && MP.selectedCards.size === 1) {
         const selIdx = Array.from(MP.selectedCards)[0];
         const selCard = hand[selIdx];
         const me = s.players[MP.mySeat];
