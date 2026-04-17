@@ -39,6 +39,7 @@ body.theme-v2 #game-area {
   display: grid;
   grid-template-columns: 160px minmax(120px, auto) minmax(300px, 2fr);
   grid-template-rows: auto auto auto;        /* all rows content-sized              */
+  align-content: start;                      /* don't stretch rows to fill height   */
   overflow: hidden;
   gap: 0;
 }
