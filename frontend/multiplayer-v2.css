@@ -37,7 +37,7 @@ body.theme-v2 #game-layout {
 /* game-area: 3-column grid — players | market | contracts+pool */
 body.theme-v2 #game-area {
   display: grid;
-  grid-template-columns: 200px 1fr auto;
+  grid-template-columns: 200px auto 1fr;
   grid-template-rows: auto auto auto;        /* all rows content-sized              */
   align-content: stretch;                    /* rows can use available height        */
   overflow: hidden;
@@ -132,14 +132,9 @@ body.theme-v2 .opponents-strip {
   flex-shrink: 0;                    /* players don't shrink for feed       */
 }
 
-/* "Other Players" → "Players" */
+/* Hide players header */
 body.theme-v2 .board-zone > section:first-child > .section-title {
-  font-size: 0;                     /* hide original text                  */
-}
-body.theme-v2 .board-zone > section:first-child > .section-title::after {
-  content: "PLAYERS";
-  font-size: 0.6rem;
-  letter-spacing: 0.1em;
+  display: none;
 }
 
 /* Player cards: background tint, no colored left border, uniform text */
@@ -254,7 +249,14 @@ body.theme-v2 .board-zone > section:nth-child(2) {
   align-self: stretch;
 }
 body.theme-v2 .board-zone > section:nth-child(2) > .section-title {
-  display: none;
+  font-size: 0;
+}
+body.theme-v2 .board-zone > section:nth-child(2) > .section-title::after {
+  content: "MARKET";
+  font-size: 0.8rem;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+  color: var(--text-muted);
 }
 
 /* Market chips (resource prices) — vertical stack, fill ruler height */
@@ -443,7 +445,21 @@ body.theme-v2 #event-deck-area {
   display: flex;
   gap: 8px;
   margin-bottom: 8px;
+  margin-top: 1.4em;
   align-items: stretch;
+  position: relative;
+}
+body.theme-v2 #event-deck-area::before {
+  content: "EVENTS";
+  display: block;
+  position: absolute;
+  top: -1.2em;
+  left: 0;
+  font-size: 0.8rem;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
 }
 
 body.theme-v2 .event-card-back {
