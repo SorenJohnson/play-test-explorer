@@ -148,8 +148,7 @@ body.theme-v2 .turn-dot {
   margin-right: 2px;
 }
 
-/* In v2, rate chips moved to the turn-order sidebar — hide the chip grid
-   from the player board but KEEP the rate number line (essential tracker) */
+/* Rate chips already in turn-order sidebar — hide from player board */
 body.theme-v2 .player-rates-grid {
   display: none;
 }
@@ -157,11 +156,11 @@ body.theme-v2 #player-zone-title {
   display: none;
 }
 body.theme-v2 .player-stats-money {
-  font-size: 0.75rem;
+  font-size: 0.78rem;
 }
 body.theme-v2 .player-stats-buildings,
 body.theme-v2 .player-stats-specials {
-  font-size: 0.65rem;
+  font-size: 0.7rem;
 }
 
 /* Opponent rate chips: non-zero only, compact */
@@ -208,20 +207,20 @@ body.theme-v2 .market-grid {
   flex-shrink: 0;
 }
 body.theme-v2 .market-cell {
-  padding: 2px 4px;
-  font-size: 0.65rem;
+  padding: 3px 5px;
+  font-size: 0.75rem;
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   border-radius: 3px;
-  flex: 1;                          /* fill same vertical space as ruler   */
+  flex: 1;
 }
 body.theme-v2 .market-cell .res-name {
-  font-size: 0.6rem;
-  min-width: 26px;
+  font-size: 0.7rem;
+  min-width: 28px;
 }
 body.theme-v2 .market-cell .res-price {
-  font-size: 0.75rem;
+  font-size: 0.85rem;
   font-weight: 700;
 }
 /* Hide step dots in compact chips view */
@@ -236,7 +235,7 @@ body.theme-v2 .market-cell .res-price-wrap {
 /* Vertical ruler — tall, thin, rate-tracker style */
 body.theme-v2 .market-ruler {
   display: flex;
-  flex: 0 0 70px;                   /* slightly wider for readability      */
+  flex: 0 0 110px;                  /* wide enough for labeled dots        */
   margin-top: 0;
   padding: 2px;
 }
@@ -283,18 +282,26 @@ body.theme-v2 .ruler-dots-row {
   position: relative;
 }
 
-/* Match the player board's rnl-dot size (20x20) */
+/* Ruler dots: same size as player board, with resource label inside */
 body.theme-v2 .ruler-res-dot {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  opacity: 0.9;
-}
-body.theme-v2 .ruler-res-dot.selected {
   width: 22px;
   height: 22px;
+  border-radius: 50%;
+  opacity: 0.9;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.35rem;
+  font-weight: 700;
+  color: #000;
+  line-height: 1;
+}
+body.theme-v2 .ruler-res-dot.selected {
+  width: 26px;
+  height: 26px;
   opacity: 1;
   box-shadow: 0 0 6px rgba(255,255,255,0.5);
+  font-size: 0.4rem;
 }
 
 body.theme-v2 .ruler-pip.current {
@@ -324,26 +331,26 @@ body.theme-v2 .hand-card {
 }
 
 body.theme-v2 .card-costs {
-  font-size: 0.65rem;
+  font-size: 0.75rem;
   color: var(--text-muted);
   margin-bottom: 2px;
 }
 body.theme-v2 .card-name {
   font-weight: 600;
-  font-size: 0.82rem;
+  font-size: 0.9rem;
   margin-bottom: 2px;
 }
 body.theme-v2 .card-rates {
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   margin-bottom: 2px;
 }
 body.theme-v2 .card-effect {
-  font-size: 0.65rem;
+  font-size: 0.72rem;
   color: var(--accent-violet);
   font-style: italic;
 }
 body.theme-v2 .card-bottom {
-  font-size: 0.6rem;
+  font-size: 0.7rem;
   color: var(--text-dim);
 }
 

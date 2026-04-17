@@ -160,9 +160,12 @@
         ${PRICE_TRACK.map((p, i) => {
           const isCurrent = i === selectedPos;
           const resHere = resourcesAtPos[i] || [];
+          const isV2 = document.body.classList.contains("theme-v2");
           const dots = resHere.map(r => {
             const isSelected = r === selectedRes;
-            return `<span class="ruler-res-dot ${isSelected ? 'selected' : ''}" style="background:${RESOURCE_COLORS[r]}" title="${r}"></span>`;
+            // v2: show resource abbreviation inside the dot (like rate tracker)
+            const label = isV2 ? r : '';
+            return `<span class="ruler-res-dot ${isSelected ? 'selected' : ''}" style="background:${RESOURCE_COLORS[r]}" title="${r}">${label}</span>`;
           }).join("");
           return `<span class="ruler-pip ${isCurrent ? 'current' : ''}" style="${isCurrent ? 'border-color:' + selectedColor : ''}">
             <span class="ruler-dots-row">${dots}</span>
