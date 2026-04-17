@@ -489,6 +489,13 @@ body.theme-v2 .card-rates {
   font-size: 0.8rem;
   min-height: 1.2em;
 }
+/* Number + pip never separated */
+body.theme-v2 .rate-line {
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
 body.theme-v2 .card-effect {
   font-size: 0.72rem;
   color: var(--accent-violet);
@@ -603,7 +610,7 @@ body.theme-v2 .card-sell-btn.chosen {
 /* All cards: same fixed size, strict internal layout */
 body.theme-v2 .hand-card,
 body.theme-v2 .pool-card {
-  height: 170px;
+  height: 220px;
   width: 160px;
   display: flex;
   flex-direction: column;

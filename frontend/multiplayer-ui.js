@@ -253,7 +253,7 @@
         const reqLines = (c.requirements || []).map(r => {
           const have = me?.rates?.[r.resource] || 0;
           const met = have >= r.amount;
-          return `<div class="contract-req-line ${met ? 'met' : 'unmet'}">${r.amount} ${resPip(r.resource, true)}</div>`;
+          return `<div class="contract-req-line ${met ? 'met' : 'unmet'}"><span class="rate-line">${r.amount}&nbsp;${resPip(r.resource, true)}</span></div>`;
         }).join("");
         return `<div class="contract-card ${sel} ${inactive}" data-ci="${ci}">
           <div class="contract-reqs-v2">${reqLines || '&nbsp;'}</div>
@@ -590,9 +590,9 @@
     ).join(isV2 ? " " : ", ");
     const rates = (c.rates || []).map(r =>
       isV2
-        ? `${r.amount > 0 ? '+' : ''}${r.amount} ${resPip(r.resource, true)}`
+        ? `<span class="rate-line">${r.amount > 0 ? '+' : ''}${r.amount}&nbsp;${resPip(r.resource, true)}</span>`
         : `<span class="${r.amount > 0 ? 'rate-pos' : 'rate-neg'}">${r.amount > 0 ? '+' : ''}${r.amount} ${r.resource}</span>`
-    ).join(" ");
+    ).join(isV2 ? "<br>" : " ");
     const sell = (c.can_sell || []).join("/");
     const canContract = c.can_fulfill_contract;
     let html = "";
