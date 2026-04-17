@@ -574,10 +574,12 @@
   }
   
   // Render a resource as a colored pip icon (just the name, no number)
-  function resPip(resource) {
+  // isRate=true → square shape for rates, circle for costs/resources
+  function resPip(resource, isRate) {
     const bg = RESOURCE_COLORS[resource] || 'var(--text-muted)';
     const color = MP.pipTextColor(resource);
-    return `<span class="res-pip" style="background:${bg};color:${color}">${resource}</span>`;
+    const cls = isRate ? "res-pip res-pip-rate" : "res-pip";
+    return `<span class="${cls}" style="background:${bg};color:${color}">${resource}</span>`;
   }
 
   function renderCard(c) {
@@ -588,7 +590,7 @@
     ).join(isV2 ? " " : ", ");
     const rates = (c.rates || []).map(r =>
       isV2
-        ? `${r.amount > 0 ? '+' : ''}${r.amount} ${resPip(r.resource)}`
+        ? `${r.amount > 0 ? '+' : ''}${r.amount} ${resPip(r.resource, true)}`
         : `<span class="${r.amount > 0 ? 'rate-pos' : 'rate-neg'}">${r.amount > 0 ? '+' : ''}${r.amount} ${r.resource}</span>`
     ).join(" ");
     const sell = (c.can_sell || []).join("/");

@@ -439,20 +439,22 @@ body.theme-v2 .hand-card {
   padding: 6px 8px;
 }
 
-/* Resource pip: base style, sized per context */
+/* Resource pip: circles for resources, squares for rates */
 body.theme-v2 .res-pip {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
+  border-radius: 50%;               /* circle = resource/cost              */
   font-weight: 900;
   line-height: 1;
   white-space: nowrap;
   vertical-align: middle;
-  /* Default size — overridden per section below */
   width: 22px;
   height: 22px;
   font-size: 0.35rem;
+}
+body.theme-v2 .res-pip-rate {
+  border-radius: 4px;               /* square = rate                       */
 }
 
 /* Card costs + rates: compact inline pips */
