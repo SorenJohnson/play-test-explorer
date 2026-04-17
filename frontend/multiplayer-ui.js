@@ -199,7 +199,7 @@
               return `<div class="ruler-sub ${isCurrent ? 'current' : ''}">${dots}</div>`;
             }).join("");
             const hasSelected = g.positions.includes(selectedPos);
-            return `<div class="ruler-group ${hasSelected ? 'has-selected' : ''}">
+            return `<div class="ruler-group ${hasSelected ? 'has-selected' : ''}" style="flex:${g.positions.length}">
               <div class="ruler-group-label">$${g.price}</div>
               <div class="ruler-group-slots">${subSlots}</div>
             </div>`;

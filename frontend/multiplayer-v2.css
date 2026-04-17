@@ -379,47 +379,51 @@ body.theme-v2 .ruler-pip.current .ruler-price {
 
 /* Grouped ruler: price sections with subsections */
 body.theme-v2 .ruler-group {
-  display: flex;
-  flex-direction: row;
-  align-items: stretch;
-  flex: 1;
-  border: 1px solid rgba(255,255,255,0.05);
-  border-radius: 3px;
   position: relative;
-  min-height: 0;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 3px;
+  margin-bottom: 1px;
+  overflow: hidden;
 }
 body.theme-v2 .ruler-group.has-selected {
-  border-color: rgba(255,255,255,0.15);
+  border-color: rgba(255,255,255,0.2);
 }
+
+/* Large background price spanning the full group height */
 body.theme-v2 .ruler-group-label {
   position: absolute;
-  right: 2px;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 1.4rem;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
   font-weight: 900;
   color: var(--text-muted);
-  opacity: 0.3;
+  opacity: 0.2;
   z-index: 0;
   pointer-events: none;
 }
+
+/* Sub-slots stack vertically within the group */
 body.theme-v2 .ruler-group-slots {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
-  flex: 1;
-  z-index: 1;
 }
 body.theme-v2 .ruler-sub {
-  flex: 1;
   display: flex;
   align-items: center;
   justify-content: flex-start;
   gap: 2px;
-  padding: 1px 3px;
-  min-height: 20px;
+  padding: 3px 4px;
+  min-height: 26px;
+}
+body.theme-v2 .ruler-sub + .ruler-sub {
+  border-top: 1px dashed rgba(255,255,255,0.06);
 }
 body.theme-v2 .ruler-sub.current {
-  background: rgba(255,255,255,0.06);
+  background: rgba(255,255,255,0.08);
 }
 
 /* ============================================================
