@@ -73,17 +73,17 @@ body.theme-v2 .board-zone > section:nth-child(3) {
   padding: 4px 8px;
 }
 
-/* Pool → right column, row 2 */
+/* Pool → right column, remaining rows */
 body.theme-v2 .board-zone > section:nth-child(4) {
   grid-column: 3;
-  grid-row: 2;
+  grid-row: 2 / -1;
   padding: 4px 8px;
   overflow-y: auto;
 }
 
-/* Player zone → right column, below pool (row 3) */
+/* Player zone → center column, below the ruler */
 body.theme-v2 .player-zone {
-  grid-column: 3;
+  grid-column: 2;
   grid-row: 3;
   background: var(--bg-player-mat);
   border-top: 1px solid rgba(88, 166, 255, 0.15);
