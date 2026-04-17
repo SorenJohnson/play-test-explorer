@@ -463,8 +463,11 @@ body.theme-v2 .hand-card {
 
 /* Contracts: taller, reward big + centered, white text */
 body.theme-v2 .contracts-grid {
-  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  display: flex;
   gap: 4px;
+}
+body.theme-v2 .contracts-grid .contract-card {
+  flex: 1;                          /* all contracts same width            */
 }
 body.theme-v2 .contract-card {
   background: var(--bg-card);
@@ -472,12 +475,35 @@ body.theme-v2 .contract-card {
   padding: 8px;
   font-size: 0.8rem;
   text-align: center;
+  display: flex;
+  flex-direction: column;
 }
+
+/* Fixed-height requirements zone — all contracts align regardless of # reqs */
+body.theme-v2 .contract-reqs-v2 {
+  min-height: 3.2em;                /* space for ~2 requirement lines       */
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  margin-bottom: 4px;
+}
+body.theme-v2 .contract-req-line {
+  font-size: 0.8rem;
+}
+body.theme-v2 .contract-req-line.met {
+  color: var(--accent-green);
+}
+body.theme-v2 .contract-req-line.unmet {
+  color: var(--accent-red);
+}
+
+/* Reward always in the same position */
 body.theme-v2 .contract-card .contract-reward {
-  color: var(--text-primary);       /* white/grey, not green               */
+  color: var(--text-primary);
   font-size: 1.2rem;
   font-weight: 800;
-  margin: 4px 0;
+  margin-top: auto;                 /* push to bottom of card              */
 }
 body.theme-v2 .contract-card.selected {
   border-color: var(--accent-blue);

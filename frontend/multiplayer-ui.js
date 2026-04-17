@@ -246,15 +246,22 @@
       const sel = ci === MP.selectedContract ? "selected" : "";
       const inactive = !myTurn ? "inactive" : "";
       const isV2 = document.body.classList.contains("theme-v2");
-      return isV2
-        ? `<div class="contract-card ${sel} ${inactive}" data-ci="${ci}">
-            <div class="contract-reqs">${reqs}</div>
-            <div class="contract-reward">$${c.reward}</div>
-          </div>`
-        : `<div class="contract-card ${sel} ${inactive}" data-ci="${ci}">
-            <div class="contract-reward">$${c.reward}</div>
-            <div>${reqs}</div>
-          </div>`;
+      if (isV2) {
+        // Fixed-slot layout: each req on its own line, fixed-height zone
+        const reqLines = (c.requirements || []).map(r => {
+          const have = me?.rates?.[r.resource] || 0;
+          const met = have >= r.amount;
+          return `<div class="contract-req-line ${met ? 'met' : 'unmet'}">${r.amount} ${r.resource}</div>`;
+        }).join("");
+        return `<div class="contract-card ${sel} ${inactive}" data-ci="${ci}">
+          <div class="contract-reqs-v2">${reqLines || '&nbsp;'}</div>
+          <div class="contract-reward">$${c.reward}</div>
+        </div>`;
+      }
+      return `<div class="contract-card ${sel} ${inactive}" data-ci="${ci}">
+        <div class="contract-reward">$${c.reward}</div>
+        <div>${reqs}</div>
+      </div>`;
     }).join("");
     if (myTurn) {
       grid.querySelectorAll(".contract-card").forEach(el => {
