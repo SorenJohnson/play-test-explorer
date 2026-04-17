@@ -438,6 +438,14 @@ body.theme-v2 .card-rates {
   font-size: 0.8rem;
   margin-bottom: 2px;
 }
+/* Rate values on cards: white text, colored left border for clarity */
+body.theme-v2 .card-rates .rate-pos,
+body.theme-v2 .card-rates .rate-neg {
+  color: var(--text-primary);
+  border-left: 2px solid;
+  padding-left: 3px;
+  margin-right: 4px;
+}
 body.theme-v2 .card-effect {
   font-size: 0.72rem;
   color: var(--accent-violet);
@@ -487,9 +495,23 @@ body.theme-v2 .card-sell-btn.active {
 body.theme-v2 .card-sell-btn.active:hover {
   background: rgba(255,255,255,0.12);
 }
+body.theme-v2 .card-sell-btn.chosen {
+  opacity: 1;
+  border-color: currentColor;
+  background: rgba(255,255,255,0.15);
+  box-shadow: 0 0 6px rgba(255,255,255,0.2);
+}
 
+/* All hand + pool cards: fixed height, sell row always at bottom */
 body.theme-v2 .hand-card {
-  min-height: 120px;
+  height: 180px;
+  display: flex;
+  flex-direction: column;
+}
+body.theme-v2 .pool-card {
+  height: 150px;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Contracts: taller, reward big + centered, white text */

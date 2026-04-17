@@ -357,7 +357,9 @@
         });
       });
 
-      // V2: activate sell buttons on the selected card if it can sell
+      // V2: activate sell buttons on the selected card if it can sell.
+      // Clicking a resource SELECTS it (stores on MP._v2SellResource),
+      // then pressing the Sell button executes the action.
       if (isV2 && MP.selectedCards.size === 1) {
         const selIdx = Array.from(MP.selectedCards)[0];
         const selCard = hand[selIdx];
@@ -368,23 +370,24 @@
             cardEl.querySelectorAll(".card-sell-btn").forEach(btn => {
               btn.classList.remove("dimmed");
               btn.classList.add("active");
+              // Highlight if this resource was already chosen
+              if (MP._v2SellResource === btn.dataset.sellRes) {
+                btn.classList.add("chosen");
+              }
               btn.addEventListener("click", (e) => {
                 e.stopPropagation();
-                const res = btn.dataset.sellRes;
-                const action = {type: "sell", card_idx: selIdx, sell_resource: res};
-                // Hacker Array: if owned, grab target+direction from inline controls
-                const hTarget = document.getElementById("mp-hacker-target");
-                const hDir = document.getElementById("mp-hacker-dir");
-                if (hTarget?.value) {
-                  action.hacker_target = hTarget.value;
-                  action.hacker_direction = parseInt(hDir?.value || "1");
-                }
-                clearSelection();
-                sendAction(action);
+                MP._v2SellResource = btn.dataset.sellRes;
+                // Re-render to show the chosen highlight
+                renderHand(s);
+                renderActions(s);
               });
             });
           }
+        } else {
+          MP._v2SellResource = null;
         }
+      } else if (isV2) {
+        MP._v2SellResource = null;
       }
     }
   }
@@ -1426,8 +1429,15 @@
       const cardHtml = el?.innerHTML || "";
   
       const action = {type: "sell", card_idx: cardIdx};
-      const resSel = document.getElementById("mp-sell-resource");
-      if (resSel?.value) action.sell_resource = resSel.value;
+      // V2: use the on-card resource selection; classic: use the picker
+      const isV2 = document.body.classList.contains("theme-v2");
+      if (isV2 && MP._v2SellResource) {
+        action.sell_resource = MP._v2SellResource;
+        MP._v2SellResource = null;
+      } else {
+        const resSel = document.getElementById("mp-sell-resource");
+        if (resSel?.value) action.sell_resource = resSel.value;
+      }
       const hTarget = document.getElementById("mp-hacker-target");
       const hDir = document.getElementById("mp-hacker-dir");
       if (hTarget?.value) {
