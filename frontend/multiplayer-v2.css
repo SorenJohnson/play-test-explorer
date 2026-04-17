@@ -1,192 +1,251 @@
 /* ===== Visual redesign v2 — gated behind body.theme-v2 =====
  *
- * Toggle via the "UI" button in the status bar. All rules are scoped so
- * the classic look is always one click away. Once approved, merge these
- * overrides into multiplayer.css and remove this file + the toggle.
+ * Toggle via the "New UI" / "Classic UI" button in the status bar.
+ * All rules scoped under body.theme-v2 — classic view is one click away.
  *
- * Layers:
- *   1. Zone backgrounds (board / player mat / opponents / feed)
- *   2. Card & contract differentiation
- *   3. Rate chip noise reduction
- *   4. Fan-of-cards hand layout
+ * Design reference: Dune Imperium digital — board fills viewport,
+ * hand is a bottom dock with cards peeking up, hover reveals full card.
  */
 
-/* --- New design tokens --- */
 body.theme-v2 {
-  --bg-board:       #131922;      /* board surface — slight blue-gray lift   */
-  --bg-player-mat:  #0f1923;      /* personal zone — cool tint               */
-  --bg-contracts:   #1a170e;      /* amber zone for shared objectives        */
-  --bg-feed:        #10151c;      /* sidebar "score pad"                     */
-  --contract-accent: #c89b30;     /* gold for contract borders/rewards       */
+  --bg-board:        #131922;
+  --bg-player-mat:   #0c1420;
+  --bg-card:         #1c2332;
+  --bg-card-hand:    #1a2540;
+  --contract-border: #6b6040;
 }
 
 
 /* ============================================================
-   LAYER 1 — Zone Backgrounds
+   LAYOUT — No page scroll, hand pinned to bottom
    ============================================================ */
 
-/* Board zone: "the table" */
+body.theme-v2 #game-wrapper {
+  height: 100vh;
+  overflow: hidden;
+}
+
+body.theme-v2 #game-screen {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+body.theme-v2 #game-layout {
+  flex: 1;
+  min-height: 0;
+}
+
+/* game-area becomes a flex column: board scrolls, hand stays at bottom */
+body.theme-v2 #game-area {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 body.theme-v2 .board-zone {
+  flex: 1;
+  overflow-y: auto;
   background: var(--bg-board);
-  border-radius: 12px;
-  padding: 20px 16px 16px;
-  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 4px;
+  border: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
 }
 
-/* Player zone: "your player mat" */
+/* Hand/action dock pinned to bottom of game-area */
 body.theme-v2 .player-zone {
+  flex-shrink: 0;
   background: var(--bg-player-mat);
-  border-radius: 12px;
-  padding: 20px 16px 16px;
-  margin-top: 16px;
-  border-top: none;
-  border: 1px solid rgba(88, 166, 255, 0.12);
+  border-top: 2px solid rgba(88, 166, 255, 0.2);
+  margin-top: 0;
+  padding: 6px 12px 4px;
 }
 
-/* Feed sidebar: "score pad" */
 body.theme-v2 #event-feed {
-  background: var(--bg-feed);
-  border-left: 1px solid var(--border);
-  padding: 12px;
+  background: color-mix(in srgb, var(--bg-elevated) 80%, var(--bg-canvas));
 }
 
-/* Section titles → zone labels */
+
+/* ============================================================
+   SECTION TITLES — Small zone labels
+   ============================================================ */
+
 body.theme-v2 .section-title {
   text-transform: uppercase;
-  font-size: 0.65rem;
-  letter-spacing: 0.12em;
+  font-size: 0.6rem;
+  letter-spacing: 0.1em;
   color: var(--text-dim);
-  margin-bottom: 10px;
+  margin-bottom: 6px;
   font-weight: 600;
 }
 
-/* Slightly mute opponents — "across the table" */
-body.theme-v2 .opponent-card {
-  opacity: 0.9;
-  border-width: 2px;
+
+/* ============================================================
+   CARDS — Solid backgrounds, compact, readable
+   ============================================================ */
+
+body.theme-v2 .pool-card,
+body.theme-v2 .hand-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+/* Card internals */
+body.theme-v2 .card-costs {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+body.theme-v2 .card-name {
+  font-weight: 600;
+  font-size: 0.8rem;
+  margin-bottom: 2px;
+}
+body.theme-v2 .card-rates {
+  font-size: 0.7rem;
+  margin-bottom: 2px;
+}
+body.theme-v2 .card-effect {
+  font-size: 0.65rem;
+  color: var(--accent-violet);
+  font-style: italic;
+}
+body.theme-v2 .card-bottom {
+  font-size: 0.6rem;
+  color: var(--text-dim);
+}
+
+/* Pool: compact, on the board */
+body.theme-v2 .pool-grid {
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 5px;
+}
+body.theme-v2 .pool-card {
+  font-size: 0.72rem;
 }
 
 
 /* ============================================================
-   LAYER 2 — Card & Contract Differentiation
+   HAND DOCK — Cards peek up, expand on hover (Dune-style)
    ============================================================ */
 
-/* Contracts: gold accent, portrait card proportions */
+body.theme-v2 .hand-grid {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 0;
+  min-height: 0;
+}
+
+body.theme-v2 .hand-card {
+  background: var(--bg-card-hand);
+  border-color: rgba(88, 166, 255, 0.15);
+  /* Show truncated card — just name + costs + rates visible */
+  max-height: 80px;
+  overflow: hidden;
+  transition: max-height 0.2s ease, transform 0.2s ease,
+              box-shadow 0.2s ease, border-color 0.15s ease;
+  min-width: 130px;
+  max-width: 160px;
+  flex-shrink: 0;
+  cursor: pointer;
+  position: relative;
+}
+
+/* Hover: card pops up to reveal full content */
+body.theme-v2 .hand-card:hover:not(.inactive) {
+  max-height: 300px;
+  transform: translateY(-60px);
+  z-index: 30;
+  border-color: var(--accent-blue);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.7);
+}
+
+body.theme-v2 .hand-card.selected {
+  max-height: 300px;
+  transform: translateY(-50px);
+  z-index: 31;
+  border-color: var(--accent-blue);
+  background: color-mix(in srgb, var(--accent-blue) 10%, var(--bg-card-hand));
+  box-shadow: 0 4px 20px rgba(88, 166, 255, 0.2);
+}
+
+body.theme-v2 .hand-card.inactive {
+  opacity: 0.5;
+  cursor: default;
+}
+
+
+/* ============================================================
+   CONTRACTS — Subtle warm accent, normal size
+   ============================================================ */
+
 body.theme-v2 .contract-card {
-  border-color: rgba(200, 155, 48, 0.35);
-  border-left: 3px solid var(--contract-accent);
-  background: color-mix(in srgb, var(--contract-accent) 4%, var(--bg-elevated));
-  min-height: 120px;
-  width: 140px;
-  border-radius: 8px;
-  padding: 10px;
+  background: var(--bg-card);
+  border-left: 2px solid var(--contract-border);
 }
 body.theme-v2 .contract-card.selected {
-  border-color: var(--contract-accent);
-  background: color-mix(in srgb, var(--contract-accent) 10%, var(--bg-elevated));
-}
-body.theme-v2 .contract-card .contract-reward {
-  color: var(--contract-accent);
-  font-weight: 700;
-}
-
-/* Pool cards: neutral "on the board" */
-body.theme-v2 .pool-card {
-  background: var(--bg-board);
-  border-color: var(--border);
-}
-
-/* Cards: playing-card proportions (portrait, taller than wide) */
-body.theme-v2 .hand-card,
-body.theme-v2 .pool-card {
-  min-height: 200px;
-  width: 140px;
-  min-width: 140px;
-  max-width: 140px;
-  border-radius: 8px;
-  padding: 10px;
-  font-size: 0.78rem;
-  display: flex;
-  flex-direction: column;
-}
-
-/* Hand cards: personal blue tint — "your cards" */
-body.theme-v2 .hand-card {
-  background: rgba(88, 166, 255, 0.03);
-  border-color: rgba(88, 166, 255, 0.18);
-}
-body.theme-v2 .hand-card.selected {
-  background: rgba(88, 166, 255, 0.08);
   border-color: var(--accent-blue);
-}
-body.theme-v2 .hand-card:hover:not(.inactive) {
-  border-color: var(--accent-blue);
+  background: var(--bg-selected);
 }
 
 
 /* ============================================================
-   LAYER 3 — Rate Chip Noise Reduction
+   RATE CHIPS — Mute zeros, compact opponents
    ============================================================ */
 
-/* Zero-rate chips: nearly invisible (you only care about what you have) */
 body.theme-v2 .rate-chip.rate-zero {
   opacity: 0.1;
 }
 
-/* Opponent rate grids: when JS filters to non-zero, use flex wrap */
 body.theme-v2 .opponent-rates-grid {
   display: flex;
   flex-wrap: wrap;
   gap: 3px;
 }
 body.theme-v2 .opponent-rates-grid .rate-chip.sm {
-  padding: 1px 5px;
+  padding: 1px 4px;
   font-size: 0.6rem;
   border-radius: 3px;
 }
 
+body.theme-v2 .opponent-card {
+  opacity: 0.9;
+}
+
 
 /* ============================================================
-   LAYER 4 — Fan-of-Cards Hand Layout
+   PLAYER STATS — compact in dock
    ============================================================ */
 
-body.theme-v2 .hand-grid {
-  display: flex;
-  justify-content: center;
-  align-items: flex-end;
-  gap: 0;
-  min-height: 220px;
-  padding: 40px 10px 10px;
+body.theme-v2 #mp-your-stats {
+  font-size: 0.78rem;
 }
 
-body.theme-v2 .hand-card {
-  /* Gentle fan: 2.5deg per step from center, so 4 cards span ~15deg total */
-  --angle: calc((var(--card-index, 0) - (var(--card-count, 1) - 1) / 2) * 2.5deg);
-  --lift: calc((var(--card-index, 0) - (var(--card-count, 1) - 1) / 2) * (var(--card-index, 0) - (var(--card-count, 1) - 1) / 2) * -2px);
-  transform: rotate(var(--angle)) translateY(var(--lift));
-  transform-origin: bottom center;
-  transition: transform 0.25s ease, box-shadow 0.2s ease;
-  margin: 0 -4px;             /* minimal overlap — just enough to hint    */
-  flex-shrink: 0;
-  position: relative;
-  /* Center cards get the highest base z-index so the fan looks natural */
-  z-index: calc(10 - abs(var(--card-index, 0) - (var(--card-count, 1) - 1) / 2));
+body.theme-v2 .player-rates-grid {
+  gap: 3px;
 }
 
-body.theme-v2 .hand-card:hover:not(.inactive) {
-  transform: translateY(-30px) rotate(0deg) scale(1.08);
-  z-index: 20;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+/* Hide the rate number line in v2 — dense expert view, toggle later */
+body.theme-v2 .rate-number-line {
+  display: none;
 }
 
-body.theme-v2 .hand-card.selected {
-  transform: translateY(-36px) rotate(0deg) scale(1.08);
-  z-index: 21;
-  box-shadow: 0 12px 32px rgba(88, 166, 255, 0.25);
-}
 
-body.theme-v2 .hand-card.inactive {
-  transform: rotate(var(--angle)) translateY(var(--lift));
+/* ============================================================
+   ACTION BAR — compact, in the dock
+   ============================================================ */
+
+body.theme-v2 .action-bar {
+  gap: 4px;
+}
+body.theme-v2 .action-btn {
+  padding: 4px 12px;
+  font-size: 0.8rem;
 }
 
 
