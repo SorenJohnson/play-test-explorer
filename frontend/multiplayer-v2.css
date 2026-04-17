@@ -38,7 +38,7 @@ body.theme-v2 #game-layout {
 body.theme-v2 #game-area {
   display: grid;
   grid-template-columns: 160px minmax(120px, auto) minmax(300px, 2fr);
-  grid-template-rows: 1fr 1fr auto;
+  grid-template-rows: auto auto 1fr;        /* board content-sized, hand gets rest */
   overflow: hidden;
   gap: 0;
 }
@@ -90,7 +90,6 @@ body.theme-v2 .player-zone {
   border-top: 2px solid rgba(88, 166, 255, 0.15);
   margin-top: 0;
   padding: 4px 12px;
-  max-height: 38vh;
   overflow-y: auto;
 }
 
@@ -189,13 +188,13 @@ body.theme-v2 .opponent-buildings {
    MARKET — Chips stacked vertically left of a tall thin ruler
    ============================================================ */
 
-/* Market section: chips + ruler side by side, fill cell, title hidden */
+/* Market section: chips + ruler side by side, content-sized, title hidden */
 body.theme-v2 .board-zone > section:nth-child(2) {
   display: flex;
   flex-direction: row;
   gap: 2px;
   align-items: stretch;
-  height: 100%;                     /* fill grid cell completely           */
+  align-self: stretch;
 }
 body.theme-v2 .board-zone > section:nth-child(2) > .section-title {
   display: none;
@@ -247,11 +246,9 @@ body.theme-v2 .ruler-track {
   flex-direction: column-reverse;   /* $1 at bottom, $10 at top */
   gap: 0;
   width: 100%;
-  height: 100%;                     /* fill the parent completely          */
 }
 
 body.theme-v2 .ruler-pip {
-  flex: 1;                          /* stretch to fill vertical space      */
   display: flex;
   flex-direction: row;
   align-items: center;
