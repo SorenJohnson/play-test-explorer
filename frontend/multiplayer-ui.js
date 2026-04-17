@@ -253,7 +253,7 @@
         const reqLines = (c.requirements || []).map(r => {
           const have = me?.rates?.[r.resource] || 0;
           const met = have >= r.amount;
-          return `<div class="contract-req-line ${met ? 'met' : 'unmet'}">${resPip(r.resource, r.amount)}</div>`;
+          return `<div class="contract-req-line ${met ? 'met' : 'unmet'}">${r.amount} ${resPip(r.resource)}</div>`;
         }).join("");
         return `<div class="contract-card ${sel} ${inactive}" data-ci="${ci}">
           <div class="contract-reqs-v2">${reqLines || '&nbsp;'}</div>
@@ -573,22 +573,22 @@
     return {ok: true, cost, deficit};
   }
   
-  // Render a resource amount as a colored pip icon
-  function resPip(resource, amount, prefix) {
+  // Render a resource as a colored pip icon (just the name, no number)
+  function resPip(resource) {
     const bg = RESOURCE_COLORS[resource] || 'var(--text-muted)';
     const color = MP.pipTextColor(resource);
-    return `<span class="res-pip" style="background:${bg};color:${color}">${prefix || ''}${amount} ${resource}</span>`;
+    return `<span class="res-pip" style="background:${bg};color:${color}">${resource}</span>`;
   }
 
   function renderCard(c) {
     // Returns full card HTML: costs → name → rates → effect → sell/contract
     const isV2 = document.body.classList.contains("theme-v2");
     const costs = (c.costs || []).map(r =>
-      isV2 ? resPip(r.resource, r.amount) : `${r.amount} ${r.resource}`
+      isV2 ? `${r.amount} ${resPip(r.resource)}` : `${r.amount} ${r.resource}`
     ).join(isV2 ? " " : ", ");
     const rates = (c.rates || []).map(r =>
       isV2
-        ? resPip(r.resource, Math.abs(r.amount), r.amount > 0 ? '+' : '-')
+        ? `${r.amount > 0 ? '+' : ''}${r.amount} ${resPip(r.resource)}`
         : `<span class="${r.amount > 0 ? 'rate-pos' : 'rate-neg'}">${r.amount > 0 ? '+' : ''}${r.amount} ${r.resource}</span>`
     ).join(" ");
     const sell = (c.can_sell || []).join("/");
