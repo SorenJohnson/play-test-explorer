@@ -414,8 +414,10 @@ body.theme-v2 .ruler-sub {
   padding: 3px 4px;
   flex: 1;
 }
-body.theme-v2 .ruler-sub + .ruler-sub {
-  border-top: 1px solid rgba(255,255,255,0.08);
+body.theme-v2 .ruler-sub {
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 2px;
+  margin: 1px;
 }
 body.theme-v2 .ruler-sub.current {
   background: rgba(88, 166, 255, 0.1);
