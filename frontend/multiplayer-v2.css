@@ -31,13 +31,13 @@ body.theme-v2 #game-screen {
 body.theme-v2 #game-layout {
   flex: 1;
   min-height: 0;
-  grid-template-columns: 1fr 220px;   /* narrower feed */
+  grid-template-columns: 1fr;          /* feed moves under players           */
 }
 
 /* game-area: 3-column grid — players | market | contracts+pool */
 body.theme-v2 #game-area {
   display: grid;
-  grid-template-columns: 160px minmax(120px, auto) minmax(300px, 2fr);
+  grid-template-columns: 200px minmax(120px, auto) minmax(300px, 2fr);
   grid-template-rows: auto auto auto;        /* all rows content-sized              */
   align-content: start;                      /* don't stretch rows to fill height   */
   overflow: hidden;
@@ -96,8 +96,14 @@ body.theme-v2 .player-zone {
 }
 
 body.theme-v2 #event-feed {
-  background: color-mix(in srgb, var(--bg-elevated) 80%, var(--bg-canvas));
-  font-size: 0.75rem;
+  background: none;
+  border-left: none;
+  font-size: 0.7rem;
+  padding: 4px 0;
+  margin-top: 8px;
+  border-top: 1px solid var(--border);
+  max-height: none;
+  position: static;
 }
 
 
@@ -482,10 +488,13 @@ body.theme-v2 .card-build-half {
 }
 
 body.theme-v2 .card-sell-half {
-  padding-top: 4px;
-  min-height: 36px;
+  padding: 4px;
+  min-height: 44px;
   display: flex;
   align-items: center;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
 }
 
 /* Hover hints */

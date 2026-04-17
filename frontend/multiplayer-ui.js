@@ -64,17 +64,32 @@
     renderOpponents(s);
     MP.anim.renderDeckViewer();
 
-    // V2: move the event deck area from the status bar to above
-    // the contracts section so it looks like a card deck on the board.
-    const deckArea = document.getElementById("event-deck-area");
-    const contractsSection = document.querySelector(".board-zone > section:nth-child(3)");
-    const statusBar = document.getElementById("status-bar");
-    if (deckArea && document.body.classList.contains("theme-v2")) {
-      if (contractsSection && deckArea.parentElement !== contractsSection) {
+    // V2: DOM relocations
+    if (document.body.classList.contains("theme-v2")) {
+      // Event deck → above contracts
+      const deckArea = document.getElementById("event-deck-area");
+      const contractsSection = document.querySelector(".board-zone > section:nth-child(3)");
+      if (deckArea && contractsSection && deckArea.parentElement !== contractsSection) {
         contractsSection.insertBefore(deckArea, contractsSection.firstChild);
       }
-    } else if (deckArea && statusBar && deckArea.parentElement !== statusBar) {
-      statusBar.appendChild(deckArea);
+      // Event feed → under the players section (left column)
+      const feed = document.getElementById("event-feed");
+      const playersSection = document.querySelector(".board-zone > section:first-child");
+      if (feed && playersSection && feed.parentElement !== playersSection) {
+        playersSection.appendChild(feed);
+      }
+    } else {
+      // Classic: restore original positions
+      const deckArea = document.getElementById("event-deck-area");
+      const statusBar = document.getElementById("status-bar");
+      if (deckArea && statusBar && deckArea.parentElement !== statusBar) {
+        statusBar.appendChild(deckArea);
+      }
+      const feed = document.getElementById("event-feed");
+      const gameLayout = document.getElementById("game-layout");
+      if (feed && gameLayout && feed.parentElement !== gameLayout) {
+        gameLayout.appendChild(feed);
+      }
     }
   }
   
@@ -571,9 +586,9 @@
         }).join("");
         html += `<div class="card-sell-row">${btns}</div>`;
       } else if (canContract) {
-        html += `<span class="card-contract-icon">\u{1F4CB} Contract</span>`;
+        html += `<div class="card-sell-row"><span class="card-contract-icon">\u{1F4CB} Contract</span></div>`;
       } else {
-        html += `<span class="card-no-sell">&nbsp;</span>`;
+        html += `<div class="card-sell-row"><span class="card-no-sell">&nbsp;</span></div>`;
       }
       html += `</div>`;
     } else {
