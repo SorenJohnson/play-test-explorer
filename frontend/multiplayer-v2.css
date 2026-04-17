@@ -68,6 +68,8 @@ body.theme-v2 .board-zone > section:nth-child(2) {
   align-self: stretch;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
 }
 body.theme-v2 .board-zone > section:nth-child(2) .market-ruler {
   flex: 1;
@@ -530,17 +532,17 @@ body.theme-v2 .res-pip-long {
   font-size: clamp(0.25rem, 0.45vh, 0.38rem) !important;
 }
 
-/* Card costs: scaled pips */
+/* Card costs: pips scale with card */
 body.theme-v2 .card-costs .res-pip {
-  width: min(24px, 2.5vh);
-  height: min(24px, 2.5vh);
-  font-size: clamp(0.3rem, 0.6vh, 0.5rem);
+  width: 9cqh;
+  height: 9cqh;
+  font-size: 3.5cqh;
 }
 /* Card rates: bigger pips (squares) */
 body.theme-v2 .card-rates .res-pip {
-  width: min(28px, 3vh);
-  height: min(28px, 3vh);
-  font-size: clamp(0.35rem, 0.7vh, 0.55rem);
+  width: 10cqh;
+  height: 10cqh;
+  font-size: 4cqh;
 }
 
 /* Contract requirements: slightly larger */
@@ -552,18 +554,18 @@ body.theme-v2 .contract-req-line .res-pip {
 
 /* Card sections: fixed heights so all cards align identically */
 body.theme-v2 .card-costs {
-  font-size: clamp(0.55rem, 1.1vh, 0.88rem);
+  font-size: 7cqh;
   color: var(--text-muted);
   min-height: 1.4em;
 }
 body.theme-v2 .card-name {
   font-weight: 600;
-  font-size: clamp(0.7rem, 1.4vh, 1.1rem);
+  font-size: 8cqh;
   min-height: 1.3em;
-  margin-bottom: clamp(6px, 1.5vh, 16px);
+  margin-bottom: 5cqh;
 }
 body.theme-v2 .card-rates {
-  font-size: clamp(0.6rem, 1.2vh, 0.95rem);
+  font-size: 7cqh;
   min-height: 1.3em;
 }
 /* Cost number (for >4 of one resource) */
@@ -585,10 +587,10 @@ body.theme-v2 .rate-num {
   width: 2em;
   text-align: right;
   font-weight: 700;
-  font-size: clamp(0.7rem, 1.3vh, 1.1rem);
+  font-size: 8cqh;
 }
 body.theme-v2 .card-effect {
-  font-size: 0.82rem;
+  font-size: 6cqh;
   color: var(--accent-violet);
   font-style: italic;
   min-height: 1.1em;
@@ -667,8 +669,8 @@ body.theme-v2 .card-sell-row {
 }
 /* Sell pips: colored background circles like tracker/ruler dots */
 body.theme-v2 .card-sell-btn {
-  width: min(32px, 3.5vh);
-  height: min(32px, 3.5vh);
+  width: 12cqh;
+  height: 12cqh;
   border-radius: 50%;
   display: inline-flex;
   align-items: center;
@@ -706,6 +708,7 @@ body.theme-v2 .pool-card {
   display: flex;
   flex-direction: column;
   font-size: clamp(0.6rem, 1.2vh, 0.9rem);
+  container-type: size;
 }
 
 /* Contracts: taller, reward big + centered, white text */
