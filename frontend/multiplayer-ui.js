@@ -253,7 +253,7 @@
         const reqLines = (c.requirements || []).map(r => {
           const have = me?.rates?.[r.resource] || 0;
           const met = have >= r.amount;
-          return `<div class="contract-req-line ${met ? 'met' : 'unmet'}">${r.amount} ${resPip(r.resource, true)}</div>`;
+          return `<div class="contract-req-line ${met ? 'met' : 'unmet'}">${resPip(r.resource, true).repeat(r.amount)}</div>`;
         }).join("");
         return `<div class="contract-card ${sel} ${inactive}" data-ci="${ci}">
           <div class="contract-reqs-v2">${reqLines || '&nbsp;'}</div>
@@ -586,7 +586,7 @@
     // Returns full card HTML: costs → name → rates → effect → sell/contract
     const isV2 = document.body.classList.contains("theme-v2");
     const costs = (c.costs || []).map(r =>
-      isV2 ? `${r.amount} ${resPip(r.resource)}` : `${r.amount} ${r.resource}`
+      isV2 ? resPip(r.resource).repeat(r.amount) : `${r.amount} ${r.resource}`
     ).join(isV2 ? " " : ", ");
     const rates = (c.rates || []).map(r =>
       isV2
