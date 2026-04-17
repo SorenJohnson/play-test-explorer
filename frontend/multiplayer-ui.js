@@ -571,9 +571,36 @@
     const sellBtn = document.getElementById("mp-sell-btn");
     const contractBtn = document.getElementById("mp-contract-btn");
     const passBtn = document.getElementById("mp-pass-btn");
-  
+
     const canBuild = myTurn && MP.selectedCards.size > 0 && (!alreadyBuilt || MP.currentLegal?.matter_replication);
-    buildBtn.disabled = !canBuild;
+    const isV2 = document.body.classList.contains("theme-v2");
+
+    // V2: adaptive button — text + enabled state follows card intent
+    if (isV2) {
+      const intent = MP._v2CardIntent;
+      const sellCardIdx = MP.selectedCards.size === 1 ? Array.from(MP.selectedCards)[0] : -1;
+      const sellCard = sellCardIdx >= 0 ? (s.players[MP.mySeat]?.hand || [])[sellCardIdx] : null;
+      const canSellV2 = myTurn && intent === "sell" && sellCard?.can_sell?.length > 0 && cr >= 1;
+      const canContractV2 = myTurn && MP.selectedContract >= 0 && intent === "sell"; // contract from sell half
+
+      if (intent === "sell" && canSellV2) {
+        buildBtn.textContent = "Sell";
+        buildBtn.disabled = false;
+      } else if (intent === "build" && canBuild) {
+        buildBtn.textContent = "Build";
+        buildBtn.disabled = false;
+      } else if (!intent && !MP.selectedCards.size) {
+        buildBtn.textContent = "Select a card";
+        buildBtn.disabled = true;
+      } else {
+        buildBtn.textContent = intent === "sell" ? "Sell" : "Build";
+        buildBtn.disabled = true;
+      }
+      passBtn.disabled = !myTurn;
+    } else {
+      buildBtn.disabled = !canBuild;
+    }
+
     if (alreadyBuilt && !MP.currentLegal?.matter_replication) {
       buildBtn.title = "Already built this turn";
     } else {
@@ -1451,6 +1478,32 @@
   
     document.getElementById("mp-build-btn").addEventListener("click", () => {
       if (MP.selectedCards.size === 0) return;
+
+      // V2: if intent is "sell", trigger the sell action instead of build
+      const isV2 = document.body.classList.contains("theme-v2");
+      if (isV2 && MP._v2CardIntent === "sell") {
+        if (MP.selectedCards.size !== 1) return;
+        const cardIdx = Number([...MP.selectedCards][0]);
+        const el = document.querySelectorAll("#mp-hand-grid .hand-card")[cardIdx];
+        const cardRect = el?.getBoundingClientRect();
+        const cardHtml = el?.innerHTML || "";
+        const action = {type: "sell", card_idx: cardIdx};
+        if (MP._v2SellResource) {
+          action.sell_resource = MP._v2SellResource;
+          MP._v2SellResource = null;
+        }
+        const hTarget = document.getElementById("mp-hacker-target");
+        const hDir = document.getElementById("mp-hacker-dir");
+        if (hTarget?.value) {
+          action.hacker_target = hTarget.value;
+          action.hacker_direction = parseInt(hDir?.value || "1");
+        }
+        MP._v2CardIntent = null;
+        clearSelection();
+        const ok = sendAction(action);
+        if (ok && cardRect) MP.anim.animateFadeOut(cardRect, cardHtml);
+        return;
+      }
       // Capture card rects before action
       const cardRects = [...MP.selectedCards].map(i => {
         const el = document.querySelectorAll("#mp-hand-grid .hand-card")[i];

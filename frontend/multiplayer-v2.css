@@ -709,6 +709,12 @@ body.theme-v2 .action-btn {
   font-size: 0.8rem;
 }
 
+/* V2: hide individual action buttons, show only the adaptive confirm */
+body.theme-v2 #mp-sell-btn,
+body.theme-v2 #mp-contract-btn {
+  display: none;
+}
+
 /* End Turn button — push to the right */
 body.theme-v2 #mp-pass-btn {
   margin-left: auto;
