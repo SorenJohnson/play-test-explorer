@@ -439,6 +439,20 @@ body.theme-v2 .hand-card {
   padding: 6px 8px;
 }
 
+/* Resource pip: inline colored circle used for costs, rates, contract reqs */
+body.theme-v2 .res-pip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 5px;
+  border-radius: 10px;
+  font-size: 0.65rem;
+  font-weight: 800;
+  line-height: 1.2;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
 /* Card sections: fixed heights so all cards align identically */
 body.theme-v2 .card-costs {
   font-size: 0.75rem;

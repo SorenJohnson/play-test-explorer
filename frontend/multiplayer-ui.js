@@ -250,11 +250,10 @@
       const inactive = !myTurn ? "inactive" : "";
       const isV2 = document.body.classList.contains("theme-v2");
       if (isV2) {
-        // Fixed-slot layout: each req on its own line, fixed-height zone
         const reqLines = (c.requirements || []).map(r => {
           const have = me?.rates?.[r.resource] || 0;
           const met = have >= r.amount;
-          return `<div class="contract-req-line ${met ? 'met' : 'unmet'}">${r.amount} ${r.resource}</div>`;
+          return `<div class="contract-req-line ${met ? 'met' : 'unmet'}">${resPip(r.resource, r.amount)}</div>`;
         }).join("");
         return `<div class="contract-card ${sel} ${inactive}" data-ci="${ci}">
           <div class="contract-reqs-v2">${reqLines || '&nbsp;'}</div>
@@ -574,19 +573,28 @@
     return {ok: true, cost, deficit};
   }
   
+  // Render a resource amount as a colored pip icon
+  function resPip(resource, amount, prefix) {
+    const bg = RESOURCE_COLORS[resource] || 'var(--text-muted)';
+    const color = MP.pipTextColor(resource);
+    return `<span class="res-pip" style="background:${bg};color:${color}">${prefix || ''}${amount} ${resource}</span>`;
+  }
+
   function renderCard(c) {
     // Returns full card HTML: costs → name → rates → effect → sell/contract
-    const costs = (c.costs || []).map(r => `${r.amount} ${r.resource}`).join(", ");
+    const isV2 = document.body.classList.contains("theme-v2");
+    const costs = (c.costs || []).map(r =>
+      isV2 ? resPip(r.resource, r.amount) : `${r.amount} ${r.resource}`
+    ).join(isV2 ? " " : ", ");
     const rates = (c.rates || []).map(r =>
-      `<span class="${r.amount > 0 ? 'rate-pos' : 'rate-neg'}">${r.amount > 0 ? '+' : ''}${r.amount} ${r.resource}</span>`
+      isV2
+        ? resPip(r.resource, Math.abs(r.amount), r.amount > 0 ? '+' : '-')
+        : `<span class="${r.amount > 0 ? 'rate-pos' : 'rate-neg'}">${r.amount > 0 ? '+' : ''}${r.amount} ${r.resource}</span>`
     ).join(" ");
     const sell = (c.can_sell || []).join("/");
     const canContract = c.can_fulfill_contract;
-    const isV2 = document.body.classList.contains("theme-v2");
     let html = "";
     if (isV2) {
-      // V2: split card — top half = build info, bottom half = sell info.
-      // Each half is separately clickable to indicate intent.
       const me = MP.currentState?.players?.[MP.mySeat];
       const market = MP.currentState?.market || {};
 
