@@ -469,12 +469,20 @@
       html += `<div class="card-name">${c.building}</div>`;
       html += `<div class="card-rates">${rates || '&nbsp;'}</div>`;
       html += `<div class="card-effect">${c.effect || '&nbsp;'}</div>`;
-      // Sell resources as individual buttons (greyed by default, lit when sellable)
+      // Sell resources as colored pip circles with revenue shown above
       const sellResources = (c.can_sell || []);
       if (sellResources.length > 0) {
-        const btns = sellResources.map(r =>
-          `<span class="card-sell-btn dimmed" data-sell-res="${r}" style="background:${RESOURCE_COLORS[r] || 'var(--text-muted)'}">${r}</span>`
-        ).join("");
+        const me = MP.currentState?.players?.[MP.mySeat];
+        const market = MP.currentState?.market || {};
+        const btns = sellResources.map(r => {
+          const rate = me?.rates?.[r] || 0;
+          const price = market[r] || 0;
+          const rev = rate > 0 ? rate * price : 0;
+          return `<div class="card-sell-pip-wrap">
+            <div class="card-sell-rev">$${rev}</div>
+            <span class="card-sell-btn dimmed" data-sell-res="${r}" style="background:${RESOURCE_COLORS[r] || 'var(--text-muted)'}">${r}</span>
+          </div>`;
+        }).join("");
         html += `<div class="card-sell-row">${btns}</div>`;
       } else if (canContract) {
         html += `<div class="card-sell-row"><span class="card-contract-icon">\u{1F4CB}</span></div>`;

@@ -404,7 +404,10 @@ body.theme-v2 .event-card-face {
 }
 
 
-/* Hide market chart + market chips in v2 */
+/* Hide sell picker popup + market chart + market chips in v2 */
+body.theme-v2 .sell-picker {
+  display: none !important;
+}
 body.theme-v2 #market-chart-wrap {
   display: none !important;
 }
@@ -462,11 +465,23 @@ body.theme-v2 .pool-card {
 
 /* On-card sell buttons */
 body.theme-v2 .card-sell-row {
-  margin-top: auto;                 /* push to bottom of card              */
+  margin-top: auto;
   display: flex;
-  gap: 4px;
+  gap: 6px;
   padding-top: 4px;
   min-height: 1.4em;
+  justify-content: center;
+}
+body.theme-v2 .card-sell-pip-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+body.theme-v2 .card-sell-rev {
+  font-size: 0.6rem;
+  color: var(--text-dim);
+  font-weight: 600;
 }
 /* Sell pips: colored background circles like tracker/ruler dots */
 body.theme-v2 .card-sell-btn {
