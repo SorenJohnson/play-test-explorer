@@ -49,14 +49,16 @@ body.theme-v2 .board-zone {
   display: contents;
 }
 
-/* Opponents → narrow left column, spans rows 1-3 */
+/* Opponents + feed → narrow left column, bounded by board height */
 body.theme-v2 .board-zone > section:first-child {
   grid-column: 1;
   grid-row: 1 / 4;
-  overflow-y: auto;
+  overflow: hidden;                  /* don't push the grid taller          */
   padding: 4px;
   border-right: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg-board) 70%, var(--bg-canvas));
+  display: flex;
+  flex-direction: column;
 }
 
 /* Market → center column, spans rows 1-3 (contracts + pool + player area) */
@@ -100,10 +102,13 @@ body.theme-v2 #event-feed {
   border-left: none;
   font-size: 0.7rem;
   padding: 4px 0;
-  margin-top: 8px;
+  margin-top: 6px;
   border-top: 1px solid var(--border);
-  max-height: none;
+  flex: 1;                           /* fill remaining space in left col    */
+  min-height: 0;                     /* allow shrinking below content       */
+  overflow-y: auto;                  /* scroll when feed grows long         */
   position: static;
+  max-height: none;
 }
 
 
@@ -129,6 +134,7 @@ body.theme-v2 .opponents-strip {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  flex-shrink: 0;                    /* players don't shrink for feed       */
 }
 
 /* "Other Players" → "Players" */
