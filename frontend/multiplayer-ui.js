@@ -473,7 +473,7 @@
       const sellResources = (c.can_sell || []);
       if (sellResources.length > 0) {
         const btns = sellResources.map(r =>
-          `<span class="card-sell-btn dimmed" data-sell-res="${r}" style="color:${RESOURCE_COLORS[r] || 'var(--text-muted)'}">${r}</span>`
+          `<span class="card-sell-btn dimmed" data-sell-res="${r}" style="background:${RESOURCE_COLORS[r] || 'var(--text-muted)'}">${r}</span>`
         ).join("");
         html += `<div class="card-sell-row">${btns}</div>`;
       } else if (canContract) {

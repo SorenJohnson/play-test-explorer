@@ -311,10 +311,11 @@ body.theme-v2 .ruler-pip {
   border-radius: 3px;
 }
 
-/* Price as large background number — fills the cell */
+/* Price as large background number — centered in cell */
 body.theme-v2 .ruler-price {
   position: absolute;
-  right: 4px;
+  left: 50%;
+  transform: translateX(-50%);
   font-size: 1.8rem;
   font-weight: 900;
   color: var(--text-muted);
@@ -439,11 +440,6 @@ body.theme-v2 .card-rates {
   margin-bottom: 2px;
 }
 
-/* Sell resource buttons: white text for readability */
-body.theme-v2 .card-sell-btn {
-  color: var(--text-primary) !important;
-  text-shadow: 0 0 4px currentColor;
-}
 body.theme-v2 .card-effect {
   font-size: 0.72rem;
   color: var(--accent-violet);
@@ -472,32 +468,37 @@ body.theme-v2 .card-sell-row {
   padding-top: 4px;
   min-height: 1.4em;
 }
+/* Sell pips: colored background circles like tracker/ruler dots */
 body.theme-v2 .card-sell-btn {
-  font-size: 0.78rem;
-  font-weight: 700;
-  padding: 2px 6px;
-  border-radius: 3px;
-  border: 1px solid transparent;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.4rem;
+  font-weight: 900;
+  color: #000;
+  line-height: 1;
+  border: 2px solid transparent;
   cursor: default;
   transition: opacity 0.15s, border-color 0.15s;
 }
 body.theme-v2 .card-sell-btn.dimmed {
-  opacity: 0.25;
+  opacity: 0.2;
 }
 body.theme-v2 .card-sell-btn.active {
-  opacity: 1;
-  border-color: currentColor;
+  opacity: 0.7;
   cursor: pointer;
-  background: rgba(255,255,255,0.06);
 }
 body.theme-v2 .card-sell-btn.active:hover {
-  background: rgba(255,255,255,0.12);
+  opacity: 1;
+  border-color: rgba(255,255,255,0.5);
 }
 body.theme-v2 .card-sell-btn.chosen {
   opacity: 1;
-  border-color: currentColor;
-  background: rgba(255,255,255,0.15);
-  box-shadow: 0 0 6px rgba(255,255,255,0.2);
+  border-color: #fff;
+  box-shadow: 0 0 8px rgba(255,255,255,0.3);
 }
 
 /* All hand + pool cards: fixed height, sell row always at bottom */
