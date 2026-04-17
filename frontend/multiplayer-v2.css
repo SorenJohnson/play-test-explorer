@@ -184,26 +184,58 @@ body.theme-v2 .opponent-buildings {
 
 
 /* ============================================================
-   MARKET — Vertical ruler is the primary view
+   MARKET — Chips stacked vertically left of a tall thin ruler
    ============================================================ */
 
-/* Compact the horizontal price grid */
-body.theme-v2 .market-grid {
-  grid-template-columns: repeat(9, 1fr);
-  gap: 3px;
-}
-body.theme-v2 .market-cell {
-  padding: 3px 2px;
-  font-size: 0.7rem;
-}
-body.theme-v2 .market-cell .res-price {
-  font-size: 0.9rem;
+/* Market section: chips + ruler side by side */
+body.theme-v2 .board-zone > section:nth-child(2) {
+  display: flex;
+  flex-direction: row;
+  gap: 6px;
+  align-items: stretch;
 }
 
-/* Vertical ruler — the physical price track */
+/* Market chips (resource prices) — vertical stack alongside ruler */
+body.theme-v2 .market-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 55px;
+  max-width: 65px;
+  flex-shrink: 0;
+}
+body.theme-v2 .market-cell {
+  padding: 2px 4px;
+  font-size: 0.65rem;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  border-radius: 3px;
+}
+body.theme-v2 .market-cell .res-name {
+  font-size: 0.6rem;
+  min-width: 26px;
+}
+body.theme-v2 .market-cell .res-price {
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+/* Hide step dots in compact chips view */
+body.theme-v2 .market-cell .dots-down,
+body.theme-v2 .market-cell .dots-up {
+  display: none;
+}
+body.theme-v2 .market-cell .res-price-wrap {
+  position: static;
+}
+
+/* Vertical ruler — tall, thin, rate-tracker style */
 body.theme-v2 .market-ruler {
   display: flex;
-  margin-top: 6px;
+  flex: 1;
+  margin-top: 0;
+  padding: 4px;
+  max-width: 120px;
 }
 
 body.theme-v2 .ruler-track {
@@ -211,31 +243,65 @@ body.theme-v2 .ruler-track {
   flex-direction: column-reverse;   /* $1 at bottom, $10 at top */
   gap: 1px;
   width: 100%;
+  flex: 1;
 }
 
 body.theme-v2 .ruler-pip {
+  flex: 1;
+  display: flex;
   flex-direction: row;
-  height: auto;
-  min-height: 16px;
-  padding: 1px 4px;
-  gap: 3px;
-  justify-content: flex-start;
-  font-size: 0.6rem;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  min-height: 0;
+  padding: 0 4px;
+  gap: 0;
+  border-radius: 3px;
 }
 
+/* Price as large faded background number (like rate tracker) */
 body.theme-v2 .ruler-price {
-  min-width: 24px;
-  text-align: right;
-  font-size: 0.65rem;
+  position: absolute;
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--text-subtle);
+  opacity: 0.35;
+  z-index: 0;
+  text-align: center;
+  min-width: 0;
 }
 
+/* Resource dots on top of the background numbers */
 body.theme-v2 .ruler-dots-row {
   display: flex;
   gap: 2px;
   align-items: center;
+  z-index: 1;
+  position: relative;
 }
 
-/* Hide market chart by default in v2 (digital-only, not physical) */
+body.theme-v2 .ruler-res-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  opacity: 0.9;
+}
+body.theme-v2 .ruler-res-dot.selected {
+  width: 10px;
+  height: 10px;
+  opacity: 1;
+  box-shadow: 0 0 6px rgba(255,255,255,0.5);
+}
+
+body.theme-v2 .ruler-pip.current {
+  background: rgba(255,255,255,0.06);
+}
+body.theme-v2 .ruler-pip.current .ruler-price {
+  opacity: 0.6;
+  color: var(--text-primary);
+}
+
+/* Hide market chart in v2 (digital-only, not physical) */
 body.theme-v2 #market-chart-wrap {
   display: none !important;
 }
