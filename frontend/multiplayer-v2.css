@@ -641,14 +641,16 @@ body.theme-v2 .contract-card {
   flex-direction: column;
 }
 
-/* Fixed-height requirements zone — all contracts align regardless of # reqs */
+/* Requirements row — horizontal across the top */
 body.theme-v2 .contract-reqs-v2 {
-  min-height: 3.2em;                /* space for ~2 requirement lines       */
+  min-height: 2em;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   justify-content: center;
-  gap: 2px;
+  align-items: center;
+  gap: 6px;
   margin-bottom: 4px;
+  flex-wrap: wrap;
 }
 body.theme-v2 .contract-req-line {
   font-size: 0.8rem;
