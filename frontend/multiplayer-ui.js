@@ -327,17 +327,32 @@
       return `<div class="hand-card ${sel} ${inactive}" data-hi="${i}" style="${fanStyle}">${renderCard(c)}</div>`;
     }).join("");
   
-    // Build cost estimate — computed locally so the host and client views
-    // match. Mirrors compute_build_deficit in simulation.py.
+    // Build + sell estimates — show both when a card is selected
     const estimateEl = document.getElementById("mp-build-estimate");
     if (MP.selectedCards.size > 0 && myTurn) {
+      const parts = [];
+      // Build estimate
       const est = estimateBuildCostLocal(s, [...MP.selectedCards]);
       if (est.ok) {
         const defParts = Object.entries(est.deficit || {}).map(([r, a]) => `${a} ${r}`).join(", ");
-        estimateEl.innerHTML = `Build cost: <strong>$${est.cost}</strong>${defParts ? ` (buy ${defParts})` : ' (free)'}`;
+        parts.push(`Build: <strong>$${est.cost}</strong>${defParts ? ` (buy ${defParts})` : ' (free)'}`);
       } else {
-        estimateEl.innerHTML = `<span style="color:var(--accent-red)">${est.reason || 'Cannot build'}</span>`;
+        parts.push(`<span style="color:var(--accent-red)">${est.reason || 'Cannot build'}</span>`);
       }
+      // Sell estimate (v2, single card with sell)
+      if (isV2 && MP.selectedCards.size === 1) {
+        const selIdx = Array.from(MP.selectedCards)[0];
+        const selCard = hand[selIdx];
+        const me = s.players[MP.mySeat];
+        if (selCard?.can_sell?.length > 0 && cr >= 1) {
+          const r = MP._v2SellResource || selCard.can_sell[0];
+          const rate = me?.rates?.[r] || 0;
+          const price = s.market?.[r] || 0;
+          const rev = rate > 0 ? rate * price : 0;
+          parts.push(`Sell: <strong>$${rev}</strong> (${rate} ${r} @ $${price})`);
+        }
+      }
+      estimateEl.innerHTML = parts.join(" &nbsp;·&nbsp; ");
     } else {
       estimateEl.textContent = "";
     }
@@ -393,14 +408,8 @@
               });
             });
 
-            // Show sell info on the chosen resource's rev label
-            if (MP._v2SellResource) {
-              const r = MP._v2SellResource;
-              const rate = me?.rates?.[r] || 0;
-              const price = s.market?.[r] || 0;
-              const rev = rate > 0 ? rate * price : 0;
-              estimateEl.innerHTML = `Sell for: <strong>$${rev}</strong> (${rate} ${r} @ $${price})`;
-            }
+            // (Sell info is shown in the estimate area above via the
+            // combined build+sell estimate logic.)
           }
         } else {
           MP._v2SellResource = null;
