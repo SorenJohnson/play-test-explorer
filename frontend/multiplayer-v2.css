@@ -439,16 +439,17 @@ body.theme-v2 .hand-card {
   padding: 6px 8px;
 }
 
-/* Resource pip: inline colored circle used for costs, rates, contract reqs */
+/* Resource pip: fixed-size colored circle, same as ruler/tracker dots */
 body.theme-v2 .res-pip {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 1px 5px;
-  border-radius: 10px;
-  font-size: 0.65rem;
-  font-weight: 800;
-  line-height: 1.2;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  font-size: 0.4rem;
+  font-weight: 900;
+  line-height: 1;
   white-space: nowrap;
   vertical-align: middle;
 }
