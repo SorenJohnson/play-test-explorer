@@ -64,6 +64,52 @@ body.theme-v2 .player-zone {
 
 body.theme-v2 #event-feed {
   background: color-mix(in srgb, var(--bg-elevated) 80%, var(--bg-canvas));
+  font-size: 0.75rem;
+}
+
+/* Narrower feed sidebar */
+body.theme-v2 #game-layout {
+  grid-template-columns: 1fr 220px;
+}
+
+
+/* ============================================================
+   OPPONENTS — Stacked vertically with turn indicator
+   ============================================================ */
+
+body.theme-v2 .opponents-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+body.theme-v2 .opponent-card {
+  padding: 6px 8px;
+  font-size: 0.75rem;
+}
+
+/* Active-turn opponent gets a visible glow instead of just a class */
+body.theme-v2 .opponent-card.active-turn {
+  border-left-width: 4px;
+  box-shadow: inset 0 0 12px rgba(88, 166, 255, 0.08);
+}
+
+
+/* ============================================================
+   MARKET — Vertical list instead of horizontal grid
+   ============================================================ */
+
+body.theme-v2 .market-grid {
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+
+body.theme-v2 .market-cell {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  font-size: 0.75rem;
 }
 
 
