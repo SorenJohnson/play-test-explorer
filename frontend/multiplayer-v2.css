@@ -20,6 +20,8 @@ body.theme-v2 {
 body.theme-v2 #game-wrapper {
   height: 100vh;
   overflow: hidden;
+  padding-bottom: 12px;
+  box-sizing: border-box;
 }
 
 body.theme-v2 #game-screen {
