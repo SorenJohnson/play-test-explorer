@@ -39,9 +39,8 @@ body.theme-v2 #game-layout {
 /* game-area: 3-column grid — players | market | contracts+pool */
 body.theme-v2 #game-area {
   display: grid;
-  grid-template-columns: 200px 130px 1fr;
-  grid-template-rows: auto auto auto;        /* all rows content-sized              */
-  align-content: stretch;                    /* rows can use available height        */
+  grid-template-columns: min(200px, 20vw) min(130px, 14vw) 1fr;
+  grid-template-rows: auto auto auto 1fr;
   overflow: hidden;
   gap: 0;
 }
@@ -96,8 +95,9 @@ body.theme-v2 .player-zone {
   border-top: 2px solid rgba(88, 166, 255, 0.2);
   margin-top: 12px;
   padding: 8px;
-  overflow: hidden;                  /* shrink, don't scroll                */
+  overflow: hidden;
   border-radius: 6px;
+  min-height: 0;                     /* allow shrinking below content       */
 }
 
 body.theme-v2 #event-feed {
