@@ -63,6 +63,9 @@
     renderPlayerPanel(s);
     renderOpponents(s);
     MP.anim.renderDeckViewer();
+
+    // (V2 layout puts the entire player-zone in the board's right column
+    // via CSS grid — no DOM relocation needed.)
   }
   
   const PRICE_TRACK = [1,1,1,2,2,2,3,3,4,4,5,5,6,7,8,9,10];
