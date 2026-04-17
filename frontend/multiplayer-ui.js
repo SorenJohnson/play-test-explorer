@@ -66,11 +66,12 @@
 
     // V2: DOM relocations
     if (document.body.classList.contains("theme-v2")) {
-      // Event deck → above contracts
+      // Event deck → own grid child in board-zone, before contracts section
       const deckArea = document.getElementById("event-deck-area");
+      const boardZone = document.querySelector(".board-zone");
       const contractsSection = document.querySelector(".board-zone > section:nth-child(3)");
-      if (deckArea && contractsSection && deckArea.parentElement !== contractsSection) {
-        contractsSection.insertBefore(deckArea, contractsSection.firstChild);
+      if (deckArea && boardZone && contractsSection && deckArea.parentElement !== boardZone) {
+        boardZone.insertBefore(deckArea, contractsSection);
       }
     } else {
       // Classic: restore event deck to status bar
@@ -194,12 +195,15 @@
               const resHere = resourcesAtPos[i] || [];
               const dots = resHere.map(r => {
                 const isSelected = r === selectedRes;
-                return `<span class="ruler-res-dot ${isSelected ? 'selected' : ''}" style="background:${RESOURCE_COLORS[r]};color:${MP.pipTextColor(r)}" title="${r}">${r}</span>`;
+                const longCls = r.length > 3 ? ' ruler-long' : '';
+                return `<span class="ruler-res-dot${longCls} ${isSelected ? 'selected' : ''}" style="background:${RESOURCE_COLORS[r]};color:${MP.pipTextColor(r)}" title="${r}">${r}</span>`;
               }).join("");
               return `<div class="ruler-sub ${isCurrent ? 'current' : ''}">${dots}</div>`;
             }).join("");
             const hasSelected = g.positions.includes(selectedPos);
-            return `<div class="ruler-group ${hasSelected ? 'has-selected' : ''}" style="flex:${g.positions.length}">
+            // flex:N so the group takes N/17 of the ruler height — each of
+            // its N subsections ends up 1/17 of the total ruler.
+            return `<div class="ruler-group ${hasSelected ? 'has-selected' : ''}" style="flex:${g.positions.length} 1 0">
               <div class="ruler-group-label">$${g.price}</div>
               <div class="ruler-group-slots">${subSlots}</div>
             </div>`;
@@ -479,16 +483,18 @@
               MP._v2CardIntent = "sell";
               MP._v2SellResource = null;
             } else {
-              // Build: allow multi-select
+              // Build: allow multi-select up to cards_remaining.
+              // If we're already at capacity, replace the selection with
+              // the new card (so the player isn't stuck on an old selection
+              // after building).
               if (MP._v2CardIntent === "sell") {
-                // Switching from sell to build — start fresh
                 MP.selectedCards.clear();
                 MP._v2SellResource = null;
+              } else if (MP.selectedCards.size >= Math.max(cr, 1)) {
+                MP.selectedCards.clear();
               }
               MP._v2CardIntent = "build";
-              if (MP.selectedCards.size < Math.max(cr, 1)) {
-                MP.selectedCards.add(hi);
-              }
+              MP.selectedCards.add(hi);
             }
           } else {
             if (MP.selectedCards.has(hi)) MP.selectedCards.delete(hi);
@@ -755,21 +761,11 @@
             }).join("") + `</div>`;
         }
   
-        let hackerHtml = "";
-        if (MP.currentLegal?.hacker_array_status?.owned) {
-          const resOpts = RESOURCE_ORDER.filter(r => r !== "PWR").map(r => `<option value="${r}">${r}</option>`).join("");
-          hackerHtml = `<div class="sell-hacker-row">
-            <span style="font-size:0.75rem;color:var(--text-muted)">Hacker Array:</span>
-            <select id="mp-hacker-target" class="toggle-select">${resOpts}</select>
-            <select id="mp-hacker-dir" class="toggle-select">
-              <option value="1">+3 (raise)</option>
-              <option value="-1">-3 (lower)</option>
-            </select>
-          </div>`;
-        }
-  
-        if (resBtnsHtml || hackerHtml) {
-          sellPicker.innerHTML = `${resBtnsHtml}${hackerHtml}<input type="hidden" id="mp-sell-resource" value="${bestRes}">`;
+        // Hacker Array config lives in the Special Actions panel now; sell
+        // action reads MP._v2HackerTarget / MP._v2HackerDir at execute time.
+
+        if (resBtnsHtml) {
+          sellPicker.innerHTML = `${resBtnsHtml}<input type="hidden" id="mp-sell-resource" value="${bestRes}">`;
           sellPicker.style.display = "block";
           sellPicker.querySelectorAll(".sell-res-btn").forEach(btn => {
             if (btn.dataset.res === bestRes) btn.classList.add("selected");
@@ -805,71 +801,45 @@
     if (!host) return;
     const myTurn = isMyTurn(s);
     const pa = MP.currentLegal?.patent_actions || {};
-    const oc = MP.currentLegal?.optimization_center_status || {};
-    const parts = [];
-  
-    if (oc.owned) {
-      const status = oc;
-      const opts = (status.valid_resources || []).map(r => `<option value="${r}">${r}</option>`).join("");
-      const canUse = myTurn && status.available && opts;
-      parts.push(`
-        <div class="patent-action-row">
-          <strong>Optimization Center</strong> &mdash; -1 PWR, +1 to a positive rate.
-          <select id="pa-oc-resource" class="toggle-select" ${canUse ? "" : "disabled"}>
-            ${opts || '<option value="">none</option>'}
-          </select>
-          <button id="pa-oc-btn" class="action-btn" ${canUse ? "" : "disabled"}>Use OC</button>
-        </div>
-      `);
-    }
-    if (pa.water_engine?.owned) {
-      const status = pa.water_engine;
-      const canUse = myTurn && status.available;
-      parts.push(`
-        <div class="patent-action-row">
-          <strong>Water Engine</strong> &mdash; -1 H2O, +2 PWR.
-          <button id="pa-we-btn" class="action-btn" ${canUse ? "" : "disabled"}>Use WE</button>
-        </div>
-      `);
-    }
-    if (pa.nanotechnology?.owned) {
-      const status = pa.nanotechnology;
-      const pool = s.pool || [];
-      const poolOpts = pool.map((c, i) => `<option value="${i}">${i + 1}: ${c.building}</option>`).join("");
-      const canUse = myTurn && status.available && pool.length > 0;
-      parts.push(`
-        <div class="patent-action-row">
-          <strong>Nanotechnology</strong> &mdash; replace a pool card with a deck draw.
-          <select id="pa-nano-card" class="toggle-select" ${canUse ? "" : "disabled"}>
-            ${poolOpts || '<option value="">empty</option>'}
-          </select>
-          <button id="pa-nano-btn" class="action-btn" ${canUse ? "" : "disabled"}>Replace</button>
-        </div>
-      `);
-    }
-    if (pa.teleportation?.owned) {
-      const status = pa.teleportation;
-      const opts = (status.valid_resources || []).map(r => `<option value="${r}">${r}</option>`).join("");
-      const canUse = myTurn && status.available && opts;
-      parts.push(`
-        <div class="patent-action-row">
-          <strong>Teleportation</strong> &mdash; sell any resource, -1 PWR.
-          <select id="pa-tele-resource" class="toggle-select" ${canUse ? "" : "disabled"}>
-            ${opts || '<option value="">none</option>'}
-          </select>
-          <button id="pa-tele-btn" class="action-btn" ${canUse ? "" : "disabled"}>Sell</button>
-        </div>
-      `);
-    }
-  
-    host.innerHTML = parts.length ? `<h4 style="color:var(--text-muted);font-size:0.75rem;margin:8px 0 4px">Patent Actions</h4>${parts.join("")}` : "";
-  
-    // Wire buttons
-    document.getElementById("pa-oc-btn")?.addEventListener("click", () => {
-      const r = document.getElementById("pa-oc-resource")?.value;
-      if (!r) return;
-      sendPatentAction("oc", {resource: r});
-    });
+
+    // Always show all 3 patent actions; grayed out when not owned/unavailable.
+    const row = (owned, canUse, title, descr, body) => {
+      const cls = !owned ? 'patent-action-row locked' : (canUse ? 'patent-action-row' : 'patent-action-row inactive');
+      return `<div class="${cls}"><strong>${title}</strong> &mdash; ${descr}${body || ''}</div>`;
+    };
+
+    const we = pa.water_engine || {};
+    const weCanUse = myTurn && we.owned && we.available;
+    const weBody = `<button id="pa-we-btn" class="action-btn" ${weCanUse ? "" : "disabled"}>Use WE</button>`;
+
+    const nano = pa.nanotechnology || {};
+    const pool = s.pool || [];
+    const nanoOpts = pool.map((c, i) => `<option value="${i}">${i + 1}: ${c.building}</option>`).join("");
+    const nanoCanUse = myTurn && nano.owned && nano.available && pool.length > 0;
+    const nanoBody = `
+      <select id="pa-nano-card" class="toggle-select" ${nanoCanUse ? "" : "disabled"}>
+        ${nanoOpts || '<option value="">empty</option>'}
+      </select>
+      <button id="pa-nano-btn" class="action-btn" ${nanoCanUse ? "" : "disabled"}>Replace</button>`;
+
+    const tele = pa.teleportation || {};
+    const teleOpts = (tele.valid_resources || []).map(r => `<option value="${r}">${r}</option>`).join("");
+    const teleCanUse = myTurn && tele.owned && tele.available && teleOpts;
+    const teleBody = `
+      <select id="pa-tele-resource" class="toggle-select" ${teleCanUse ? "" : "disabled"}>
+        ${teleOpts || '<option value="">none</option>'}
+      </select>
+      <button id="pa-tele-btn" class="action-btn" ${teleCanUse ? "" : "disabled"}>Sell</button>`;
+
+    const parts = [
+      row(we.owned, weCanUse, "Water Engine", "-1 H2O, +2 PWR.", weBody),
+      row(nano.owned, nanoCanUse, "Nanotechnology", "replace a pool card.", nanoBody),
+      row(tele.owned, teleCanUse, "Teleportation", "sell any resource, -1 PWR.", teleBody),
+    ];
+
+    host.innerHTML = `<h4 class="special-heading">Patent Actions</h4>${parts.join("")}`;
+
+    // Wire buttons (OC lives in the Special Actions panel now)
     document.getElementById("pa-we-btn")?.addEventListener("click", () => {
       sendPatentAction("water_engine", {});
     });
@@ -922,15 +892,45 @@
     const host = document.getElementById("mp-special-toggles");
     if (!host) return;
     const myTurn = isMyTurn(s);
-    if (!myTurn || !MP.currentLegal) { host.innerHTML = ""; return; }
-  
-    const parts = [];
-    // Space Elevator is always-on when owned. For a selected contract with
-    // more than one requirement, show a picker so the player chooses which
-    // resource gets the -1. For single-req contracts (or no selection),
-    // just show the status so the player knows it will apply.
-    const se = MP.currentLegal.space_elevator_status;
-    if (se?.owned) {
+    const legal = MP.currentLegal || {};
+
+    // Optimization Center — direct action; owner uses it for -1 PWR, +1 rate.
+    const oc = legal.optimization_center_status || {};
+    const ocOpts = (oc.valid_resources || []).map(r => `<option value="${r}">${r}</option>`).join("");
+    const ocCanUse = myTurn && oc.owned && oc.available && ocOpts;
+    const ocCls = !oc.owned ? 'patent-action-row locked' : (ocCanUse ? 'patent-action-row' : 'patent-action-row inactive');
+    const ocHtml = `
+      <div class="${ocCls}"><strong>Optimization Center</strong> &mdash; -1 PWR, +1 positive rate.
+        <select id="pa-oc-resource" class="toggle-select" ${ocCanUse ? "" : "disabled"}>
+          ${ocOpts || '<option value="">none</option>'}
+        </select>
+        <button id="pa-oc-btn" class="action-btn" ${ocCanUse ? "" : "disabled"}>Use OC</button>
+      </div>`;
+
+    // Hacker Array — per-sell modifier; target + direction are stashed on MP
+    // and applied when the sell action runs.
+    const ha = legal.hacker_array_status || {};
+    const haResOpts = RESOURCE_ORDER.filter(r => r !== "PWR").map(r => {
+      const sel = (MP._v2HackerTarget === r) ? 'selected' : '';
+      return `<option value="${r}" ${sel}>${r}</option>`;
+    }).join("");
+    const haDir = MP._v2HackerDir ?? 1;
+    const haCls = !ha.owned ? 'patent-action-row locked' : (myTurn ? 'patent-action-row' : 'patent-action-row inactive');
+    const haHtml = `
+      <div class="${haCls}"><strong>Hacker Array</strong> &mdash; on sell, adjust another resource.
+        <select id="ha-target" class="toggle-select" ${ha.owned && myTurn ? "" : "disabled"}>
+          <option value="">none</option>${haResOpts}
+        </select>
+        <select id="ha-dir" class="toggle-select" ${ha.owned && myTurn ? "" : "disabled"}>
+          <option value="1" ${haDir === 1 ? 'selected' : ''}>+3</option>
+          <option value="-1" ${haDir === -1 ? 'selected' : ''}>-3</option>
+        </select>
+      </div>`;
+
+    // Space Elevator — always shown; grayed if not owned or not my turn.
+    const se = legal.space_elevator_status || {};
+    let seBody = "";
+    if (se.owned) {
       const contract = MP.selectedContract >= 0
         ? s.available_contracts?.[MP.selectedContract]
         : null;
@@ -939,37 +939,43 @@
         const opts = reqs.map(r =>
           `<option value="${r.resource}">-1 ${r.resource} (was ${r.amount})</option>`
         ).join("");
-        parts.push(`
-          <div class="toggle-label">
-            <strong>Space Elevator</strong> &mdash; reduce
-            <select id="se-target" class="toggle-select">${opts}</select>
-            by 1
-          </div>
-        `);
+        seBody = ` &mdash; reduce <select id="se-target" class="toggle-select" ${myTurn ? "" : "disabled"}>${opts}</select> by 1`;
       } else if (reqs.length === 1) {
-        parts.push(`
-          <div class="toggle-label">
-            <strong>Space Elevator</strong> &mdash; auto -1 ${reqs[0].resource}
-          </div>
-        `);
+        seBody = ` &mdash; auto -1 ${reqs[0].resource}`;
       } else {
-        parts.push(`
-          <div class="toggle-label">
-            <strong>Space Elevator</strong> &mdash; always-on (-1 to a contract req)
-          </div>
-        `);
+        seBody = " &mdash; always-on";
       }
+    } else {
+      seBody = " &mdash; -1 to a contract req";
     }
-    const lp = MP.currentLegal.launch_pad_status;
-    if (lp?.owned) {
-      parts.push(`
-        <label class="toggle-label">
-          <input type="checkbox" id="toggle-lp" ${lp.available ? "" : "disabled"}>
-          Launch Pad (free contract, no card cost)
-        </label>
-      `);
-    }
-    host.innerHTML = parts.join("");
+    const seCls = !se.owned ? 'patent-action-row locked' : (myTurn ? 'patent-action-row' : 'patent-action-row inactive');
+    const seHtml = `<div class="${seCls}"><strong>Space Elevator</strong>${seBody}</div>`;
+
+    // Launch Pad — always shown; grayed if not owned or not available.
+    const lp = legal.launch_pad_status || {};
+    const lpCanUse = myTurn && lp.owned && lp.available;
+    const lpCls = !lp.owned ? 'patent-action-row locked' : (lpCanUse ? 'patent-action-row' : 'patent-action-row inactive');
+    const lpHtml = `
+      <label class="${lpCls}">
+        <input type="checkbox" id="toggle-lp" ${lpCanUse ? "" : "disabled"}>
+        <strong>Launch Pad</strong> &mdash; free contract, no card cost
+      </label>`;
+
+    host.innerHTML = `<h4 class="special-heading">Special Actions</h4>${ocHtml}${haHtml}${seHtml}${lpHtml}`;
+
+    // Wire OC button (it used to live in the Patent Actions panel)
+    document.getElementById("pa-oc-btn")?.addEventListener("click", () => {
+      const r = document.getElementById("pa-oc-resource")?.value;
+      if (!r) return;
+      sendPatentAction("oc", {resource: r});
+    });
+    // Keep Hacker Array selection stashed so sell action can read it later.
+    document.getElementById("ha-target")?.addEventListener("change", e => {
+      MP._v2HackerTarget = e.target.value || null;
+    });
+    document.getElementById("ha-dir")?.addEventListener("change", e => {
+      MP._v2HackerDir = parseInt(e.target.value);
+    });
   }
   
   function _buildRateNumberLine(rates) {
@@ -1009,9 +1015,10 @@
         const isZero = i === 5;
         const isNeg = i < 5;
         const hue = isZero ? "" : isNeg ? "rnl-cell-neg" : "rnl-cell-pos";
-        const dotHtml = dots.map(e =>
-          `<span class="${dotClass}" style="background:${e.color};color:${MP.pipTextColor(e.res)}" title="${e.res}: ${e.val > 0 ? '+' : ''}${e.val}">${dotClass === 'rnl-dot' ? e.res : ''}</span>`
-        ).join("");
+        const dotHtml = dots.map(e => {
+          const longCls = e.res.length > 3 ? ' rnl-long' : '';
+          return `<span class="${dotClass}${longCls}" style="background:${e.color};color:${MP.pipTextColor(e.res)}" title="${e.res}: ${e.val > 0 ? '+' : ''}${e.val}">${dotClass === 'rnl-dot' ? e.res : ''}</span>`;
+        }).join("");
         return `<div class="rnl-slot-wrap ${isZero ? 'rnl-zero' : ''}">
           <div class="rnl-slot ${hue} ${slotClass || ''}">
             <span class="rnl-bg-num">${labels[i]}</span>
@@ -1631,11 +1638,9 @@
           action.sell_resource = MP._v2SellResource;
           MP._v2SellResource = null;
         }
-        const hTarget = document.getElementById("mp-hacker-target");
-        const hDir = document.getElementById("mp-hacker-dir");
-        if (hTarget?.value) {
-          action.hacker_target = hTarget.value;
-          action.hacker_direction = parseInt(hDir?.value || "1");
+        if (MP._v2HackerTarget) {
+          action.hacker_target = MP._v2HackerTarget;
+          action.hacker_direction = MP._v2HackerDir ?? 1;
         }
         MP._v2CardIntent = null;
         clearSelection();
@@ -1648,7 +1653,12 @@
         const el = document.querySelectorAll("#mp-hand-grid .hand-card")[i];
         return el ? {rect: el.getBoundingClientRect(), html: el.innerHTML} : null;
       }).filter(Boolean);
-      const destRect = document.getElementById("mp-your-stats")?.getBoundingClientRect();
+      // Target the player's own opponent-card in the turn-order strip so
+      // the build animation SHRINKS the card toward the player panel
+      // (rather than stretching it to fill the wider stats row).
+      const youEl = document.querySelector("#mp-opponents .opponent-card.is-you")
+        || document.getElementById("mp-your-stats");
+      const destRect = youEl?.getBoundingClientRect();
   
       const buildCards = [...MP.selectedCards].map(Number);
   
@@ -1699,15 +1709,13 @@
         const resSel = document.getElementById("mp-sell-resource");
         if (resSel?.value) action.sell_resource = resSel.value;
       }
-      const hTarget = document.getElementById("mp-hacker-target");
-      const hDir = document.getElementById("mp-hacker-dir");
-      if (hTarget?.value) {
-        action.hacker_target = hTarget.value;
-        action.hacker_direction = parseInt(hDir?.value || "1");
+      if (MP._v2HackerTarget) {
+        action.hacker_target = MP._v2HackerTarget;
+        action.hacker_direction = MP._v2HackerDir ?? 1;
       }
       clearSelection();
       const ok = sendAction(action);
-  
+
       if (ok && cardRect) MP.anim.animateFadeOut(cardRect, cardHtml);
     });
     document.getElementById("mp-contract-btn").addEventListener("click", () => {

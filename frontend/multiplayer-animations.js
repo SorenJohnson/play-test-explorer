@@ -12,15 +12,28 @@
   const ANIM_FLIGHT = 400;
   const ANIM_FADE = 300;
 
+  // Zoom factor from the game wrapper (v2 viewport scaling).
+  // Clones are appended to body (outside zoom), so coords from
+  // getBoundingClientRect are screen-space but clone content renders
+  // unzoomed. Dividing coords by z and setting clone zoom = z keeps
+  // visual size and position consistent.
+  function _zoom() {
+    const w = document.getElementById("game-wrapper");
+    return parseFloat(w?.style.zoom) || 1;
+  }
+
   function animateCard(sourceRect, destRect, html, opts = {}) {
+    const z = _zoom();
     const clone = document.createElement("div");
     clone.className = "flying-card";
     clone.innerHTML = html;
     Object.assign(clone.style, {
       position: "fixed",
-      left: sourceRect.left + "px",
-      top: sourceRect.top + "px",
-      width: sourceRect.width + "px",
+      left: (sourceRect.left / z) + "px",
+      top: (sourceRect.top / z) + "px",
+      width: (sourceRect.width / z) + "px",
+      height: (sourceRect.height / z) + "px",
+      zoom: z,
       zIndex: "200",
       transition: `all ${ANIM_FLIGHT}ms cubic-bezier(0.4, 0, 0.2, 1)`,
       pointerEvents: "none",
@@ -29,9 +42,10 @@
     document.body.appendChild(clone);
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        clone.style.left = destRect.left + "px";
-        clone.style.top = destRect.top + "px";
-        clone.style.width = destRect.width + "px";
+        clone.style.left = (destRect.left / z) + "px";
+        clone.style.top = (destRect.top / z) + "px";
+        clone.style.width = (destRect.width / z) + "px";
+        clone.style.height = (destRect.height / z) + "px";
         if (opts.fadeOut) clone.style.opacity = "0";
       });
     });
@@ -42,14 +56,17 @@
 
   function animateFadeOut(rect, html) {
     if (!rect) return;
+    const z = _zoom();
     const clone = document.createElement("div");
     clone.className = "flying-card card-fade-out";
     clone.innerHTML = html || "";
     Object.assign(clone.style, {
       position: "fixed",
-      left: rect.left + "px",
-      top: rect.top + "px",
-      width: rect.width + "px",
+      left: (rect.left / z) + "px",
+      top: (rect.top / z) + "px",
+      width: (rect.width / z) + "px",
+      height: (rect.height / z) + "px",
+      zoom: z,
       zIndex: "200",
       pointerEvents: "none",
     });
@@ -58,13 +75,15 @@
   }
 
   function animateReward(rect, text) {
+    const z = _zoom();
     const el = document.createElement("div");
     el.className = "reward-popup";
     el.textContent = text;
     Object.assign(el.style, {
       position: "fixed",
-      left: (rect.left + rect.width / 2) + "px",
-      top: rect.top + "px",
+      left: ((rect.left + rect.width / 2) / z) + "px",
+      top: (rect.top / z) + "px",
+      zoom: z,
       zIndex: "201",
     });
     document.body.appendChild(el);
@@ -148,10 +167,12 @@
       const popup = document.createElement("div");
       popup.className = amount > 0 ? "rate-change-popup positive" : "rate-change-popup negative";
       popup.textContent = `${amount > 0 ? "+" : ""}${amount}`;
+      const z = _zoom();
       Object.assign(popup.style, {
         position: "fixed",
-        left: (rect.left + rect.width / 2) + "px",
-        top: (rect.top - 8) + "px",
+        left: ((rect.left + rect.width / 2) / z) + "px",
+        top: ((rect.top - 8) / z) + "px",
+        zoom: z,
         zIndex: "250",
       });
       document.body.appendChild(popup);
@@ -242,12 +263,14 @@
     const flyCard = document.createElement("div");
     flyCard.className = "flying-card";
     flyCard.innerHTML = `<span style="font-size:0.7rem">&#9889; ${titleHtml}</span>`;
+    const z = _zoom();
     Object.assign(flyCard.style, {
       position: "fixed",
-      left: deckRect.left + "px",
-      top: deckRect.top + "px",
-      width: deckRect.width + "px",
-      height: deckRect.height + "px",
+      left: (deckRect.left / z) + "px",
+      top: (deckRect.top / z) + "px",
+      width: (deckRect.width / z) + "px",
+      height: (deckRect.height / z) + "px",
+      zoom: z,
       zIndex: "200",
       transition: `all ${ANIM_FLIGHT}ms cubic-bezier(0.4, 0, 0.2, 1)`,
       pointerEvents: "none",
@@ -260,10 +283,10 @@
 
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        flyCard.style.left = discardRect.left + "px";
-        flyCard.style.top = discardRect.top + "px";
-        flyCard.style.width = discardRect.width + "px";
-        flyCard.style.height = discardRect.height + "px";
+        flyCard.style.left = (discardRect.left / z) + "px";
+        flyCard.style.top = (discardRect.top / z) + "px";
+        flyCard.style.width = (discardRect.width / z) + "px";
+        flyCard.style.height = (discardRect.height / z) + "px";
       });
     });
 

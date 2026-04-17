@@ -18,7 +18,7 @@ body.theme-v2 {
    ============================================================ */
 
 body.theme-v2 #game-wrapper {
-  height: 100vh;
+  height: 1280px;                      /* fixed reference height; zoom fits it */
   overflow: hidden;
   padding-bottom: 12px;
   box-sizing: border-box;
@@ -36,7 +36,7 @@ body.theme-v2 #game-layout {
   grid-template-columns: 1fr min(200px, 20vw);
   grid-template-rows: 1fr;
 }
-/* game-area: flex column so board + player zone both shrink */
+/* game-area: flex column — board fills top, player-zone keeps natural size */
 body.theme-v2 #game-area {
   display: flex;
   flex-direction: column;
@@ -44,27 +44,28 @@ body.theme-v2 #game-area {
   overflow: hidden;
 }
 
-/* board-zone: 3-column grid, shrinks with flex */
+/* board-zone: 3-column grid, takes remaining space above player zone.
+ * Contracts row is kept small so the pool row can hold a full card row. */
 body.theme-v2 .board-zone {
   display: grid;
   grid-template-columns: min(200px, 20vw) min(130px, 14vw) 1fr;
-  grid-template-rows: 1fr;
-  flex: 3;
+  grid-template-rows: auto 130px minmax(0, 1fr);  /* events(auto), contracts(fixed), pool(rest) */
+  flex: 1 1 0;
   min-height: 0;
   overflow: hidden;
 }
 
-/* Players → narrow left column */
+/* Players → narrow left column, spans all rows */
 body.theme-v2 .board-zone > section:first-child {
   grid-column: 1;
-  grid-row: 1 / -1;
+  grid-row: 1 / 4;
   overflow-y: auto;
   padding: 4px;
   border-right: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg-board) 70%, var(--bg-canvas));
 }
 
-/* Ruler → col 2, column layout so header is above ruler */
+/* Ruler → col 2, spans all rows */
 body.theme-v2 .board-zone > section:nth-child(2) {
   grid-column: 2;
   grid-row: 1 / 4;
@@ -77,34 +78,45 @@ body.theme-v2 .board-zone > section:nth-child(2) {
 }
 body.theme-v2 .board-zone > section:nth-child(2) .market-ruler {
   flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
 }
 body.theme-v2 .board-zone > section:nth-child(2) .ruler-track {
-  height: 100%;
+  height: 100%;                      /* track fills available ruler height  */
 }
 
-/* Contracts → col 3 (right of ruler) */
-body.theme-v2 .board-zone > section:nth-child(3) {
+/* Event deck area → col 3, row 1 (auto-sized) */
+body.theme-v2 .board-zone > #event-deck-area {
   grid-column: 3;
+  grid-row: 1;
   padding: 4px 8px;
   overflow: hidden;
-  min-height: 0;
 }
 
-/* Pool → col 3 */
+/* Contracts → col 3, row 2 */
 body.theme-v2 .board-zone > section:nth-child(4) {
   grid-column: 3;
+  grid-row: 2;
   padding: 4px 8px;
   overflow: hidden;
   min-height: 0;
 }
 
-/* Player zone → below the board, shrinks with flex */
-body.theme-v2 .player-zone {
-  flex: 2;
+/* Pool → col 3, row 3 */
+body.theme-v2 .board-zone > section:nth-child(5) {
+  grid-column: 3;
+  grid-row: 3;
+  padding: 4px 8px;
+  overflow: hidden;
   min-height: 0;
+}
+
+/* Player zone → below the board, natural content size, never shrinks */
+body.theme-v2 .player-zone {
+  flex-shrink: 0;
   background: var(--bg-player-mat);
   border-top: 2px solid rgba(88, 166, 255, 0.2);
-  margin-top: 12px;
   padding: 8px;
   overflow: hidden;
   border-radius: 6px;
@@ -296,7 +308,7 @@ body.theme-v2 .market-cell .res-price-wrap {
 /* Vertical ruler — tall, thin, rate-tracker style */
 body.theme-v2 .market-ruler {
   display: flex;
-  flex: 0 0 min(110px, 14vh);        /* scales with viewport                */
+  flex: 0 0 110px;                    /* zoom scales uniformly               */
   margin-top: 0;
   padding: 2px;
 }
@@ -306,7 +318,6 @@ body.theme-v2 .ruler-track {
   flex-direction: column-reverse;   /* $1 at bottom, $10 at top */
   gap: 0;
   width: 100%;
-  height: 100%;
 }
 
 body.theme-v2 .ruler-pip {
@@ -344,39 +355,48 @@ body.theme-v2 .ruler-dots-row {
   position: relative;
 }
 
-/* Ruler dots: scale with viewport */
+/* Ruler dots: font fills the pip; .ruler-long shrinks for 4-char FOOD */
 body.theme-v2 .ruler-res-dot {
-  width: min(26px, 2.8vh);
-  height: min(26px, 2.8vh);
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   opacity: 0.9;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.55rem;
+  font-size: 0.62rem;
   font-weight: 900;
   color: #000;
   line-height: 1;
 }
-body.theme-v2 .ruler-res-dot.selected {
-  width: min(30px, 3.2vh);
-  height: min(30px, 3.2vh);
-  opacity: 1;
-  box-shadow: 0 0 6px rgba(255,255,255,0.5);
+body.theme-v2 .ruler-res-dot.ruler-long {
   font-size: 0.48rem;
 }
-
-/* Rate tracker dots: scale with viewport */
-body.theme-v2 .rnl-dot {
-  width: min(24px, 2.6vh);
-  height: min(24px, 2.6vh);
-  font-size: clamp(0.35rem, 0.7vh, 0.55rem);
-  border-radius: 4px;
+body.theme-v2 .ruler-res-dot.selected {
+  width: 26px;
+  height: 26px;
+  opacity: 1;
+  box-shadow: 0 0 6px rgba(255,255,255,0.5);
+  font-size: 0.72rem;
+}
+body.theme-v2 .ruler-res-dot.selected.ruler-long {
+  font-size: 0.55rem;
 }
 
-/* Rate tracker: top track tall enough for 3 stacked pips */
+/* Rate tracker dots: bigger square pips — largest font that fits */
+body.theme-v2 .rnl-dot {
+  width: 26px;
+  height: 26px;
+  font-size: 0.72rem;
+  border-radius: 5px;
+}
+body.theme-v2 .rnl-dot.rnl-long {
+  font-size: 0.55rem;                /* FOOD fits in 26px pip                */
+}
+
+/* Rate tracker: top track tall enough for 3 stacked 26px pips */
 body.theme-v2 .rnl-track:first-child .rnl-slot {
-  min-height: min(80px, 9vh);
+  min-height: 88px;
 }
 
 body.theme-v2 .ruler-pip.current {
@@ -387,17 +407,18 @@ body.theme-v2 .ruler-pip.current .ruler-price {
   color: var(--text-primary);
 }
 
-/* Grouped ruler: price sections with subsections */
+/* Grouped ruler: price sections. Each group takes flex:N where N is its
+ * number of positions, so all 17 subsections across all groups divide the
+ * ruler's total height equally (each sub = 1/17 of the ruler). Parent
+ * group borders are the MAJOR dividers between prices. */
 body.theme-v2 .ruler-group {
   position: relative;
-  border: 1px solid rgba(255,255,255,0.12);
+  border: 1px solid rgba(255,255,255,0.35);   /* major border — between prices */
   border-radius: 4px;
   margin-bottom: 2px;
   overflow: hidden;
   container-type: size;
-}
-body.theme-v2 .ruler-group-slots {
-  height: 100%;
+  min-height: 0;
 }
 
 /* Large background price spanning the full group height */
@@ -421,18 +442,25 @@ body.theme-v2 .ruler-group-slots {
   z-index: 1;
   display: flex;
   flex-direction: column;
+  height: 100%;
 }
+/* Subsections divide their parent group equally via flex:1. Combined with
+ * group flex:N (N = position count), every sub ends up 1/17 of the ruler.
+ * Minor sub borders — major dividers live on .ruler-group. */
 body.theme-v2 .ruler-sub {
   display: flex;
   align-items: center;
   justify-content: flex-start;
   gap: 2px;
-  padding: 3px 4px;
-  flex: 1;
-  flex: 1 1 0;                       /* equal share of group height          */
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 2px;
-  margin: 1px;
+  padding: 1px 3px;
+  flex: 1 1 0;
+  min-height: 0;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  border-radius: 0;
+  box-sizing: border-box;
+}
+body.theme-v2 .ruler-sub:first-child {
+  border-top: none;                  /* no divider at group edge             */
 }
 body.theme-v2 .ruler-sub.current {
   background: rgba(88, 166, 255, 0.1);
@@ -445,8 +473,8 @@ body.theme-v2 .ruler-sub.current {
 body.theme-v2 #event-deck-area {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 16px;
+  gap: 6px;
+  margin-bottom: 0;
   align-items: stretch;
 }
 body.theme-v2 #event-deck-area::before {
@@ -464,19 +492,19 @@ body.theme-v2 #event-deck-area::before {
 }
 
 body.theme-v2 .event-card-back {
-  min-width: 60px;
-  min-height: 80px;
+  min-width: 50px;
+  min-height: 50px;
   border-radius: 6px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  font-size: 0.75rem;
+  font-size: 0.7rem;
 }
 
 body.theme-v2 .event-card-face {
-  min-width: 100px;
-  min-height: 80px;
+  min-width: 80px;
+  min-height: 50px;
   border-radius: 6px;
   display: flex;
   align-items: center;
@@ -486,13 +514,9 @@ body.theme-v2 .event-card-face {
 }
 
 
-/* Hide sell picker popup + market chart + market chips in v2 */
-/* Hide sell resource buttons (they're on the card now) but keep Hacker Array */
-body.theme-v2 .sell-res-label,
-body.theme-v2 .sell-res-btns {
-  display: none !important;
-}
-body.theme-v2 .sell-picker #mp-sell-resource {
+/* Hide sell picker entirely in v2 — resource is picked via on-card pips,
+ * and Hacker Array config lives in the Special Actions panel. */
+body.theme-v2 #mp-sell-picker {
   display: none !important;
 }
 body.theme-v2 #market-chart-wrap {
@@ -515,45 +539,58 @@ body.theme-v2 .hand-card {
   padding: 6px 8px;
 }
 
-/* Resource pip: circles for resources, squares for rates */
+/* Resource pip: circles for resources, squares for rates.
+ * Font sizes are the largest that keep 3-char text inside the pip; 4-char
+ * "FOOD" gets its own scaled-down rule below. */
 body.theme-v2 .res-pip {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: 50%;               /* circle = resource/cost              */
-  font-weight: 900;
+  font-weight: 700;                  /* match rate tracker pip weight        */
   line-height: 1;
   white-space: nowrap;
   vertical-align: middle;
-  width: min(22px, 2.4vh);
-  height: min(22px, 2.4vh);
-  font-size: clamp(0.25rem, 0.5vh, 0.35rem);
+  width: 18px;
+  height: 18px;
+  font-size: 0.5rem;                 /* 3-char fits in 18px; FOOD via .long */
 }
 body.theme-v2 .res-pip-rate {
   border-radius: 4px;
 }
+/* FOOD (4 chars) — scaled per context to fit alongside 3-char normal pips. */
 body.theme-v2 .res-pip-long {
-  font-size: clamp(0.25rem, 0.45vh, 0.38rem) !important;
+  font-size: 0.38rem !important;
+}
+body.theme-v2 .card-rates .res-pip-long {
+  font-size: 3.5cqh !important;      /* FOOD fits in 10cqh pip               */
+}
+body.theme-v2 .card-costs .res-pip-long {
+  font-size: 3cqh !important;
+}
+body.theme-v2 .contract-req-line .res-pip-long {
+  font-size: 0.58rem !important;
 }
 
-/* Card costs: pips scale with card */
+/* Card costs: pips scale with card; font fills the pip */
 body.theme-v2 .card-costs .res-pip {
   width: 9cqh;
   height: 9cqh;
-  font-size: 3.5cqh;
+  font-size: 4.5cqh;                 /* 3-char fits in 9cqh pip              */
 }
-/* Card rates: bigger pips (squares) */
+/* Card rates: square pips sized so 4 fit beneath a 2-line title without
+ * overflowing the card bounds (e.g. Electronics Factory). */
 body.theme-v2 .card-rates .res-pip {
   width: 10cqh;
   height: 10cqh;
-  font-size: 4cqh;
+  font-size: 5cqh;                   /* 3-char fits in 10cqh pip             */
 }
 
-/* Contract requirements: slightly larger */
+/* Contract requirements: square pips match card rate pip sizing */
 body.theme-v2 .contract-req-line .res-pip {
-  width: min(24px, 2.6vh);
-  height: min(24px, 2.6vh);
-  font-size: clamp(0.3rem, 0.6vh, 0.5rem);
+  width: 26px;
+  height: 26px;
+  font-size: 0.75rem;
 }
 
 /* Card sections: fixed heights so all cards align identically */
@@ -575,7 +612,7 @@ body.theme-v2 .card-rates {
 /* Cost number (for >4 of one resource) */
 body.theme-v2 .cost-num {
   font-weight: 700;
-  font-size: clamp(0.7rem, 1.2vh, 1rem);
+  font-size: 0.85rem;
   margin-right: 2px;
 }
 
@@ -604,7 +641,7 @@ body.theme-v2 .card-bottom {
   color: var(--text-dim);
 }
 
-/* Pool: same card sizing as hand */
+/* Pool: wrap if needed */
 body.theme-v2 .pool-grid {
   display: flex;
   gap: 6px;
@@ -704,14 +741,15 @@ body.theme-v2 .card-sell-btn.chosen {
   box-shadow: 0 0 8px rgba(255,255,255,0.3);
 }
 
-/* All cards: playing-card proportions, scale with viewport */
+/* All cards: fixed px proportions — zoom scales them uniformly.
+ * Sized so 4 pool cards fit side-by-side in the board's pool column. */
 body.theme-v2 .hand-card,
 body.theme-v2 .pool-card {
-  height: min(280px, 30vh);
-  width: min(190px, 20vh);
+  height: 275px;
+  width: 195px;
   display: flex;
   flex-direction: column;
-  font-size: clamp(0.6rem, 1.2vh, 0.9rem);
+  font-size: 0.8rem;
   container-type: size;
 }
 
@@ -810,9 +848,18 @@ body.theme-v2 .hand-card.inactive {
   opacity: 0.5;
 }
 
-/* RATE TRACKER — brighter background numbers for readability */
+/* RATE TRACKER — centered in player zone.
+ * Normal cells fit 2 pips wide × 3 tall; center (zero) cell fits 3×3. */
 body.theme-v2 .rate-number-line {
   display: block;
+  max-width: 760px;
+  margin: 0 auto;                   /* centered horizontally in player zone */
+}
+body.theme-v2 .rnl-slot-wrap {
+  min-width: 62px;                   /* 2 × 26px pip + padding/gap          */
+}
+body.theme-v2 .rnl-slot-wrap.rnl-zero {
+  min-width: 92px;                   /* 3 × 26px pip + padding/gap          */
 }
 body.theme-v2 .rnl-bg-num {
   color: var(--text-muted);
@@ -827,6 +874,7 @@ body.theme-v2 .rate-chip.rate-zero {
 /* Player stats compact */
 body.theme-v2 #mp-your-stats {
   font-size: 0.78rem;
+  flex-shrink: 0;
 }
 body.theme-v2 .player-rates-grid {
   gap: 3px;
@@ -851,17 +899,14 @@ body.theme-v2 #mp-special-toggles {
 
 /* Reserve space for special actions even when empty */
 body.theme-v2 #mp-patent-actions {
-  min-height: 24px;
+  min-height: 0;
 }
 
 body.theme-v2 .action-bar {
   display: flex;
   align-items: center;
-  gap: 4px;
-}
-
-body.theme-v2 .action-bar {
-  gap: 4px;
+  gap: 8px;
+  justify-content: flex-end;         /* Build + End Turn both on the right  */
   flex: 1;
 }
 body.theme-v2 .action-btn {
@@ -875,9 +920,95 @@ body.theme-v2 #mp-contract-btn {
   display: none;
 }
 
-/* End Turn button — push to the right */
-body.theme-v2 #mp-pass-btn {
+
+/* ============================================================
+   SPECIAL ACTIONS PANEL — always shows all 6 special actions,
+   grayed out when the corresponding patent/building isn't built.
+   Sits to the LEFT of the hand.
+   ============================================================ */
+
+/* Hand section is a two-column flex row:
+ *   - LEFT: #mp-special-panel runs full height of the player zone.
+ *   - RIGHT: stats + rate tracker (centered in the remaining width) + hand cards.
+ * The special panel pushes the rate tracker to the right on purpose. */
+body.theme-v2 #hand-section {
+  display: flex;
+  flex-direction: row;
+  gap: 12px;
+  align-items: stretch;
+}
+body.theme-v2 #mp-special-panel {
+  flex: 0 0 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.7rem;
+}
+body.theme-v2 .player-main-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* Reserve fixed space for the build cost / already-built message so the
+ * player zone doesn't grow when a card is selected — growth here would
+ * push the board up and cut off the bottom of the pool. */
+body.theme-v2 #mp-build-estimate {
+  min-height: 36px;
+  max-height: 36px;
+  overflow: hidden;
+  margin-top: 6px;
+}
+body.theme-v2 .special-heading {
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+  margin: 6px 0 2px;
+  font-weight: 700;
+}
+body.theme-v2 .patent-action-row {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 0.7rem;
+  line-height: 1.3;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+body.theme-v2 .patent-action-row.locked {
+  opacity: 0.35;                     /* not built yet — grayed out          */
+  filter: grayscale(1);
+  cursor: not-allowed;
+}
+body.theme-v2 .patent-action-row.inactive {
+  opacity: 0.65;                     /* built but not usable this turn      */
+}
+body.theme-v2 .patent-action-row .action-btn {
+  padding: 2px 8px;
+  font-size: 0.68rem;
   margin-left: auto;
+}
+body.theme-v2 .patent-action-row .toggle-select {
+  font-size: 0.68rem;
+  padding: 1px 4px;
+}
+
+
+/* ============================================================
+   FLYING CARD CLONES
+   ============================================================ */
+
+/* Clones are appended to <body> outside #game-wrapper, so card-name/card-rates
+ * `cqh` units fall back to the viewport (hundreds of px) instead of the card.
+ * Giving the clone itself `container-type: size` anchors cqh to its own fixed
+ * inline width/height, so animated text matches real cards. */
+body.theme-v2 .flying-card {
+  container-type: size;
+  overflow: hidden;
 }
 
 

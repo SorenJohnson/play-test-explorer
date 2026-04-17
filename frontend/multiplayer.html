@@ -118,10 +118,16 @@
         <!-- ===== Your Tableau ===== -->
         <div id="player-zone" class="player-zone">
           <section id="hand-section" class="game-section">
-            <h3 id="player-zone-title" class="section-title"></h3>
-            <div id="mp-your-stats"></div>
-            <div id="mp-hand-grid" class="hand-grid"></div>
-            <div id="mp-build-estimate" class="build-estimate"></div>
+            <div id="mp-special-panel">
+              <div id="mp-patent-actions"></div>
+              <div id="mp-special-toggles"></div>
+            </div>
+            <div class="player-main-col">
+              <h3 id="player-zone-title" class="section-title"></h3>
+              <div id="mp-your-stats"></div>
+              <div id="mp-hand-grid" class="hand-grid"></div>
+              <div id="mp-build-estimate" class="build-estimate"></div>
+            </div>
           </section>
 
           <section id="action-section" class="game-section">
@@ -132,8 +138,6 @@
               <button id="mp-pass-btn" class="action-btn" disabled>End Turn</button>
             </div>
             <div id="mp-sell-picker" class="sell-picker" style="display:none"></div>
-            <div id="mp-special-toggles"></div>
-            <div id="mp-patent-actions"></div>
           </section>
         </div>
       </div>

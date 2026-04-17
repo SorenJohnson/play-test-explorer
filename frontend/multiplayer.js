@@ -79,6 +79,21 @@ MP.cssVar = _cssVar;
 const _darkTextResources = new Set(["SI", "O2", "FOOD", "GLS", "PWR", "ELX"]);
 MP.pipTextColor = (resource) => _darkTextResources.has(resource) ? "#000" : "#fff";
 
+// ===== Viewport zoom (v2 only) =====
+// Scale the entire game wrapper uniformly when the viewport is smaller than
+// the reference design height. Everything shrinks proportionally — no
+// individual element distortion.
+if (document.body.classList.contains("theme-v2")) {
+  const REF_HEIGHT = 1280; // matches CSS fixed height on #game-wrapper
+  const wrapper = document.getElementById("game-wrapper");
+  function _updateZoom() {
+    const z = Math.min(1, window.innerHeight / REF_HEIGHT);
+    wrapper.style.zoom = z;
+  }
+  window.addEventListener("resize", _updateZoom);
+  _updateZoom();
+}
+
 // ===== Lobby button wiring =====
 
 document.getElementById("btn-create").addEventListener("click", () => {
