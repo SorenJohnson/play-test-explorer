@@ -102,15 +102,6 @@ document.getElementById("btn-connect").addEventListener("click", () => {
 
 document.getElementById("btn-start").addEventListener("click", () => MP.core.startGame());
 
-// Visual theme toggle — switches between classic and v2 styling.
-// The v2 CSS is scoped under body.theme-v2 so this is a pure class toggle.
-document.getElementById("theme-toggle-btn").addEventListener("click", () => {
-  document.body.classList.toggle("theme-v2");
-  const active = document.body.classList.contains("theme-v2");
-  document.getElementById("theme-toggle-btn").textContent = active ? "Classic UI" : "New UI";
-  // Re-render to apply JS-gated changes (fan hand, non-zero rate chips)
-  if (MP.currentState) MP.ui.renderGame();
-});
 document.getElementById("prompt-submit").addEventListener("click", () => MP.core.submitPrompt());
 document.getElementById("btn-new-game").addEventListener("click", () => location.reload());
 document.getElementById("btn-review-game").addEventListener("click", () => {
@@ -123,10 +114,6 @@ document.getElementById("btn-review-game").addEventListener("click", () => {
 if (new URLSearchParams(location.search).has("autostart")) {
   const params = new URLSearchParams(location.search);
   const aiType = params.get("ai") || "smart";
-  if (params.get("theme") === "v2") {
-    document.body.classList.add("theme-v2");
-    document.getElementById("theme-toggle-btn").textContent = "Classic UI";
-  }
   // Bypass the lobby UI entirely: init PeerJS, force all seats to AI,
   // call startGame directly. No button clicks, no DOM events.
   MP.role = "host";
