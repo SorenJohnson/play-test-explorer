@@ -332,11 +332,29 @@
       return `<div class="hand-card ${sel}${intentCls} ${inactive}" data-hi="${i}" style="${fanStyle}">${renderCard(c)}</div>`;
     }).join("");
   
-    // Build + sell estimates — show both when a card is selected
+    // V2: auto-select best sell resource BEFORE computing estimates
+    if (isV2 && MP._v2CardIntent === "sell" && MP.selectedCards.size === 1) {
+      const selIdx = Array.from(MP.selectedCards)[0];
+      const selCard = hand[selIdx];
+      if (selCard?.can_sell?.length > 0) {
+        if (!MP._v2SellResource || !selCard.can_sell.includes(MP._v2SellResource)) {
+          let bestRes = selCard.can_sell[0];
+          let bestRev = 0;
+          const me = s.players[MP.mySeat];
+          for (const r of selCard.can_sell) {
+            const rate = me?.rates?.[r] || 0;
+            const rev = rate > 0 ? rate * (s.market?.[r] || 0) : 0;
+            if (rev > bestRev) { bestRev = rev; bestRes = r; }
+          }
+          MP._v2SellResource = bestRes;
+        }
+      }
+    }
+
+    // Build + sell estimates
     const estimateEl = document.getElementById("mp-build-estimate");
     if (MP.selectedCards.size > 0 && myTurn) {
       if (isV2) {
-        // V2: only show info for the active intent
         const intent = MP._v2CardIntent;
         if (intent === "build") {
           const est = estimateBuildCostLocal(s, [...MP.selectedCards]);
@@ -457,18 +475,7 @@
         const me = s.players[MP.mySeat];
         const canSell = selCard?.can_sell?.length > 0 && cr >= 1;
         if (canSell) {
-          // Auto-select best revenue resource if none chosen yet
-          if (!MP._v2SellResource || !selCard.can_sell.includes(MP._v2SellResource)) {
-            let bestRes = selCard.can_sell[0];
-            let bestRev = 0;
-            for (const r of selCard.can_sell) {
-              const rate = me?.rates?.[r] || 0;
-              const rev = rate > 0 ? rate * (s.market?.[r] || 0) : 0;
-              if (rev > bestRev) { bestRev = rev; bestRes = r; }
-            }
-            MP._v2SellResource = bestRes;
-          }
-
+          // (Auto-select already ran above, before estimate computation)
           const cardEl = grid.querySelectorAll(".hand-card")[selIdx];
           if (cardEl) {
             cardEl.querySelectorAll(".card-sell-btn").forEach(btn => {

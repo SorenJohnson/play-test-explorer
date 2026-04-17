@@ -411,7 +411,12 @@ body.theme-v2 .event-card-face {
 
 
 /* Hide sell picker popup + market chart + market chips in v2 */
-body.theme-v2 .sell-picker {
+/* Hide sell resource buttons (they're on the card now) but keep Hacker Array */
+body.theme-v2 .sell-res-label,
+body.theme-v2 .sell-res-btns {
+  display: none !important;
+}
+body.theme-v2 .sell-picker #mp-sell-resource {
   display: none !important;
 }
 body.theme-v2 #market-chart-wrap {
