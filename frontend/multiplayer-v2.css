@@ -441,25 +441,26 @@ body.theme-v2 .hand-card {
   padding: 6px 8px;
 }
 
+/* Card sections: fixed heights so all cards align identically */
 body.theme-v2 .card-costs {
   font-size: 0.75rem;
   color: var(--text-muted);
-  margin-bottom: 2px;
+  min-height: 1.2em;
 }
 body.theme-v2 .card-name {
   font-weight: 600;
   font-size: 0.9rem;
-  margin-bottom: 2px;
+  min-height: 1.2em;
 }
 body.theme-v2 .card-rates {
   font-size: 0.8rem;
-  margin-bottom: 2px;
+  min-height: 1.2em;
 }
-
 body.theme-v2 .card-effect {
   font-size: 0.72rem;
   color: var(--accent-violet);
   font-style: italic;
+  min-height: 1em;
 }
 body.theme-v2 .card-bottom {
   font-size: 0.7rem;
@@ -474,8 +475,6 @@ body.theme-v2 .pool-grid {
 }
 body.theme-v2 .pool-card {
   font-size: 0.8rem;
-  width: 150px;
-  flex-shrink: 0;
 }
 
 /* ============================================================
@@ -500,7 +499,7 @@ body.theme-v2 .card-sell-half {
   min-height: 50px;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   background: rgba(255, 255, 255, 0.12);
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 4px;
@@ -531,28 +530,9 @@ body.theme-v2 .card-no-sell {
 
 /* On-card sell buttons */
 body.theme-v2 .card-sell-row {
-  margin-top: auto;
   display: flex;
   gap: 6px;
-  padding-top: 4px;
-  min-height: 1.4em;
-  justify-content: flex-start;       /* left-biased                         */
-}
-body.theme-v2 .card-sell-pip-wrap {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-}
-body.theme-v2 .card-sell-rev {
-  font-size: 0.72rem;
-  color: var(--text-primary);
-  font-weight: 700;
-  display: none;                    /* hidden until sell intent active      */
-}
-/* Only show revenue when the card has sell intent */
-body.theme-v2 .hand-card.intent-sell .card-sell-pip-wrap:has(.chosen) .card-sell-rev {
-  display: block;
+  justify-content: flex-start;
 }
 /* Sell pips: colored background circles like tracker/ruler dots */
 body.theme-v2 .card-sell-btn {
@@ -587,10 +567,11 @@ body.theme-v2 .card-sell-btn.chosen {
   box-shadow: 0 0 8px rgba(255,255,255,0.3);
 }
 
-/* All cards: same fixed height, sell row always at bottom */
+/* All cards: same fixed size, strict internal layout */
 body.theme-v2 .hand-card,
 body.theme-v2 .pool-card {
-  height: 160px;
+  height: 170px;
+  width: 160px;
   display: flex;
   flex-direction: column;
 }
@@ -660,7 +641,6 @@ body.theme-v2 .hand-grid {
 body.theme-v2 .hand-card {
   background: var(--bg-card-hand);
   border-color: rgba(88, 166, 255, 0.18);
-  width: 150px;                /* same as pool cards */
   flex-shrink: 0;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
@@ -711,9 +691,24 @@ body.theme-v2 .player-rates-grid {
    ACTION BAR — above the hand, End Turn bottom-right
    ============================================================ */
 
-/* Put action section BEFORE hand section visually */
+/* Action section BEFORE hand, with special actions area above buttons */
 body.theme-v2 #action-section {
   order: -1;
+}
+
+/* Special building actions: dedicated area above the hand */
+body.theme-v2 #mp-patent-actions,
+body.theme-v2 #mp-special-toggles {
+  margin-bottom: 4px;
+  font-size: 0.75rem;
+}
+
+/* Reserve space for special actions even when empty */
+body.theme-v2 #mp-patent-actions {
+  min-height: 24px;
+}
+
+body.theme-v2 .action-bar {
   display: flex;
   align-items: center;
   gap: 4px;

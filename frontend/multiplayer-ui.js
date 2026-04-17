@@ -396,9 +396,21 @@
     if (myTurn) {
       grid.querySelectorAll(".hand-card:not(.disabled)").forEach(el => {
         el.addEventListener("click", (e) => {
-          // Don't toggle selection if they clicked a sell button
-          if (e.target.classList.contains("card-sell-btn")) return;
           const hi = parseInt(el.dataset.hi);
+
+          // V2: clicking a sell pip on ANY card = select that card + sell intent + that resource
+          if (isV2 && e.target.classList.contains("card-sell-btn")) {
+            MP.selectedCards.clear();
+            MP.selectedCards.add(hi);
+            MP._v2CardIntent = "sell";
+            MP._v2SellResource = e.target.dataset.sellRes;
+            renderHand(s);
+            renderPool(s);
+            renderActions(s);
+            return;
+          }
+          // Classic: don't toggle selection if they clicked a sell button
+          if (!isV2 && e.target.classList.contains("card-sell-btn")) return;
 
           if (isV2) {
             // Split card: detect which half was clicked
@@ -594,15 +606,9 @@
       html += `<div class="card-sell-half" data-intent="sell">`;
       const sellResources = (c.can_sell || []);
       if (sellResources.length > 0) {
-        const btns = sellResources.map(r => {
-          const rate = me?.rates?.[r] || 0;
-          const price = market[r] || 0;
-          const rev = rate > 0 ? rate * price : 0;
-          return `<div class="card-sell-pip-wrap">
-            <div class="card-sell-rev">$${rev}</div>
-            <span class="card-sell-btn dimmed" data-sell-res="${r}" style="background:${RESOURCE_COLORS[r]};color:${MP.pipTextColor(r)}">${r}</span>
-          </div>`;
-        }).join("");
+        const btns = sellResources.map(r =>
+          `<span class="card-sell-btn dimmed" data-sell-res="${r}" style="background:${RESOURCE_COLORS[r]};color:${MP.pipTextColor(r)}">${r}</span>`
+        ).join("");
         html += `<div class="card-sell-row">${btns}</div>`;
       } else if (canContract) {
         html += `<div class="card-sell-row"><span class="card-contract-icon">\u{1F4CB} Contract</span></div>`;
