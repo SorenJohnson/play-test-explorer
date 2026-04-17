@@ -253,7 +253,7 @@
         const reqLines = (c.requirements || []).map(r => {
           const have = me?.rates?.[r.resource] || 0;
           const met = have >= r.amount;
-          return `<span class="contract-req-line ${met ? 'met' : 'unmet'}"><span class="rate-num">${r.amount}</span>${resPip(r.resource, true)}</span>`;
+          return `<span class="contract-req-line ${met ? 'met' : 'unmet'}">${r.amount}${resPip(r.resource, true)}</span>`;
         }).join(" ");
         return `<div class="contract-card ${sel} ${inactive}" data-ci="${ci}">
           <div class="contract-reqs-v2">${reqLines || '&nbsp;'}</div>
