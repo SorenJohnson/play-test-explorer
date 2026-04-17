@@ -824,13 +824,17 @@
       const specialList = specials.map(c => `<span class="opp-special">${c.building}</span>`).join(" ");
       const patentList = patents.map(c => `<span class="opp-patent">${c.building}</span>`).join(" ");
 
-      const youTag = isYou ? ' <span style="color:var(--accent-blue)">(You)</span>' : '';
+      const youTag = isYou ? ' <span style="opacity:0.6">(You)</span>' : '';
       const aiTag = !p.is_human && !isYou ? ' (AI)' : '';
       const turnIndicator = isActive ? '<span class="turn-dot" title="Active turn">●</span> ' : '';
       const youClass = isYou ? ' is-you' : '';
+      // V2: player color as subtle background tint instead of left border
+      const bgStyle = isV2
+        ? `background: color-mix(in srgb, ${color} 8%, var(--bg-elevated));`
+        : `border-left:3px solid ${color};`;
 
       return `
-        <div class="opponent-card ${isActive ? 'active-turn' : ''}${youClass}" style="border-left:3px solid ${color}">
+        <div class="opponent-card ${isActive ? 'active-turn' : ''}${youClass}" style="${bgStyle}">
           <div class="opponent-header">
             <span class="opponent-name" style="color:${color}">${turnIndicator}${p.name}${aiTag}${youTag}</span>
             <span class="opponent-nw" style="color:${p.net_worth >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'}">NW $${p.net_worth}</span>
