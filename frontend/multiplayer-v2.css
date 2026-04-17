@@ -144,11 +144,7 @@ body.theme-v2 .hand-grid {
 body.theme-v2 .hand-card {
   background: var(--bg-card-hand);
   border-color: rgba(88, 166, 255, 0.15);
-  /* Show truncated card — just name + costs + rates visible */
-  max-height: 80px;
-  overflow: hidden;
-  transition: max-height 0.2s ease, transform 0.2s ease,
-              box-shadow 0.2s ease, border-color 0.15s ease;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.15s ease;
   min-width: 130px;
   max-width: 160px;
   flex-shrink: 0;
@@ -156,22 +152,20 @@ body.theme-v2 .hand-card {
   position: relative;
 }
 
-/* Hover: card pops up to reveal full content */
+/* Hover: lift slightly to indicate interactivity */
 body.theme-v2 .hand-card:hover:not(.inactive) {
-  max-height: 300px;
-  transform: translateY(-60px);
+  transform: translateY(-8px);
   z-index: 30;
   border-color: var(--accent-blue);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.7);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
 }
 
 body.theme-v2 .hand-card.selected {
-  max-height: 300px;
-  transform: translateY(-50px);
+  transform: translateY(-10px);
   z-index: 31;
   border-color: var(--accent-blue);
   background: color-mix(in srgb, var(--accent-blue) 10%, var(--bg-card-hand));
-  box-shadow: 0 4px 20px rgba(88, 166, 255, 0.2);
+  box-shadow: 0 4px 16px rgba(88, 166, 255, 0.2);
 }
 
 body.theme-v2 .hand-card.inactive {
