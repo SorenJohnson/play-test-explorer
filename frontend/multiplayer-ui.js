@@ -292,9 +292,13 @@
     const cr = MP.currentLegal?.cards_remaining ?? 2;
   
     const inactive = !myTurn ? "inactive" : "";
+    const isV2 = document.body.classList.contains("theme-v2");
+    const cardCount = hand.length;
     grid.innerHTML = hand.map((c, i) => {
       const sel = MP.selectedCards.has(i) ? "selected" : "";
-      return `<div class="hand-card ${sel} ${inactive}" data-hi="${i}">${renderCard(c)}</div>`;
+      // Fan-hand layout (v2): set CSS custom properties for rotation calc
+      const fanStyle = isV2 ? `--card-index:${i}; --card-count:${cardCount};` : "";
+      return `<div class="hand-card ${sel} ${inactive}" data-hi="${i}" style="${fanStyle}">${renderCard(c)}</div>`;
     }).join("");
   
     // Build cost estimate — computed locally so the host and client views
@@ -774,12 +778,15 @@
       const isActive = realIdx === s.current_player_index;
       const color = PLAYER_COLORS[realIdx % PLAYER_COLORS.length];
   
-      // Same rate-chip grid as player panel, slightly smaller
-      const ratesGrid = RESOURCE_ORDER.map(r => {
-        const v = p.rates?.[r] || 0;
-        const cls = v > 0 ? "rate-pos" : v < 0 ? "rate-neg" : "rate-zero";
-        return `<div class="rate-chip sm ${cls}"><span class="rate-res" style="color:${RESOURCE_COLORS[r]}">${r}</span><span class="rate-val">${v > 0 ? "+" : ""}${v}</span></div>`;
-      }).join("");
+      // Rate chips — in v2 theme, show only non-zero rates to reduce noise
+      const isV2 = document.body.classList.contains("theme-v2");
+      const ratesGrid = RESOURCE_ORDER
+        .filter(r => !isV2 || (p.rates?.[r] || 0) !== 0)
+        .map(r => {
+          const v = p.rates?.[r] || 0;
+          const cls = v > 0 ? "rate-pos" : v < 0 ? "rate-neg" : "rate-zero";
+          return `<div class="rate-chip sm ${cls}"><span class="rate-res" style="color:${RESOURCE_COLORS[r]}">${r}</span><span class="rate-val">${v > 0 ? "+" : ""}${v}</span></div>`;
+        }).join("");
   
       // Buildings split into regular + specials + patents
       const builtCards = p.built_cards || [];
