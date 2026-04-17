@@ -433,15 +433,29 @@ body.theme-v2 .player-rates-grid {
 
 
 /* ============================================================
-   ACTION BAR — compact in dock
+   ACTION BAR — above the hand, End Turn bottom-right
    ============================================================ */
+
+/* Put action section BEFORE hand section visually */
+body.theme-v2 #action-section {
+  order: -1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
 
 body.theme-v2 .action-bar {
   gap: 4px;
+  flex: 1;
 }
 body.theme-v2 .action-btn {
   padding: 5px 14px;
   font-size: 0.8rem;
+}
+
+/* End Turn button — push to the right */
+body.theme-v2 #mp-pass-btn {
+  margin-left: auto;
 }
 
 

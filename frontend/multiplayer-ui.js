@@ -229,12 +229,16 @@
       }).join(", ");
       const sel = ci === MP.selectedContract ? "selected" : "";
       const inactive = !myTurn ? "inactive" : "";
-      return `
-        <div class="contract-card ${sel} ${inactive}" data-ci="${ci}">
-          <div class="contract-reward">$${c.reward}</div>
-          <div>${reqs}</div>
-        </div>
-      `;
+      const isV2 = document.body.classList.contains("theme-v2");
+      return isV2
+        ? `<div class="contract-card ${sel} ${inactive}" data-ci="${ci}">
+            <div class="contract-reqs">${reqs}</div>
+            <div class="contract-reward">$${c.reward}</div>
+          </div>`
+        : `<div class="contract-card ${sel} ${inactive}" data-ci="${ci}">
+            <div class="contract-reward">$${c.reward}</div>
+            <div>${reqs}</div>
+          </div>`;
     }).join("");
     if (myTurn) {
       grid.querySelectorAll(".contract-card").forEach(el => {
@@ -398,15 +402,27 @@
     ).join(" ");
     const sell = (c.can_sell || []).join("/");
     const canContract = c.can_fulfill_contract;
+    const isV2 = document.body.classList.contains("theme-v2");
     let html = "";
-    if (costs) html += `<div class="card-costs">${costs}</div>`;
-    html += `<div class="card-name">${c.building}</div>`;
-    if (rates) html += `<div class="card-rates">${rates}</div>`;
-    if (c.effect) html += `<div class="card-effect">${c.effect}</div>`;
-    const bottomParts = [];
-    if (sell) bottomParts.push(`<span class="card-sell">Sell: ${sell}</span>`);
-    if (canContract) bottomParts.push(`<span class="card-contract">\u{1F4CB}</span>`);
-    if (bottomParts.length) html += `<div class="card-bottom">${bottomParts.join(" ")}</div>`;
+    if (isV2) {
+      // V2: fixed-slot layout — every section always present so cards
+      // align vertically regardless of content. Empty slots get &nbsp;
+      html += `<div class="card-costs">${costs || '&nbsp;'}</div>`;
+      html += `<div class="card-name">${c.building}</div>`;
+      html += `<div class="card-rates">${rates || '&nbsp;'}</div>`;
+      html += `<div class="card-effect">${c.effect || '&nbsp;'}</div>`;
+      const bottom = sell ? `Sell: ${sell}` : (canContract ? '\u{1F4CB}' : '&nbsp;');
+      html += `<div class="card-bottom">${bottom}</div>`;
+    } else {
+      if (costs) html += `<div class="card-costs">${costs}</div>`;
+      html += `<div class="card-name">${c.building}</div>`;
+      if (rates) html += `<div class="card-rates">${rates}</div>`;
+      if (c.effect) html += `<div class="card-effect">${c.effect}</div>`;
+      const bottomParts = [];
+      if (sell) bottomParts.push(`<span class="card-sell">Sell: ${sell}</span>`);
+      if (canContract) bottomParts.push(`<span class="card-contract">\u{1F4CB}</span>`);
+      if (bottomParts.length) html += `<div class="card-bottom">${bottomParts.join(" ")}</div>`;
+    }
     return html;
   }
   
