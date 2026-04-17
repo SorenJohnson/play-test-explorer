@@ -383,6 +383,10 @@ body.theme-v2 .ruler-group {
   border: 1px solid rgba(255,255,255,0.12);
   border-radius: 4px;
   margin-bottom: 2px;
+  overflow: hidden;
+}
+body.theme-v2 .ruler-group-slots {
+  height: 100%;
 }
 
 /* Large background price spanning the full group height */
