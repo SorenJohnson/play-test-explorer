@@ -74,6 +74,11 @@ const MP = window.MP;
 // which don't resolve var() references themselves.
 MP.cssVar = _cssVar;
 
+// Pip text color: dark text on light resource backgrounds, white on dark.
+// Used by sell pips, ruler dots, and rate tracker dots for consistency.
+const _darkTextResources = new Set(["SI", "O2", "FOOD", "GLS", "PWR", "ELX"]);
+MP.pipTextColor = (resource) => _darkTextResources.has(resource) ? "#000" : "#fff";
+
 // ===== Lobby button wiring =====
 
 document.getElementById("btn-create").addEventListener("click", () => {

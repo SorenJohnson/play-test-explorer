@@ -174,12 +174,10 @@
           const isCurrent = i === selectedPos;
           const resHere = resourcesAtPos[i] || [];
           const isV2 = document.body.classList.contains("theme-v2");
-          const lightRes = new Set(["SI", "O2", "FOOD", "GLS"]);
           const dots = resHere.map(r => {
             const isSelected = r === selectedRes;
             const label = isV2 ? r : '';
-            const textColor = lightRes.has(r) ? "#000" : "#fff";
-            return `<span class="ruler-res-dot ${isSelected ? 'selected' : ''}" style="background:${RESOURCE_COLORS[r]};color:${textColor}" title="${r}">${label}</span>`;
+            return `<span class="ruler-res-dot ${isSelected ? 'selected' : ''}" style="background:${RESOURCE_COLORS[r]};color:${MP.pipTextColor(r)}" title="${r}">${label}</span>`;
           }).join("");
           return `<span class="ruler-pip ${isCurrent ? 'current' : ''}" style="${isCurrent ? 'border-color:' + selectedColor : ''}">
             <span class="ruler-dots-row">${dots}</span>
@@ -475,16 +473,13 @@
       if (sellResources.length > 0) {
         const me = MP.currentState?.players?.[MP.mySeat];
         const market = MP.currentState?.market || {};
-        // Light resources get dark text, dark resources get white
-        const lightRes = new Set(["SI", "O2", "FOOD", "GLS"]);
         const btns = sellResources.map(r => {
           const rate = me?.rates?.[r] || 0;
           const price = market[r] || 0;
           const rev = rate > 0 ? rate * price : 0;
-          const textColor = lightRes.has(r) ? "#000" : "#fff";
           return `<div class="card-sell-pip-wrap">
             <div class="card-sell-rev">$${rev}</div>
-            <span class="card-sell-btn dimmed" data-sell-res="${r}" style="background:${RESOURCE_COLORS[r] || 'var(--text-muted)'};color:${textColor}">${r}</span>
+            <span class="card-sell-btn dimmed" data-sell-res="${r}" style="background:${RESOURCE_COLORS[r]};color:${MP.pipTextColor(r)}">${r}</span>
           </div>`;
         }).join("");
         html += `<div class="card-sell-row">${btns}</div>`;
@@ -807,7 +802,7 @@
         const isNeg = i < 5;
         const hue = isZero ? "" : isNeg ? "rnl-cell-neg" : "rnl-cell-pos";
         const dotHtml = dots.map(e =>
-          `<span class="${dotClass}" style="background:${e.color}" title="${e.res}: ${e.val > 0 ? '+' : ''}${e.val}">${dotClass === 'rnl-dot' ? e.res : ''}</span>`
+          `<span class="${dotClass}" style="background:${e.color};color:${MP.pipTextColor(e.res)}" title="${e.res}: ${e.val > 0 ? '+' : ''}${e.val}">${dotClass === 'rnl-dot' ? e.res : ''}</span>`
         ).join("");
         return `<div class="rnl-slot-wrap ${isZero ? 'rnl-zero' : ''}">
           <div class="rnl-slot ${hue} ${slotClass || ''}">
