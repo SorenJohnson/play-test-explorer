@@ -331,29 +331,49 @@
     // Build + sell estimates — show both when a card is selected
     const estimateEl = document.getElementById("mp-build-estimate");
     if (MP.selectedCards.size > 0 && myTurn) {
-      const parts = [];
-      // Build estimate
-      const est = estimateBuildCostLocal(s, [...MP.selectedCards]);
-      if (est.ok) {
-        const defParts = Object.entries(est.deficit || {}).map(([r, a]) => `${a} ${r}`).join(", ");
-        parts.push(`Build: <strong>$${est.cost}</strong>${defParts ? ` (buy ${defParts})` : ' (free)'}`);
+      if (isV2) {
+        // V2: only show info for the active intent
+        const intent = MP._v2CardIntent;
+        if (intent === "build") {
+          const est = estimateBuildCostLocal(s, [...MP.selectedCards]);
+          if (est.ok) {
+            const defParts = Object.entries(est.deficit || {}).map(([r, a]) => `${a} ${r}`).join(", ");
+            estimateEl.innerHTML = `Build: <strong>$${est.cost}</strong>${defParts ? ` (buy ${defParts})` : ' (free)'}`;
+          } else {
+            estimateEl.innerHTML = `<span style="color:var(--accent-red)">${est.reason || 'Cannot build'}</span>`;
+          }
+        } else if (intent === "sell" && MP.selectedCards.size === 1) {
+          const selIdx = Array.from(MP.selectedCards)[0];
+          const selCard = hand[selIdx];
+          const me = s.players[MP.mySeat];
+          if (selCard?.can_sell?.length > 0) {
+            const r = MP._v2SellResource || selCard.can_sell[0];
+            const rate = me?.rates?.[r] || 0;
+            const price = s.market?.[r] || 0;
+            const rev = rate > 0 ? rate * price : 0;
+            estimateEl.innerHTML = `Sell: <strong>$${rev}</strong> (${rate} ${r} @ $${price})`;
+          } else if (selCard?.can_fulfill_contract) {
+            if (MP.selectedContract >= 0) {
+              const c = s.available_contracts?.[MP.selectedContract];
+              estimateEl.innerHTML = `Contract: <strong>$${c?.reward || 50}</strong>`;
+            } else {
+              estimateEl.innerHTML = `<span style="color:var(--text-muted)">Select a contract</span>`;
+            }
+          } else {
+            estimateEl.textContent = "";
+          }
+        } else {
+          estimateEl.textContent = "";
+        }
       } else {
-        parts.push(`<span style="color:var(--accent-red)">${est.reason || 'Cannot build'}</span>`);
-      }
-      // Sell estimate (v2, single card with sell)
-      if (isV2 && MP.selectedCards.size === 1) {
-        const selIdx = Array.from(MP.selectedCards)[0];
-        const selCard = hand[selIdx];
-        const me = s.players[MP.mySeat];
-        if (selCard?.can_sell?.length > 0 && cr >= 1) {
-          const r = MP._v2SellResource || selCard.can_sell[0];
-          const rate = me?.rates?.[r] || 0;
-          const price = s.market?.[r] || 0;
-          const rev = rate > 0 ? rate * price : 0;
-          parts.push(`Sell: <strong>$${rev}</strong> (${rate} ${r} @ $${price})`);
+        const est = estimateBuildCostLocal(s, [...MP.selectedCards]);
+        if (est.ok) {
+          const defParts = Object.entries(est.deficit || {}).map(([r, a]) => `${a} ${r}`).join(", ");
+          estimateEl.innerHTML = `Build cost: <strong>$${est.cost}</strong>${defParts ? ` (buy ${defParts})` : ' (free)'}`;
+        } else {
+          estimateEl.innerHTML = `<span style="color:var(--accent-red)">${est.reason || 'Cannot build'}</span>`;
         }
       }
-      estimateEl.innerHTML = parts.join(" &nbsp;·&nbsp; ");
     } else {
       estimateEl.textContent = "";
     }
@@ -429,6 +449,7 @@
               btn.addEventListener("click", (e) => {
                 e.stopPropagation();
                 MP._v2SellResource = btn.dataset.sellRes;
+                MP._v2CardIntent = "sell";  // clicking a pip = sell intent
                 renderHand(s);
                 renderActions(s);
               });
@@ -583,12 +604,18 @@
     // V2: adaptive button — text + enabled state follows card intent
     if (isV2) {
       const intent = MP._v2CardIntent;
-      const sellCardIdx = MP.selectedCards.size === 1 ? Array.from(MP.selectedCards)[0] : -1;
-      const sellCard = sellCardIdx >= 0 ? (s.players[MP.mySeat]?.hand || [])[sellCardIdx] : null;
-      const canSellV2 = myTurn && intent === "sell" && sellCard?.can_sell?.length > 0 && cr >= 1;
-      const canContractV2 = myTurn && MP.selectedContract >= 0 && intent === "sell"; // contract from sell half
+      const selCardIdx = MP.selectedCards.size === 1 ? Array.from(MP.selectedCards)[0] : -1;
+      const selCard = selCardIdx >= 0 ? (s.players[MP.mySeat]?.hand || [])[selCardIdx] : null;
+      const canSellV2 = myTurn && intent === "sell" && selCard?.can_sell?.length > 0 && cr >= 1;
+      const isContractCard = selCard?.can_fulfill_contract && !(selCard?.can_sell?.length > 0);
 
-      if (intent === "sell" && canSellV2) {
+      if (intent === "sell" && isContractCard && MP.selectedContract >= 0) {
+        buildBtn.textContent = "Contract";
+        buildBtn.disabled = false;
+      } else if (intent === "sell" && isContractCard) {
+        buildBtn.textContent = "Contract";
+        buildBtn.disabled = true;  // need to select a contract first
+      } else if (intent === "sell" && canSellV2) {
         buildBtn.textContent = "Sell";
         buildBtn.disabled = false;
       } else if (intent === "build" && canBuild) {
@@ -1484,14 +1511,34 @@
     document.getElementById("mp-build-btn").addEventListener("click", () => {
       if (MP.selectedCards.size === 0) return;
 
-      // V2: if intent is "sell", trigger the sell action instead of build
+      // V2: dispatch sell or contract based on intent
       const isV2 = document.body.classList.contains("theme-v2");
       if (isV2 && MP._v2CardIntent === "sell") {
         if (MP.selectedCards.size !== 1) return;
         const cardIdx = Number([...MP.selectedCards][0]);
+        const hand = MP.currentState?.players[MP.mySeat]?.hand || [];
+        const card = hand[cardIdx];
         const el = document.querySelectorAll("#mp-hand-grid .hand-card")[cardIdx];
         const cardRect = el?.getBoundingClientRect();
         const cardHtml = el?.innerHTML || "";
+
+        // Contract action (card has contract icon, not sell)
+        if (card?.can_fulfill_contract && !(card?.can_sell?.length > 0) && MP.selectedContract >= 0) {
+          const action = {type: "contract", contract_idx: MP.selectedContract, card_idx: cardIdx};
+          const seTargetEl = document.getElementById("se-target");
+          if (seTargetEl?.value) action.elevator_target = seTargetEl.value;
+          const contractForAnim = MP.currentState?.available_contracts?.[MP.selectedContract];
+          MP._v2CardIntent = null;
+          clearSelection();
+          const ok = sendAction(action);
+          if (ok && cardRect) {
+            MP.anim.animateFadeOut(cardRect, cardHtml);
+            if (contractForAnim) MP.anim.animateReward(cardRect, `+$${contractForAnim.reward}`);
+          }
+          return;
+        }
+
+        // Sell action
         const action = {type: "sell", card_idx: cardIdx};
         if (MP._v2SellResource) {
           action.sell_resource = MP._v2SellResource;
