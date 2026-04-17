@@ -40,7 +40,7 @@ body.theme-v2 #game-layout {
 body.theme-v2 #game-area {
   display: grid;
   grid-template-columns: min(200px, 20vw) min(130px, 14vw) 1fr;
-  grid-template-rows: minmax(0, auto) minmax(0, auto) minmax(0, auto) minmax(0, 1fr);
+  grid-template-rows: 1fr 1fr 1fr 2fr;        /* all rows share space, all shrink   */
   overflow: hidden;
   gap: 0;
 }
