@@ -470,7 +470,7 @@ body.theme-v2 .card-sell-row {
   gap: 6px;
   padding-top: 4px;
   min-height: 1.4em;
-  justify-content: center;
+  justify-content: flex-start;       /* left-biased                         */
 }
 body.theme-v2 .card-sell-pip-wrap {
   display: flex;
@@ -505,7 +505,7 @@ body.theme-v2 .card-sell-btn {
   transition: opacity 0.15s, border-color 0.15s;
 }
 body.theme-v2 .card-sell-btn.dimmed {
-  opacity: 0.2;
+  opacity: 0.35;
 }
 body.theme-v2 .card-sell-btn.active {
   opacity: 0.7;
@@ -521,14 +521,10 @@ body.theme-v2 .card-sell-btn.chosen {
   box-shadow: 0 0 8px rgba(255,255,255,0.3);
 }
 
-/* All hand + pool cards: fixed height, sell row always at bottom */
-body.theme-v2 .hand-card {
-  height: 180px;
-  display: flex;
-  flex-direction: column;
-}
+/* All cards: same fixed height, sell row always at bottom */
+body.theme-v2 .hand-card,
 body.theme-v2 .pool-card {
-  height: 150px;
+  height: 160px;
   display: flex;
   flex-direction: column;
 }
