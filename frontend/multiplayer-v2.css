@@ -81,14 +81,14 @@ body.theme-v2 .board-zone > section:nth-child(4) {
   overflow-y: auto;
 }
 
-/* Hand dock → full width bottom, ~25vh */
+/* Hand dock → full width bottom, generous height */
 body.theme-v2 .player-zone {
   grid-column: 1 / -1;
   background: var(--bg-player-mat);
   border-top: 2px solid rgba(88, 166, 255, 0.15);
   margin-top: 0;
   padding: 8px 12px;
-  max-height: 28vh;
+  max-height: 38vh;
   overflow-y: auto;
 }
 
@@ -187,12 +187,15 @@ body.theme-v2 .opponent-buildings {
    MARKET — Chips stacked vertically left of a tall thin ruler
    ============================================================ */
 
-/* Market section: chips + ruler side by side */
+/* Market section: chips + ruler side by side, title hidden */
 body.theme-v2 .board-zone > section:nth-child(2) {
   display: flex;
   flex-direction: row;
-  gap: 6px;
+  gap: 4px;
   align-items: stretch;
+}
+body.theme-v2 .board-zone > section:nth-child(2) > .section-title {
+  display: none;           /* remove "Market (click cell...)" text       */
 }
 
 /* Market chips (resource prices) — vertical stack alongside ruler */
@@ -200,9 +203,8 @@ body.theme-v2 .market-grid {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  min-width: 55px;
-  max-width: 65px;
   flex-shrink: 0;
+  justify-content: space-between;  /* fill vertical space evenly         */
 }
 body.theme-v2 .market-cell {
   padding: 2px 4px;
@@ -232,10 +234,9 @@ body.theme-v2 .market-cell .res-price-wrap {
 /* Vertical ruler — tall, thin, rate-tracker style */
 body.theme-v2 .market-ruler {
   display: flex;
-  flex: 1;
+  flex: 1;                          /* fill all remaining horizontal space */
   margin-top: 0;
-  padding: 4px;
-  max-width: 120px;
+  padding: 2px;
 }
 
 body.theme-v2 .ruler-track {
@@ -262,10 +263,10 @@ body.theme-v2 .ruler-pip {
 /* Price as large faded background number (like rate tracker) */
 body.theme-v2 .ruler-price {
   position: absolute;
-  font-size: 1rem;
-  font-weight: 800;
+  font-size: 1.3rem;
+  font-weight: 900;
   color: var(--text-subtle);
-  opacity: 0.35;
+  opacity: 0.3;
   z-index: 0;
   text-align: center;
   min-width: 0;
