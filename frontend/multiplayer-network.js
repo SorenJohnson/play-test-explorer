@@ -278,6 +278,13 @@
         MP.currentState = msg.state;
         MP.ui.showEndgame();
         break;
+      case "action_result":
+        // Host rejected the client's action — show the error. The state
+        // refresh that follows will correct any optimistic animation.
+        if (!msg.ok) {
+          alert(msg.reason || "Action failed");
+        }
+        break;
     }
   }
 

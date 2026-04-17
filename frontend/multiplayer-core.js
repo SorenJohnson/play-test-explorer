@@ -304,6 +304,18 @@ game
     if (result.ok) {
       addFeedEntry({kind: "action", text: `${MP.currentState.players[seatIdx]?.name}: ${result.detail}`});
       MP.network.broadcastFeed({kind: "action", text: `${MP.currentState.players[seatIdx]?.name}: ${result.detail}`});
+    } else {
+      // Tell the client their action was rejected so they see an error
+      // instead of a phantom animation with no feedback. Success is
+      // confirmed implicitly by the state refresh that follows.
+      const conn = MP.connections[peerId];
+      if (conn) {
+        conn.send(JSON.stringify({
+          type: "action_result",
+          ok: false,
+          reason: result.reason || "Action failed",
+        }));
+      }
     }
     hostRefreshState();
   }
