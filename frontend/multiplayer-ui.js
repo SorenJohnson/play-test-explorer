@@ -254,7 +254,7 @@
     const grid = document.getElementById("mp-pool-grid");
     const myTurn = isMyTurn(s);
     const canSwap = myTurn && s.can_pool_swap && MP.selectedCards.size === 1;
-    const poolInactive = myTurn && !canSwap ? "inactive" : "";
+    const poolInactive = canSwap ? "" : "inactive";
     grid.innerHTML = (s.pool || []).map((c, i) => {
       const swappable = canSwap ? "swap-target" : "";
       return `<div class="pool-card ${swappable} ${poolInactive}" data-pi="${i}">${renderCard(c)}</div>`;
@@ -989,7 +989,7 @@
         detailHtml += `<div class="feed-line-note">Drew <strong>${ed.card_drawn || "?"}</strong>${slotLabel} into pool</div>`;
         if (ed.pool_idx != null) {
           const fallback = ed.replaced_via_fallback ? ' <em>(no slot match — FIFO)</em>' : '';
-          detailHtml += `<div class="feed-line-note">→ pool[${ed.pool_idx}]${fallback}</div>`;
+          detailHtml += `<div class="feed-line-note">→ pool[${ed.pool_idx + 1}]${fallback}</div>`;
         }
         if (ed.card_replaced) {
           const rSlot = ed.card_replaced_slot != null ? ` (slot ${ed.card_replaced_slot})` : "";
@@ -1158,11 +1158,25 @@
           return;
         }
       }
+    } else if (prompt.kind === "patent_office_pick") {
+      // Remote client building Patent Office: host peeked the two
+      // patents and sent them here. Reuse the existing picker UI;
+      // the callback sends the pick index back to the host.
+      showPatentOfficePicker(prompt.patents || [], (pickIdx) => {
+        if (MP.role === "host") {
+          // Shouldn't happen (host renders the picker inline in
+          // wireGameButtons), but handle defensively.
+          clearSelection();
+        } else {
+          MP.hostConn.send(JSON.stringify({type: "patent_office_pick", pick_idx: pickIdx}));
+        }
+      });
+      return;  // picker manages the modal itself
     } else {
       titleEl.textContent = "Prompt";
       bodyEl.innerHTML = `<p>${prompt.kind}</p>`;
     }
-  
+
     document.getElementById("prompt-modal").style.display = "flex";
   }
   

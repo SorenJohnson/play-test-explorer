@@ -525,7 +525,7 @@ def do_draw_building_card(state: GameState) -> str:
         _record_event_line(
             state, kind="detail",
             text=(
-                f"  slot {new_card.slot} → pool[{replaced_pool_idx}] "
+                f"  slot {new_card.slot} → pool[{replaced_pool_idx + 1}] "
                 f"(evicted slot {evicted_slot}){fallback_note}"
             ),
         )

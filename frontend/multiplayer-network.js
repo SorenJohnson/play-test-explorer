@@ -167,6 +167,9 @@
       case "pool_swap":
         if (MP.game) MP.core.handleRemotePoolSwap(conn.peer, msg);
         break;
+      case "patent_office_pick":
+        if (MP.game) MP.core.handlePatentOfficePick(conn.peer, msg.pick_idx);
+        break;
     }
   }
 

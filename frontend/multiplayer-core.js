@@ -267,17 +267,53 @@ game
 
   // ===== Host: Handle Remote Player Actions =====
 
+  // Stash a pending Patent Office build while we wait for the client to
+  // pick which of the two drawn patents they want to keep. Null unless
+  // a pick prompt is in flight.
+  let _pendingPatentOfficeBuild = null;
+
   function handleRemoteAction(peerId, msg) {
     const seatIdx = MP.clientSeats[peerId];
     if (seatIdx === undefined || MP.currentState.current_player_index !== seatIdx) return;
 
     const action = msg.action;
+
+    // Patent Office build from a remote client: the client doesn't have
+    // access to MP.game, so it can't peek the patent pile locally. Send
+    // a pick prompt back to the client, stash the build, and wait.
+    if (action.type === "build" && action.patent_office_pick == null) {
+      const hand = MP.currentState?.players[seatIdx]?.hand || [];
+      const hasPatentOffice = (action.build_cards || []).some(i => hand[i]?.building === "Patent Office");
+      if (hasPatentOffice) {
+        const patents = MP.game.peek_patent_office_patents().toJs({dict_converter: Object.fromEntries});
+        if (patents.length >= 2) {
+          _pendingPatentOfficeBuild = { peerId, action };
+          const conn = MP.connections[peerId];
+          if (conn) {
+            conn.send(JSON.stringify({
+              type: "prompt",
+              prompt: { kind: "patent_office_pick", patents },
+            }));
+          }
+          return;
+        }
+      }
+    }
+
     const result = MP.game.apply_human_action(MP.pyodide.toPy(action)).toJs({dict_converter: Object.fromEntries});
     if (result.ok) {
       addFeedEntry({kind: "action", text: `${MP.currentState.players[seatIdx]?.name}: ${result.detail}`});
       MP.network.broadcastFeed({kind: "action", text: `${MP.currentState.players[seatIdx]?.name}: ${result.detail}`});
     }
     hostRefreshState();
+  }
+
+  function handlePatentOfficePick(peerId, pickIdx) {
+    if (!_pendingPatentOfficeBuild || _pendingPatentOfficeBuild.peerId !== peerId) return;
+    const { action } = _pendingPatentOfficeBuild;
+    _pendingPatentOfficeBuild = null;
+    action.patent_office_pick = pickIdx;
+    handleRemoteAction(peerId, { action });
   }
 
   function handleRemoteEndTurn(peerId) {
@@ -499,6 +535,7 @@ game
     tryResolvePrompt,
     addFeedEntry,
     addEventFeedEntries,
+    handlePatentOfficePick,
     // setPromptAnswer lets UI auto-submit an empty answer for a seat that
     // isn't involved in the current prompt (e.g. debt paydown when I'm not
     // in debt). Must NOT be used to bypass the prompt modal for active seats.
