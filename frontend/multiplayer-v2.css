@@ -69,7 +69,7 @@ body.theme-v2 .board-zone > section:nth-child(2) {
   flex-direction: column;
 }
 body.theme-v2 .board-zone > section:nth-child(2) .market-ruler {
-  height: 100%;
+  flex: 1;
 }
 body.theme-v2 .board-zone > section:nth-child(2) .ruler-track {
   height: 100%;
@@ -242,17 +242,10 @@ body.theme-v2 .opponent-buildings {
    MARKET — Chips stacked vertically left of a tall thin ruler
    ============================================================ */
 
-/* Market section: chips + ruler side by side, content-sized, title hidden */
-body.theme-v2 .board-zone > section:nth-child(2) {
-  display: flex;
-  flex-direction: row;
-  gap: 2px;
-  align-items: stretch;
-  align-self: stretch;
-}
 /* Market header: underline to match other sections */
 body.theme-v2 .board-zone > section:nth-child(2) > .section-title {
   padding-bottom: 4px;
+  margin-bottom: 6px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -440,25 +433,22 @@ body.theme-v2 .ruler-sub.current {
 
 body.theme-v2 #event-deck-area {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 8px;
-  margin-top: 1.4em;
   align-items: stretch;
-  position: relative;
 }
 body.theme-v2 #event-deck-area::before {
   content: "EVENTS";
   display: block;
-  position: absolute;
-  top: -1.4em;
-  left: 0;
-  right: 0;
+  width: 100%;
   font-size: 0.8rem;
   letter-spacing: 0.12em;
   font-weight: 700;
   color: var(--text-muted);
   text-transform: uppercase;
   padding-bottom: 4px;
+  margin-bottom: 6px;
   border-bottom: 1px solid var(--border);
 }
 
