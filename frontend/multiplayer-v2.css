@@ -18,7 +18,9 @@ body.theme-v2 {
    ============================================================ */
 
 body.theme-v2 #game-wrapper {
-  height: 1280px;                      /* fixed reference height; zoom fits it */
+  width: 1400px;                       /* fixed reference width — zoom fits it  */
+  height: 1280px;                      /* fixed reference height — zoom fits it */
+  margin: 0 auto;                      /* center when viewport is wider         */
   overflow: hidden;
   padding-bottom: 12px;
   box-sizing: border-box;
@@ -228,12 +230,26 @@ body.theme-v2 .player-stats-v2 {
 body.theme-v2 .player-stats-v2 strong {
   font-weight: 700;
 }
+body.theme-v2 .player-money-line {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 16px;
+  white-space: nowrap;
+}
 body.theme-v2 .player-nw-badge {
   position: absolute;
   top: 0;
   right: 0;
   font-size: 1.1rem;
   font-weight: 800;
+}
+/* Reserve space for the built-buildings list so the player zone doesn't
+ * grow as buildings come in — growth here pushes the board up and cuts
+ * the pool bottom. 3 lines at 0.7rem ≈ 42px. */
+body.theme-v2 .player-buildings-box {
+  min-height: 48px;
+  max-height: 48px;
+  overflow: hidden;
 }
 body.theme-v2 .player-stats-buildings,
 body.theme-v2 .player-stats-specials {
@@ -436,12 +452,16 @@ body.theme-v2 .ruler-group-label {
   pointer-events: none;
 }
 
-/* Sub-slots: transparent, dots sit on top of the background number */
+/* Sub-slots: transparent, dots sit on top of the background number.
+ * column-reverse so higher PRICE_TRACK positions visually appear higher
+ * within the group, matching the outer ruler-track direction. Without
+ * this, a resource moving from pos 1 to pos 2 in the $1 group appears
+ * to move DOWN in the ruler, which looks like it didn't update. */
 body.theme-v2 .ruler-group-slots {
   position: relative;
   z-index: 1;
   display: flex;
-  flex-direction: column;
+  flex-direction: column-reverse;
   height: 100%;
 }
 /* Subsections divide their parent group equally via flex:1. Combined with
@@ -459,8 +479,9 @@ body.theme-v2 .ruler-sub {
   border-radius: 0;
   box-sizing: border-box;
 }
-body.theme-v2 .ruler-sub:first-child {
-  border-top: none;                  /* no divider at group edge             */
+body.theme-v2 .ruler-sub:last-child {
+  border-top: none;                  /* no divider at group edge (topmost in
+                                        column-reverse is the last DOM child) */
 }
 body.theme-v2 .ruler-sub.current {
   background: rgba(88, 166, 255, 0.1);

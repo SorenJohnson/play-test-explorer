@@ -1067,10 +1067,12 @@
     const moneyHtml = isV2
       ? `<div class="player-stats-v2">
           <div class="player-nw-badge" style="color:${me.net_worth >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'}">NW $${me.net_worth}</div>
-          <div>Cash: <strong>$${me.money}</strong></div>
-          ${me.debt > 0 ? `<div style="color:var(--accent-red)">Debt: <strong>$${me.debt}</strong></div>` : ''}
-          ${me.credit > 0 ? `<div style="color:var(--accent-yellow)">Credit: <strong>$${me.credit}</strong></div>` : ''}
-          <div>Contracts: <strong>${me.contracts_fulfilled || 0}</strong></div>
+          <div class="player-money-line">
+            <span>Cash: <strong>$${me.money}</strong></span>
+            <span>Contracts: <strong>${me.contracts_fulfilled || 0}</strong></span>
+            ${me.debt > 0 ? `<span style="color:var(--accent-red)">Debt: <strong>$${me.debt}</strong></span>` : ''}
+            ${me.credit > 0 ? `<span style="color:var(--accent-yellow)">Credit: <strong>$${me.credit}</strong></span>` : ''}
+          </div>
         </div>`
       : `<div class="player-stats-money">
           Cash $${me.money}${me.debt > 0 ? ` | <span style="color:var(--accent-red)">Debt $${me.debt}</span>` : ''}${me.credit > 0 ? ` | <span style="color:var(--accent-yellow)">Credit $${me.credit}</span>` : ''} | ${me.contracts_fulfilled || 0} contracts
@@ -1081,9 +1083,11 @@
         ${moneyHtml}
         <div class="player-rates-grid">${ratesGrid}</div>
         ${rateNumberLine}
-        <div class="player-stats-buildings">${buildingList}</div>
-        ${specialList ? `<div class="player-stats-specials">${specialList}</div>` : ''}
-        ${patentList ? `<div class="player-stats-specials">${patentList}</div>` : ''}
+        <div class="player-buildings-box">
+          <div class="player-stats-buildings">${buildingList}</div>
+          ${specialList ? `<div class="player-stats-specials">${specialList}</div>` : ''}
+          ${patentList ? `<div class="player-stats-specials">${patentList}</div>` : ''}
+        </div>
       </div>
     `;
   }

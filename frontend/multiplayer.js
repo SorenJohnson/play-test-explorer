@@ -84,10 +84,14 @@ MP.pipTextColor = (resource) => _darkTextResources.has(resource) ? "#000" : "#ff
 // the reference design height. Everything shrinks proportionally — no
 // individual element distortion.
 if (document.body.classList.contains("theme-v2")) {
+  const REF_WIDTH = 1400;  // matches CSS fixed width on #game-wrapper
   const REF_HEIGHT = 1280; // matches CSS fixed height on #game-wrapper
   const wrapper = document.getElementById("game-wrapper");
   function _updateZoom() {
-    const z = Math.min(1, window.innerHeight / REF_HEIGHT);
+    // Scale uniformly by whichever axis is more constrained — keeps the
+    // design's aspect ratio so nothing reflows/wraps when the viewport
+    // shrinks.
+    const z = Math.min(1, window.innerWidth / REF_WIDTH, window.innerHeight / REF_HEIGHT);
     wrapper.style.zoom = z;
   }
   window.addEventListener("resize", _updateZoom);
