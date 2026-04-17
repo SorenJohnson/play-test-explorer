@@ -463,6 +463,53 @@ body.theme-v2 .pool-card {
   min-height: 100px;
 }
 
+/* ============================================================
+   SPLIT CARD — build half (top) + sell half (bottom)
+   ============================================================ */
+
+body.theme-v2 .card-build-half,
+body.theme-v2 .card-sell-half {
+  padding: 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+body.theme-v2 .card-build-half {
+  flex: 1;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+body.theme-v2 .card-sell-half {
+  padding-top: 4px;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+}
+
+/* Hover hints */
+body.theme-v2 .hand-card:not(.inactive) .card-build-half:hover {
+  background: rgba(88, 166, 255, 0.06);
+}
+body.theme-v2 .hand-card:not(.inactive) .card-sell-half:hover {
+  background: rgba(63, 185, 80, 0.06);
+}
+
+/* Intent highlighting on selected card */
+body.theme-v2 .hand-card.intent-build .card-build-half {
+  background: rgba(88, 166, 255, 0.1);
+  border-color: var(--accent-blue);
+}
+body.theme-v2 .hand-card.intent-sell .card-sell-half {
+  background: rgba(63, 185, 80, 0.1);
+}
+
+/* No-sell placeholder */
+body.theme-v2 .card-no-sell {
+  color: var(--text-subtle);
+  font-size: 0.65rem;
+}
+
 /* On-card sell buttons */
 body.theme-v2 .card-sell-row {
   margin-top: auto;

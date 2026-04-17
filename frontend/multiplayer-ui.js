@@ -322,9 +322,10 @@
     const cardCount = hand.length;
     grid.innerHTML = hand.map((c, i) => {
       const sel = MP.selectedCards.has(i) ? "selected" : "";
-      // Fan-hand layout (v2): set CSS custom properties for rotation calc
       const fanStyle = isV2 ? `--card-index:${i}; --card-count:${cardCount};` : "";
-      return `<div class="hand-card ${sel} ${inactive}" data-hi="${i}" style="${fanStyle}">${renderCard(c)}</div>`;
+      const intentCls = isV2 && MP.selectedCards.has(i) && MP._v2CardIntent
+        ? ` intent-${MP._v2CardIntent}` : "";
+      return `<div class="hand-card ${sel}${intentCls} ${inactive}" data-hi="${i}" style="${fanStyle}">${renderCard(c)}</div>`;
     }).join("");
   
     // Build + sell estimates — show both when a card is selected
@@ -363,8 +364,33 @@
           // Don't toggle selection if they clicked a sell button
           if (e.target.classList.contains("card-sell-btn")) return;
           const hi = parseInt(el.dataset.hi);
-          if (MP.selectedCards.has(hi)) MP.selectedCards.delete(hi);
-          else if (MP.selectedCards.size < Math.max(cr, 1)) MP.selectedCards.add(hi);
+
+          if (isV2) {
+            // Split card: detect which half was clicked
+            const buildHalf = e.target.closest(".card-build-half");
+            const sellHalf = e.target.closest(".card-sell-half");
+            if (MP.selectedCards.has(hi)) {
+              // Already selected — toggle off if clicking same half, switch intent otherwise
+              if ((buildHalf && MP._v2CardIntent === "build") || (sellHalf && MP._v2CardIntent === "sell")) {
+                MP.selectedCards.delete(hi);
+                MP._v2CardIntent = null;
+                MP._v2SellResource = null;
+              } else if (sellHalf) {
+                MP._v2CardIntent = "sell";
+              } else {
+                MP._v2CardIntent = "build";
+              }
+            } else {
+              MP.selectedCards.clear();
+              MP.selectedCards.add(hi);
+              MP._v2CardIntent = sellHalf ? "sell" : "build";
+              MP._v2SellResource = null;
+            }
+          } else {
+            if (MP.selectedCards.has(hi)) MP.selectedCards.delete(hi);
+            else if (MP.selectedCards.size < Math.max(cr, 1)) MP.selectedCards.add(hi);
+          }
+
           renderHand(s);
           renderPool(s);
           renderActions(s);
@@ -491,17 +517,23 @@
     const isV2 = document.body.classList.contains("theme-v2");
     let html = "";
     if (isV2) {
-      // V2: fixed-slot layout — every section always present so cards
-      // align vertically regardless of content. Empty slots get &nbsp;
+      // V2: split card — top half = build info, bottom half = sell info.
+      // Each half is separately clickable to indicate intent.
+      const me = MP.currentState?.players?.[MP.mySeat];
+      const market = MP.currentState?.market || {};
+
+      // BUILD HALF: costs → name → rates → effect
+      html += `<div class="card-build-half" data-intent="build">`;
       html += `<div class="card-costs">${costs || '&nbsp;'}</div>`;
       html += `<div class="card-name">${c.building}</div>`;
       html += `<div class="card-rates">${rates || '&nbsp;'}</div>`;
-      html += `<div class="card-effect">${c.effect || '&nbsp;'}</div>`;
-      // Sell resources as colored pip circles with revenue shown above
+      if (c.effect) html += `<div class="card-effect">${c.effect}</div>`;
+      html += `</div>`;
+
+      // SELL HALF: resource pips with revenue
+      html += `<div class="card-sell-half" data-intent="sell">`;
       const sellResources = (c.can_sell || []);
       if (sellResources.length > 0) {
-        const me = MP.currentState?.players?.[MP.mySeat];
-        const market = MP.currentState?.market || {};
         const btns = sellResources.map(r => {
           const rate = me?.rates?.[r] || 0;
           const price = market[r] || 0;
@@ -513,10 +545,11 @@
         }).join("");
         html += `<div class="card-sell-row">${btns}</div>`;
       } else if (canContract) {
-        html += `<div class="card-sell-row"><span class="card-contract-icon">\u{1F4CB}</span></div>`;
+        html += `<span class="card-contract-icon">\u{1F4CB} Contract</span>`;
       } else {
-        html += `<div class="card-sell-row">&nbsp;</div>`;
+        html += `<span class="card-no-sell">&nbsp;</span>`;
       }
+      html += `</div>`;
     } else {
       if (costs) html += `<div class="card-costs">${costs}</div>`;
       html += `<div class="card-name">${c.building}</div>`;
