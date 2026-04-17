@@ -417,7 +417,7 @@ body.theme-v2 .ruler-sub {
   justify-content: flex-start;
   gap: 2px;
   padding: 3px 4px;
-  min-height: 26px;
+  height: 28px;                      /* every position same fixed height    */
 }
 body.theme-v2 .ruler-sub + .ruler-sub {
   border-top: 2px solid var(--border);
