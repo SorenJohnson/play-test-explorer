@@ -380,13 +380,9 @@ body.theme-v2 .ruler-pip.current .ruler-price {
 /* Grouped ruler: price sections with subsections */
 body.theme-v2 .ruler-group {
   position: relative;
-  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
   border-radius: 4px;
   margin-bottom: 2px;
-  overflow: hidden;
-}
-body.theme-v2 .ruler-group.has-selected {
-  background: rgba(255,255,255,0.1);
 }
 
 /* Large background price spanning the full group height */
@@ -398,19 +394,17 @@ body.theme-v2 .ruler-group-label {
   justify-content: center;
   font-weight: 900;
   color: var(--text-muted);
-  opacity: 0.25;
+  opacity: 0.3;
   z-index: 0;
   pointer-events: none;
 }
 
-/* Sub-slots stack vertically, transparent with gaps to show background */
+/* Sub-slots: transparent, dots sit on top of the background number */
 body.theme-v2 .ruler-group-slots {
   position: relative;
   z-index: 1;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 2px;
 }
 body.theme-v2 .ruler-sub {
   display: flex;
@@ -419,11 +413,12 @@ body.theme-v2 .ruler-sub {
   gap: 2px;
   padding: 3px 4px;
   flex: 1;
-  background: var(--bg-board);
-  border-radius: 2px;
+}
+body.theme-v2 .ruler-sub + .ruler-sub {
+  border-top: 1px solid rgba(255,255,255,0.08);
 }
 body.theme-v2 .ruler-sub.current {
-  background: rgba(88, 166, 255, 0.12);
+  background: rgba(88, 166, 255, 0.1);
 }
 
 /* ============================================================
