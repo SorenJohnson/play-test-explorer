@@ -773,13 +773,19 @@
   
   function renderOpponents(s) {
     const strip = document.getElementById("mp-opponents");
-    strip.innerHTML = s.players.filter((_, i) => i !== MP.mySeat).map(p => {
-      const realIdx = s.players.indexOf(p);
-      const isActive = realIdx === s.current_player_index;
-      const color = PLAYER_COLORS[realIdx % PLAYER_COLORS.length];
-  
-      // Rate chips — in v2 theme, show only non-zero rates to reduce noise
-      const isV2 = document.body.classList.contains("theme-v2");
+    const isV2 = document.body.classList.contains("theme-v2");
+
+    // In v2: show ALL players (including you) as a turn-order list.
+    // In classic: show only opponents.
+    const playerList = isV2
+      ? s.players.map((p, i) => ({p, idx: i}))
+      : s.players.filter((_, i) => i !== MP.mySeat).map(p => ({p, idx: s.players.indexOf(p)}));
+
+    strip.innerHTML = playerList.map(({p, idx}) => {
+      const isActive = idx === s.current_player_index;
+      const isYou = idx === MP.mySeat;
+      const color = PLAYER_COLORS[idx % PLAYER_COLORS.length];
+
       const ratesGrid = RESOURCE_ORDER
         .filter(r => !isV2 || (p.rates?.[r] || 0) !== 0)
         .map(r => {
@@ -787,8 +793,7 @@
           const cls = v > 0 ? "rate-pos" : v < 0 ? "rate-neg" : "rate-zero";
           return `<div class="rate-chip sm ${cls}"><span class="rate-res" style="color:${RESOURCE_COLORS[r]}">${r}</span><span class="rate-val">${v > 0 ? "+" : ""}${v}</span></div>`;
         }).join("");
-  
-      // Buildings split into regular + specials + patents
+
       const builtCards = p.built_cards || [];
       const buildings = builtCards.filter(c => !c.effect && c.slot !== 5).map(c => c.building);
       const specials = builtCards.filter(c => c.effect && c.slot !== 5);
@@ -796,15 +801,20 @@
       const buildingList = buildings.length ? buildings.join(", ") : "none";
       const specialList = specials.map(c => `<span class="opp-special">${c.building}</span>`).join(" ");
       const patentList = patents.map(c => `<span class="opp-patent">${c.building}</span>`).join(" ");
-  
+
+      const youTag = isYou ? ' <span style="color:var(--accent-blue)">(You)</span>' : '';
+      const aiTag = !p.is_human && !isYou ? ' (AI)' : '';
+      const turnIndicator = isActive ? '<span class="turn-dot" title="Active turn">●</span> ' : '';
+      const youClass = isYou ? ' is-you' : '';
+
       return `
-        <div class="opponent-card ${isActive ? 'active-turn' : ''}" style="border-left:3px solid ${color}">
+        <div class="opponent-card ${isActive ? 'active-turn' : ''}${youClass}" style="border-left:3px solid ${color}">
           <div class="opponent-header">
-            <span class="opponent-name" style="color:${color}">${p.name}${p.is_human ? '' : ' (AI)'}</span>
+            <span class="opponent-name" style="color:${color}">${turnIndicator}${p.name}${aiTag}${youTag}</span>
             <span class="opponent-nw" style="color:${p.net_worth >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'}">NW $${p.net_worth}</span>
           </div>
           <div class="opponent-money">
-            Cash $${p.money}${p.debt > 0 ? ` | <span style="color:var(--accent-red)">Debt $${p.debt}</span>` : ''}${p.credit > 0 ? ` | <span style="color:var(--accent-yellow)">Credit $${p.credit}</span>` : ''} | ${p.contracts_fulfilled || 0} contracts
+            $${p.money}${p.debt > 0 ? ` | <span style="color:var(--accent-red)">D$${p.debt}</span>` : ''} | ${p.contracts_fulfilled || 0}C
           </div>
           <div class="opponent-rates-grid">${ratesGrid}</div>
           <div class="opponent-buildings">${buildingList}</div>
