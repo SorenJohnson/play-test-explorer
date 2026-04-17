@@ -345,7 +345,9 @@
   
     if (myTurn) {
       grid.querySelectorAll(".hand-card:not(.disabled)").forEach(el => {
-        el.addEventListener("click", () => {
+        el.addEventListener("click", (e) => {
+          // Don't toggle selection if they clicked a sell button
+          if (e.target.classList.contains("card-sell-btn")) return;
           const hi = parseInt(el.dataset.hi);
           if (MP.selectedCards.has(hi)) MP.selectedCards.delete(hi);
           else if (MP.selectedCards.size < Math.max(cr, 1)) MP.selectedCards.add(hi);
@@ -354,6 +356,36 @@
           renderActions(s);
         });
       });
+
+      // V2: activate sell buttons on the selected card if it can sell
+      if (isV2 && MP.selectedCards.size === 1) {
+        const selIdx = Array.from(MP.selectedCards)[0];
+        const selCard = hand[selIdx];
+        const canSell = selCard?.can_sell?.length > 0 && cr >= 1;
+        if (canSell) {
+          const cardEl = grid.querySelectorAll(".hand-card")[selIdx];
+          if (cardEl) {
+            cardEl.querySelectorAll(".card-sell-btn").forEach(btn => {
+              btn.classList.remove("dimmed");
+              btn.classList.add("active");
+              btn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                const res = btn.dataset.sellRes;
+                const action = {type: "sell", card_idx: selIdx, sell_resource: res};
+                // Hacker Array: if owned, grab target+direction from inline controls
+                const hTarget = document.getElementById("mp-hacker-target");
+                const hDir = document.getElementById("mp-hacker-dir");
+                if (hTarget?.value) {
+                  action.hacker_target = hTarget.value;
+                  action.hacker_direction = parseInt(hDir?.value || "1");
+                }
+                clearSelection();
+                sendAction(action);
+              });
+            });
+          }
+        }
+      }
     }
   }
   
@@ -434,8 +466,18 @@
       html += `<div class="card-name">${c.building}</div>`;
       html += `<div class="card-rates">${rates || '&nbsp;'}</div>`;
       html += `<div class="card-effect">${c.effect || '&nbsp;'}</div>`;
-      const bottom = sell ? `Sell: ${sell}` : (canContract ? '\u{1F4CB}' : '&nbsp;');
-      html += `<div class="card-bottom">${bottom}</div>`;
+      // Sell resources as individual buttons (greyed by default, lit when sellable)
+      const sellResources = (c.can_sell || []);
+      if (sellResources.length > 0) {
+        const btns = sellResources.map(r =>
+          `<span class="card-sell-btn dimmed" data-sell-res="${r}" style="color:${RESOURCE_COLORS[r] || 'var(--text-muted)'}">${r}</span>`
+        ).join("");
+        html += `<div class="card-sell-row">${btns}</div>`;
+      } else if (canContract) {
+        html += `<div class="card-sell-row"><span class="card-contract-icon">\u{1F4CB}</span></div>`;
+      } else {
+        html += `<div class="card-sell-row">&nbsp;</div>`;
+      }
     } else {
       if (costs) html += `<div class="card-costs">${costs}</div>`;
       html += `<div class="card-name">${c.building}</div>`;

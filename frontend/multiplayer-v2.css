@@ -82,7 +82,7 @@ body.theme-v2 .board-zone > section:nth-child(4) {
   overflow-y: auto;
 }
 
-/* Player zone → right column, below pool with breathing room */
+/* Player zone → right column, fixed size (doesn't grow with content) */
 body.theme-v2 .player-zone {
   grid-column: 3;
   grid-row: 3;
@@ -92,6 +92,7 @@ body.theme-v2 .player-zone {
   padding: 8px;
   overflow-y: auto;
   border-radius: 6px;
+  min-height: 280px;                /* starts at full size, content fills  */
 }
 
 body.theme-v2 #event-feed {
@@ -455,6 +456,36 @@ body.theme-v2 .pool-grid {
 body.theme-v2 .pool-card {
   font-size: 0.8rem;
   min-height: 100px;
+}
+
+/* On-card sell buttons */
+body.theme-v2 .card-sell-row {
+  margin-top: auto;                 /* push to bottom of card              */
+  display: flex;
+  gap: 4px;
+  padding-top: 4px;
+  min-height: 1.4em;
+}
+body.theme-v2 .card-sell-btn {
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  cursor: default;
+  transition: opacity 0.15s, border-color 0.15s;
+}
+body.theme-v2 .card-sell-btn.dimmed {
+  opacity: 0.25;
+}
+body.theme-v2 .card-sell-btn.active {
+  opacity: 1;
+  border-color: currentColor;
+  cursor: pointer;
+  background: rgba(255,255,255,0.06);
+}
+body.theme-v2 .card-sell-btn.active:hover {
+  background: rgba(255,255,255,0.12);
 }
 
 body.theme-v2 .hand-card {
