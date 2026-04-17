@@ -94,9 +94,8 @@ body.theme-v2 .player-zone {
   border-top: 2px solid rgba(88, 166, 255, 0.2);
   margin-top: 12px;
   padding: 8px;
-  overflow-y: auto;
+  overflow: hidden;                  /* shrink, don't scroll                */
   border-radius: 6px;
-  min-height: 280px;                /* starts at full size, content fills  */
 }
 
 body.theme-v2 #event-feed {
@@ -525,12 +524,17 @@ body.theme-v2 .res-pip-long {
   font-size: 0.38rem !important;    /* 4+ char names (FOOD) fit in the pip */
 }
 
-/* Card costs + rates: scaled pips */
-body.theme-v2 .card-costs .res-pip,
-body.theme-v2 .card-rates .res-pip {
+/* Card costs: scaled pips */
+body.theme-v2 .card-costs .res-pip {
   width: min(24px, 2.5vh);
   height: min(24px, 2.5vh);
   font-size: clamp(0.3rem, 0.6vh, 0.5rem);
+}
+/* Card rates: bigger pips (squares) */
+body.theme-v2 .card-rates .res-pip {
+  width: min(28px, 3vh);
+  height: min(28px, 3vh);
+  font-size: clamp(0.35rem, 0.7vh, 0.55rem);
 }
 
 /* Contract requirements: slightly larger */
