@@ -466,14 +466,16 @@ body.theme-v2 .card-bottom {
   color: var(--text-dim);
 }
 
-/* Pool: compact, on the board */
+/* Pool: same card sizing as hand */
 body.theme-v2 .pool-grid {
-  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-  gap: 5px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 body.theme-v2 .pool-card {
   font-size: 0.8rem;
-  min-height: 100px;
+  width: 150px;
+  flex-shrink: 0;
 }
 
 /* ============================================================
@@ -658,9 +660,8 @@ body.theme-v2 .hand-grid {
 body.theme-v2 .hand-card {
   background: var(--bg-card-hand);
   border-color: rgba(88, 166, 255, 0.18);
-  min-width: 160px;
-  max-width: 200px;
-  flex: 1;                     /* all cards same width */
+  width: 150px;                /* same as pool cards */
+  flex-shrink: 0;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
