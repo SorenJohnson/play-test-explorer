@@ -185,6 +185,7 @@ def cmd_sync_play() -> None:
     csv_files = [
         "Cards.csv", "Contracts.csv", "market.csv", "Patents.csv",
         "News.csv", "Corporations.csv", "GameConfig.csv", "Events.csv",
+        "CardValues.csv",
     ]
     for name in csv_files:
         shutil.copy2(src_root / "data" / name, dst_root / "data" / name)
