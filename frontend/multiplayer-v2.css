@@ -371,8 +371,8 @@ body.theme-v2 .rnl-dot {
   border-radius: 4px;
 }
 
-/* Rate tracker: top track (1-5 range) tall enough for 3 stacked pips */
-body.theme-v2 .rnl-slot {
+/* Rate tracker: top track only (1-5 range) tall enough for 3 stacked pips */
+body.theme-v2 .rnl-track:first-child .rnl-slot {
   min-height: 80px;
 }
 
@@ -514,6 +514,9 @@ body.theme-v2 .res-pip {
 }
 body.theme-v2 .res-pip-rate {
   border-radius: 4px;               /* square = rate                       */
+}
+body.theme-v2 .res-pip-long {
+  font-size: 0.38rem !important;    /* 4+ char names (FOOD) fit in the pip */
 }
 
 /* Card costs + rates: compact inline pips */

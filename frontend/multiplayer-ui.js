@@ -613,7 +613,8 @@
     const bg = RESOURCE_COLORS[resource] || 'var(--text-muted)';
     const color = MP.pipTextColor(resource);
     const cls = isRate ? "res-pip res-pip-rate" : "res-pip";
-    return `<span class="${cls}" style="background:${bg};color:${color}">${resource}</span>`;
+    const longCls = resource.length > 3 ? " res-pip-long" : "";
+    return `<span class="${cls}${longCls}" style="background:${bg};color:${color}">${resource}</span>`;
   }
 
   function renderCard(c) {
