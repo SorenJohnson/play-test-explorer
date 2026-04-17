@@ -357,30 +357,50 @@
       });
 
       // V2: activate sell buttons on the selected card if it can sell.
-      // Clicking a resource SELECTS it (stores on MP._v2SellResource),
-      // then pressing the Sell button executes the action.
+      // Auto-select the best-revenue resource; clicking a pip changes it.
+      // Pressing Sell executes with the chosen resource.
       if (isV2 && MP.selectedCards.size === 1) {
         const selIdx = Array.from(MP.selectedCards)[0];
         const selCard = hand[selIdx];
+        const me = s.players[MP.mySeat];
         const canSell = selCard?.can_sell?.length > 0 && cr >= 1;
         if (canSell) {
+          // Auto-select best revenue resource if none chosen yet
+          if (!MP._v2SellResource || !selCard.can_sell.includes(MP._v2SellResource)) {
+            let bestRes = selCard.can_sell[0];
+            let bestRev = 0;
+            for (const r of selCard.can_sell) {
+              const rate = me?.rates?.[r] || 0;
+              const rev = rate > 0 ? rate * (s.market?.[r] || 0) : 0;
+              if (rev > bestRev) { bestRev = rev; bestRes = r; }
+            }
+            MP._v2SellResource = bestRes;
+          }
+
           const cardEl = grid.querySelectorAll(".hand-card")[selIdx];
           if (cardEl) {
             cardEl.querySelectorAll(".card-sell-btn").forEach(btn => {
               btn.classList.remove("dimmed");
               btn.classList.add("active");
-              // Highlight if this resource was already chosen
               if (MP._v2SellResource === btn.dataset.sellRes) {
                 btn.classList.add("chosen");
               }
               btn.addEventListener("click", (e) => {
                 e.stopPropagation();
                 MP._v2SellResource = btn.dataset.sellRes;
-                // Re-render to show the chosen highlight
                 renderHand(s);
                 renderActions(s);
               });
             });
+
+            // Show sell info on the chosen resource's rev label
+            if (MP._v2SellResource) {
+              const r = MP._v2SellResource;
+              const rate = me?.rates?.[r] || 0;
+              const price = s.market?.[r] || 0;
+              const rev = rate > 0 ? rate * price : 0;
+              estimateEl.innerHTML = `Sell for: <strong>$${rev}</strong> (${rate} ${r} @ $${price})`;
+            }
           }
         } else {
           MP._v2SellResource = null;

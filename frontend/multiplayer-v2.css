@@ -479,12 +479,11 @@ body.theme-v2 .card-sell-pip-wrap {
   gap: 2px;
 }
 body.theme-v2 .card-sell-rev {
-  font-size: 0.6rem;
-  color: var(--text-dim);
-  font-weight: 600;
-  visibility: hidden;               /* hidden by default                   */
+  font-size: 0.72rem;
+  color: var(--text-primary);
+  font-weight: 700;
+  visibility: hidden;
 }
-body.theme-v2 .card-sell-btn.chosen + .card-sell-rev,
 body.theme-v2 .card-sell-pip-wrap:has(.chosen) .card-sell-rev {
   visibility: visible;
 }
