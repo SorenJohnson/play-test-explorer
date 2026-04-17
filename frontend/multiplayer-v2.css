@@ -438,13 +438,11 @@ body.theme-v2 .card-rates {
   font-size: 0.8rem;
   margin-bottom: 2px;
 }
-/* Rate values on cards: white text, colored left border for clarity */
-body.theme-v2 .card-rates .rate-pos,
-body.theme-v2 .card-rates .rate-neg {
-  color: var(--text-primary);
-  border-left: 2px solid;
-  padding-left: 3px;
-  margin-right: 4px;
+
+/* Sell resource buttons: white text for readability */
+body.theme-v2 .card-sell-btn {
+  color: var(--text-primary) !important;
+  text-shadow: 0 0 4px currentColor;
 }
 body.theme-v2 .card-effect {
   font-size: 0.72rem;
