@@ -72,23 +72,12 @@
       if (deckArea && contractsSection && deckArea.parentElement !== contractsSection) {
         contractsSection.insertBefore(deckArea, contractsSection.firstChild);
       }
-      // Event feed → under the players section (left column)
-      const feed = document.getElementById("event-feed");
-      const playersSection = document.querySelector(".board-zone > section:first-child");
-      if (feed && playersSection && feed.parentElement !== playersSection) {
-        playersSection.appendChild(feed);
-      }
     } else {
-      // Classic: restore original positions
+      // Classic: restore event deck to status bar
       const deckArea = document.getElementById("event-deck-area");
       const statusBar = document.getElementById("status-bar");
       if (deckArea && statusBar && deckArea.parentElement !== statusBar) {
         statusBar.appendChild(deckArea);
-      }
-      const feed = document.getElementById("event-feed");
-      const gameLayout = document.getElementById("game-layout");
-      if (feed && gameLayout && feed.parentElement !== gameLayout) {
-        gameLayout.appendChild(feed);
       }
     }
   }
