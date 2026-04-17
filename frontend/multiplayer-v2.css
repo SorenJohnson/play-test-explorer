@@ -40,7 +40,7 @@ body.theme-v2 #game-layout {
 body.theme-v2 #game-area {
   display: grid;
   grid-template-columns: min(200px, 20vw) min(130px, 14vw) 1fr;
-  grid-template-rows: auto auto auto 1fr;
+  grid-template-rows: minmax(0, auto) minmax(0, auto) minmax(0, auto) minmax(0, 1fr);
   overflow: hidden;
   gap: 0;
 }
@@ -80,12 +80,16 @@ body.theme-v2 .board-zone > section:nth-child(2) .ruler-track {
 body.theme-v2 .board-zone > section:nth-child(3) {
   grid-column: 3;
   padding: 4px 8px;
+  overflow: hidden;
+  min-height: 0;
 }
 
 /* Pool → col 3 */
 body.theme-v2 .board-zone > section:nth-child(4) {
   grid-column: 3;
   padding: 4px 8px;
+  overflow: hidden;
+  min-height: 0;
 }
 
 /* Player zone → spans cols 2-3, below the board */
