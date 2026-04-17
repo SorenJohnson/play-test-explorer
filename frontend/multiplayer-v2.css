@@ -361,11 +361,12 @@ body.theme-v2 .ruler-res-dot.selected {
   font-size: 0.48rem;
 }
 
-/* Rate tracker dots bigger too */
+/* Rate tracker dots: squares (rates), bigger */
 body.theme-v2 .rnl-dot {
   width: 24px;
   height: 24px;
   font-size: 0.45rem;
+  border-radius: 4px;               /* square = rate                       */
 }
 
 body.theme-v2 .ruler-pip.current {
