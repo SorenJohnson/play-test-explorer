@@ -506,7 +506,11 @@
     const handHtml = handEl?.innerHTML || "";
     const poolHtml = poolEl?.innerHTML || "";
 
-    // Start animation FIRST so the flying cards depart from the old positions
+    // Hide source cards so they're only visible as flying clones during transit
+    if (handEl) handEl.style.visibility = "hidden";
+    if (poolEl) poolEl.style.visibility = "hidden";
+
+    // Start animation from the old positions
     if (handRect && poolRect) {
       MP.anim.animateCard(handRect, poolRect, handHtml);
       MP.anim.animateCard(poolRect, handRect, poolHtml);
