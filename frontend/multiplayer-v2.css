@@ -363,12 +363,17 @@ body.theme-v2 .ruler-res-dot.selected {
   font-size: 0.48rem;
 }
 
-/* Rate tracker dots: squares (rates), bigger */
+/* Rate tracker dots: squares (rates), bigger text */
 body.theme-v2 .rnl-dot {
   width: 24px;
   height: 24px;
-  font-size: 0.45rem;
-  border-radius: 4px;               /* square = rate                       */
+  font-size: 0.55rem;
+  border-radius: 4px;
+}
+
+/* Rate tracker: top track (1-5 range) tall enough for 3 stacked pips */
+body.theme-v2 .rnl-slot {
+  min-height: 80px;
 }
 
 body.theme-v2 .ruler-pip.current {
@@ -516,14 +521,14 @@ body.theme-v2 .card-costs .res-pip,
 body.theme-v2 .card-rates .res-pip {
   width: 20px;
   height: 20px;
-  font-size: 0.33rem;
+  font-size: 0.45rem;
 }
 
 /* Contract requirements: slightly larger */
 body.theme-v2 .contract-req-line .res-pip {
   width: 24px;
   height: 24px;
-  font-size: 0.38rem;
+  font-size: 0.5rem;
 }
 
 /* Card sections: fixed heights so all cards align identically */
