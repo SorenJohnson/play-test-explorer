@@ -250,13 +250,14 @@ body.theme-v2 .ruler-track {
 }
 
 body.theme-v2 .ruler-pip {
-  flex: 1;                          /* each pip stretches within the track */
+  flex: 1;                          /* stretch within track                */
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: center;
   position: relative;
-  padding: 2px 4px;
+  padding: 4px;
+  min-height: 28px;                 /* taller cells to fit bigger dots     */
   gap: 0;
   border-radius: 3px;
 }
@@ -282,15 +283,16 @@ body.theme-v2 .ruler-dots-row {
   position: relative;
 }
 
+/* Match the player board's rnl-dot size (20x20) */
 body.theme-v2 .ruler-res-dot {
-  width: 8px;
-  height: 8px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   opacity: 0.9;
 }
 body.theme-v2 .ruler-res-dot.selected {
-  width: 10px;
-  height: 10px;
+  width: 22px;
+  height: 22px;
   opacity: 1;
   box-shadow: 0 0 6px rgba(255,255,255,0.5);
 }
