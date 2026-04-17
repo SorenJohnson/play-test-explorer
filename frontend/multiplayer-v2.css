@@ -489,12 +489,19 @@ body.theme-v2 .card-rates {
   font-size: 0.8rem;
   min-height: 1.2em;
 }
-/* Number + pip never separated */
+/* Number + pip: fixed-width number so pips always align vertically */
 body.theme-v2 .rate-line {
   white-space: nowrap;
   display: inline-flex;
   align-items: center;
   gap: 2px;
+}
+body.theme-v2 .rate-num {
+  display: inline-block;
+  width: 2em;
+  text-align: right;
+  font-weight: 700;
+  font-size: 0.78rem;
 }
 body.theme-v2 .card-effect {
   font-size: 0.72rem;
