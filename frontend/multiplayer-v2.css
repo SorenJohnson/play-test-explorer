@@ -37,7 +37,7 @@ body.theme-v2 #game-layout {
 /* game-area: 3-column grid — players | market | contracts+pool */
 body.theme-v2 #game-area {
   display: grid;
-  grid-template-columns: 200px 160px 1fr;
+  grid-template-columns: 200px 130px 1fr;
   grid-template-rows: auto auto auto;        /* all rows content-sized              */
   align-content: stretch;                    /* rows can use available height        */
   overflow: hidden;
@@ -435,7 +435,7 @@ body.theme-v2 #event-deck-area {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-bottom: 8px;
+  margin-bottom: 16px;
   align-items: stretch;
 }
 body.theme-v2 #event-deck-area::before {
@@ -525,12 +525,12 @@ body.theme-v2 .res-pip-long {
   font-size: 0.38rem !important;    /* 4+ char names (FOOD) fit in the pip */
 }
 
-/* Card costs + rates: compact inline pips */
+/* Card costs + rates: scaled pips */
 body.theme-v2 .card-costs .res-pip,
 body.theme-v2 .card-rates .res-pip {
-  width: 20px;
-  height: 20px;
-  font-size: 0.45rem;
+  width: 24px;
+  height: 24px;
+  font-size: 0.5rem;
 }
 
 /* Contract requirements: slightly larger */
@@ -542,19 +542,19 @@ body.theme-v2 .contract-req-line .res-pip {
 
 /* Card sections: fixed heights so all cards align identically */
 body.theme-v2 .card-costs {
-  font-size: 0.75rem;
+  font-size: 0.88rem;
   color: var(--text-muted);
-  min-height: 1.2em;
+  min-height: 1.4em;
 }
 body.theme-v2 .card-name {
   font-weight: 600;
-  font-size: 0.9rem;
-  min-height: 1.2em;
-  margin-bottom: 14px;
+  font-size: 1.1rem;
+  min-height: 1.3em;
+  margin-bottom: 16px;
 }
 body.theme-v2 .card-rates {
-  font-size: 0.8rem;
-  min-height: 1.2em;
+  font-size: 0.95rem;
+  min-height: 1.3em;
 }
 /* Number + pip: fixed-width number so pips always align vertically */
 body.theme-v2 .rate-line {
@@ -568,13 +568,13 @@ body.theme-v2 .rate-num {
   width: 2em;
   text-align: right;
   font-weight: 700;
-  font-size: 1rem;
+  font-size: 1.1rem;
 }
 body.theme-v2 .card-effect {
-  font-size: 0.72rem;
+  font-size: 0.82rem;
   color: var(--accent-violet);
   font-style: italic;
-  min-height: 1em;
+  min-height: 1.1em;
 }
 body.theme-v2 .card-bottom {
   font-size: 0.7rem;
@@ -650,8 +650,8 @@ body.theme-v2 .card-sell-row {
 }
 /* Sell pips: colored background circles like tracker/ruler dots */
 body.theme-v2 .card-sell-btn {
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   display: inline-flex;
   align-items: center;
@@ -681,13 +681,14 @@ body.theme-v2 .card-sell-btn.chosen {
   box-shadow: 0 0 8px rgba(255,255,255,0.3);
 }
 
-/* All cards: same fixed size, strict internal layout */
+/* All cards: playing-card proportions (~2.5:3.5 ratio) */
 body.theme-v2 .hand-card,
 body.theme-v2 .pool-card {
-  height: 220px;
-  width: 160px;
+  height: 280px;
+  width: 190px;
   display: flex;
   flex-direction: column;
+  font-size: 0.9rem;
 }
 
 /* Contracts: taller, reward big + centered, white text */
