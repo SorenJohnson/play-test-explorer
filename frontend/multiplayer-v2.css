@@ -151,8 +151,9 @@ body.theme-v2 .opponent-card .opponent-money {
 }
 
 body.theme-v2 .opponent-card.active-turn {
-  box-shadow: inset 0 0 16px rgba(88, 166, 255, 0.12);
+  background: color-mix(in srgb, var(--accent-blue) 15%, var(--bg-elevated)) !important;
   border-color: var(--accent-blue);
+  box-shadow: 0 0 8px rgba(88, 166, 255, 0.2);
 }
 
 body.theme-v2 .opponent-card.is-you {

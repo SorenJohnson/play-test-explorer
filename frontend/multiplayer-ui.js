@@ -454,18 +454,23 @@
     const poolRect = poolEl?.getBoundingClientRect();
     const handHtml = handEl?.innerHTML || "";
     const poolHtml = poolEl?.innerHTML || "";
-  
-    if (MP.role === "host") {
-      MP.game.human_pool_swap(parseInt(handIdx), parseInt(poolIdx));
-      MP.core.hostRefreshState();
-    } else {
-      MP.hostConn.send(JSON.stringify({type: "pool_swap", hand_idx: parseInt(handIdx), pool_idx: parseInt(poolIdx)}));
-    }
-  
-    // Cross-swap animation
+
+    // Start animation FIRST so the flying cards depart from the old positions
     if (handRect && poolRect) {
       MP.anim.animateCard(handRect, poolRect, handHtml);
       MP.anim.animateCard(poolRect, handRect, poolHtml);
+    }
+
+    // Delay the state refresh so the new cards don't appear at the
+    // destination before the animation arrives (~400ms flight time).
+    const ANIM_DELAY = 420;
+    if (MP.role === "host") {
+      MP.game.human_pool_swap(parseInt(handIdx), parseInt(poolIdx));
+      setTimeout(() => MP.core.hostRefreshState(), ANIM_DELAY);
+    } else {
+      setTimeout(() => {
+        MP.hostConn.send(JSON.stringify({type: "pool_swap", hand_idx: parseInt(handIdx), pool_idx: parseInt(poolIdx)}));
+      }, ANIM_DELAY);
     }
   }
   
