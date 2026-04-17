@@ -439,19 +439,35 @@ body.theme-v2 .hand-card {
   padding: 6px 8px;
 }
 
-/* Resource pip: fixed-size colored circle, same as ruler/tracker dots */
+/* Resource pip: base style, sized per context */
 body.theme-v2 .res-pip {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
   border-radius: 50%;
-  font-size: 0.4rem;
   font-weight: 900;
   line-height: 1;
   white-space: nowrap;
   vertical-align: middle;
+  /* Default size — overridden per section below */
+  width: 22px;
+  height: 22px;
+  font-size: 0.35rem;
+}
+
+/* Card costs + rates: compact inline pips */
+body.theme-v2 .card-costs .res-pip,
+body.theme-v2 .card-rates .res-pip {
+  width: 20px;
+  height: 20px;
+  font-size: 0.33rem;
+}
+
+/* Contract requirements: slightly larger */
+body.theme-v2 .contract-req-line .res-pip {
+  width: 24px;
+  height: 24px;
+  font-size: 0.38rem;
 }
 
 /* Card sections: fixed heights so all cards align identically */
