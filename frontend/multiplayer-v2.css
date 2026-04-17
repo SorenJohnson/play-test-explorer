@@ -59,9 +59,9 @@ body.theme-v2 .board-zone > section:first-child {
   background: color-mix(in srgb, var(--bg-board) 70%, var(--bg-canvas));
 }
 
-/* Ruler → col 3, spans same rows as contracts+pool, stretches to fill */
+/* Ruler → col 2 (left of contracts/pool), spans their rows */
 body.theme-v2 .board-zone > section:nth-child(2) {
-  grid-column: 3;
+  grid-column: 2;
   grid-row: 1 / 4;
   padding: 2px;
   align-self: stretch;
@@ -73,15 +73,15 @@ body.theme-v2 .board-zone > section:nth-child(2) .ruler-track {
   height: 100%;
 }
 
-/* Contracts → col 2 */
+/* Contracts → col 3 (right of ruler) */
 body.theme-v2 .board-zone > section:nth-child(3) {
-  grid-column: 2;
+  grid-column: 3;
   padding: 4px 8px;
 }
 
-/* Pool → col 2 */
+/* Pool → col 3 */
 body.theme-v2 .board-zone > section:nth-child(4) {
-  grid-column: 2;
+  grid-column: 3;
   padding: 4px 8px;
 }
 
