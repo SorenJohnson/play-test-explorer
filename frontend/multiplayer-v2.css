@@ -33,7 +33,7 @@ body.theme-v2 #game-screen {
 body.theme-v2 #game-layout {
   flex: 1;
   min-height: 0;
-  grid-template-columns: 1fr 200px;    /* board + feed sidebar on right       */
+  grid-template-columns: 1fr min(200px, 20vw);  /* feed scales with viewport */
 }
 
 /* game-area: 3-column grid — players | market | contracts+pool */
@@ -519,15 +519,15 @@ body.theme-v2 .res-pip {
   line-height: 1;
   white-space: nowrap;
   vertical-align: middle;
-  width: 22px;
-  height: 22px;
-  font-size: 0.35rem;
+  width: min(22px, 2.4vh);
+  height: min(22px, 2.4vh);
+  font-size: clamp(0.25rem, 0.5vh, 0.35rem);
 }
 body.theme-v2 .res-pip-rate {
-  border-radius: 4px;               /* square = rate                       */
+  border-radius: 4px;
 }
 body.theme-v2 .res-pip-long {
-  font-size: 0.38rem !important;    /* 4+ char names (FOOD) fit in the pip */
+  font-size: clamp(0.25rem, 0.45vh, 0.38rem) !important;
 }
 
 /* Card costs: scaled pips */
@@ -545,9 +545,9 @@ body.theme-v2 .card-rates .res-pip {
 
 /* Contract requirements: slightly larger */
 body.theme-v2 .contract-req-line .res-pip {
-  width: 24px;
-  height: 24px;
-  font-size: 0.5rem;
+  width: min(24px, 2.6vh);
+  height: min(24px, 2.6vh);
+  font-size: clamp(0.3rem, 0.6vh, 0.5rem);
 }
 
 /* Card sections: fixed heights so all cards align identically */
