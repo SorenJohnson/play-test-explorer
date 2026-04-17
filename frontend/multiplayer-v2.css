@@ -198,13 +198,13 @@ body.theme-v2 .board-zone > section:nth-child(2) > .section-title {
   display: none;           /* remove "Market (click cell...)" text       */
 }
 
-/* Market chips (resource prices) — vertical stack alongside ruler */
+/* Market chips (resource prices) — tight vertical stack, top-aligned */
 body.theme-v2 .market-grid {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 0;
   flex-shrink: 0;
-  justify-content: space-between;  /* fill vertical space evenly         */
+  align-self: flex-start;           /* top-aligned, not stretched          */
 }
 body.theme-v2 .market-cell {
   padding: 2px 4px;
@@ -234,7 +234,7 @@ body.theme-v2 .market-cell .res-price-wrap {
 /* Vertical ruler — tall, thin, rate-tracker style */
 body.theme-v2 .market-ruler {
   display: flex;
-  flex: 1;                          /* fill all remaining horizontal space */
+  flex: 0 0 50px;                   /* fixed narrow width                  */
   margin-top: 0;
   padding: 2px;
 }
@@ -248,14 +248,13 @@ body.theme-v2 .ruler-track {
 }
 
 body.theme-v2 .ruler-pip {
-  flex: 1;
+  flex: 1;                          /* stretch to fill vertical space      */
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: center;
   position: relative;
-  min-height: 0;
-  padding: 0 4px;
+  padding: 2px 4px;
   gap: 0;
   border-radius: 3px;
 }
