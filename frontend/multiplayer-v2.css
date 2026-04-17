@@ -285,7 +285,7 @@ body.theme-v2 .market-cell .res-price-wrap {
 /* Vertical ruler — tall, thin, rate-tracker style */
 body.theme-v2 .market-ruler {
   display: flex;
-  flex: 0 0 110px;                  /* wide enough for labeled dots        */
+  flex: 0 0 min(110px, 14vh);        /* scales with viewport                */
   margin-top: 0;
   padding: 2px;
 }
@@ -333,10 +333,10 @@ body.theme-v2 .ruler-dots-row {
   position: relative;
 }
 
-/* Ruler dots: bigger with bold readable resource labels */
+/* Ruler dots: scale with viewport */
 body.theme-v2 .ruler-res-dot {
-  width: 26px;
-  height: 26px;
+  width: min(26px, 2.8vh);
+  height: min(26px, 2.8vh);
   border-radius: 50%;
   opacity: 0.9;
   display: inline-flex;
@@ -348,24 +348,24 @@ body.theme-v2 .ruler-res-dot {
   line-height: 1;
 }
 body.theme-v2 .ruler-res-dot.selected {
-  width: 30px;
-  height: 30px;
+  width: min(30px, 3.2vh);
+  height: min(30px, 3.2vh);
   opacity: 1;
   box-shadow: 0 0 6px rgba(255,255,255,0.5);
   font-size: 0.48rem;
 }
 
-/* Rate tracker dots: squares (rates), bigger text */
+/* Rate tracker dots: scale with viewport */
 body.theme-v2 .rnl-dot {
-  width: 24px;
-  height: 24px;
-  font-size: 0.55rem;
+  width: min(24px, 2.6vh);
+  height: min(24px, 2.6vh);
+  font-size: clamp(0.35rem, 0.7vh, 0.55rem);
   border-radius: 4px;
 }
 
-/* Rate tracker: top track only (1-5 range) tall enough for 3 stacked pips */
+/* Rate tracker: top track tall enough for 3 stacked pips */
 body.theme-v2 .rnl-track:first-child .rnl-slot {
-  min-height: 80px;
+  min-height: min(80px, 9vh);
 }
 
 body.theme-v2 .ruler-pip.current {
