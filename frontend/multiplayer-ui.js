@@ -586,7 +586,9 @@
     // Returns full card HTML: costs → name → rates → effect → sell/contract
     const isV2 = document.body.classList.contains("theme-v2");
     const costs = (c.costs || []).map(r =>
-      isV2 ? resPip(r.resource).repeat(r.amount) : `${r.amount} ${r.resource}`
+      isV2
+        ? (r.amount > 4 ? `<span class="rate-num">${r.amount}</span>${resPip(r.resource)}` : resPip(r.resource).repeat(r.amount))
+        : `${r.amount} ${r.resource}`
     ).join(isV2 ? " " : ", ");
     const rates = (c.rates || []).map(r =>
       isV2
