@@ -190,6 +190,22 @@ body.theme-v2 #mp-your-stats {
 body.theme-v2 .player-stats-money {
   font-size: 0.78rem;
 }
+body.theme-v2 .player-stats-v2 {
+  font-size: 0.82rem;
+  line-height: 1.6;
+  color: var(--text-primary);
+  position: relative;
+}
+body.theme-v2 .player-stats-v2 strong {
+  font-weight: 700;
+}
+body.theme-v2 .player-nw-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  font-size: 1.1rem;
+  font-weight: 800;
+}
 body.theme-v2 .player-stats-buildings,
 body.theme-v2 .player-stats-specials {
   font-size: 0.7rem;

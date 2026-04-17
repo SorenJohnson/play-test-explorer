@@ -789,11 +789,22 @@
     const specialList = specials.map(c => `<span class="opp-special">${c.building}</span>`).join(" ");
     const patentList = patents.map(c => `<span class="opp-patent">${c.building}</span>`).join(" ");
   
+    const isV2 = document.body.classList.contains("theme-v2");
+    const moneyHtml = isV2
+      ? `<div class="player-stats-v2">
+          <div class="player-nw-badge" style="color:${me.net_worth >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'}">NW $${me.net_worth}</div>
+          <div>Cash: <strong>$${me.money}</strong></div>
+          ${me.debt > 0 ? `<div style="color:var(--accent-red)">Debt: <strong>$${me.debt}</strong></div>` : ''}
+          ${me.credit > 0 ? `<div style="color:var(--accent-yellow)">Credit: <strong>$${me.credit}</strong></div>` : ''}
+          <div>Contracts: <strong>${me.contracts_fulfilled || 0}</strong></div>
+        </div>`
+      : `<div class="player-stats-money">
+          Cash $${me.money}${me.debt > 0 ? ` | <span style="color:var(--accent-red)">Debt $${me.debt}</span>` : ''}${me.credit > 0 ? ` | <span style="color:var(--accent-yellow)">Credit $${me.credit}</span>` : ''} | ${me.contracts_fulfilled || 0} contracts
+        </div>`;
+
     panel.innerHTML = `
       <div class="player-stats">
-        <div class="player-stats-money">
-          Cash $${me.money}${me.debt > 0 ? ` | <span style="color:var(--accent-red)">Debt $${me.debt}</span>` : ''}${me.credit > 0 ? ` | <span style="color:var(--accent-yellow)">Credit $${me.credit}</span>` : ''} | ${me.contracts_fulfilled || 0} contracts
-        </div>
+        ${moneyHtml}
         <div class="player-rates-grid">${ratesGrid}</div>
         ${rateNumberLine}
         <div class="player-stats-buildings">${buildingList}</div>
