@@ -111,3 +111,38 @@ document.getElementById("btn-new-game").addEventListener("click", () => location
 document.getElementById("btn-review-game").addEventListener("click", () => {
   document.getElementById("endgame-overlay").style.display = "none";
 });
+
+// Auto-start: ?autostart skips the lobby and launches a game with all AI
+// opponents. Optionally ?autostart&theme=v2 also activates the new theme.
+// Useful for quick testing and Playwright automation.
+if (new URLSearchParams(location.search).has("autostart")) {
+  const params = new URLSearchParams(location.search);
+  const aiType = params.get("ai") || "smart";
+  // Apply theme if requested
+  if (params.get("theme") === "v2") {
+    document.body.classList.add("theme-v2");
+    document.getElementById("theme-toggle-btn").textContent = "Classic UI";
+  }
+  // Click Create, wait for PeerJS, set all seats to AI one at a time
+  // (renderSeatGrid replaces the DOM on each change, so we must re-query
+  // after each change event fires), then click Start.
+  document.getElementById("btn-create").click();
+  const _autoSetSeats = () => {
+    const rc = document.getElementById("room-code")?.textContent;
+    if (!rc || rc.length < 5) { setTimeout(_autoSetSeats, 200); return; }
+    // Find next human-remote seat that needs changing
+    const remoteIdx = MP.seatConfig.findIndex((s, i) => i > 0 && s.type === "human-remote");
+    if (remoteIdx >= 0) {
+      const sel = document.querySelector(`.seat-type-select[data-seat="${remoteIdx}"]`);
+      if (sel) {
+        sel.value = aiType;
+        sel.dispatchEvent(new Event("change"));
+      }
+      setTimeout(_autoSetSeats, 100);  // re-check after re-render
+    } else {
+      // All seats set to AI — start the game
+      setTimeout(() => document.getElementById("btn-start").click(), 100);
+    }
+  };
+  _autoSetSeats();
+}
