@@ -377,6 +377,51 @@ body.theme-v2 .ruler-pip.current .ruler-price {
   color: var(--text-primary);
 }
 
+/* Grouped ruler: price sections with subsections */
+body.theme-v2 .ruler-group {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  flex: 1;
+  border: 1px solid rgba(255,255,255,0.05);
+  border-radius: 3px;
+  position: relative;
+  min-height: 0;
+}
+body.theme-v2 .ruler-group.has-selected {
+  border-color: rgba(255,255,255,0.15);
+}
+body.theme-v2 .ruler-group-label {
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 1.4rem;
+  font-weight: 900;
+  color: var(--text-muted);
+  opacity: 0.3;
+  z-index: 0;
+  pointer-events: none;
+}
+body.theme-v2 .ruler-group-slots {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  z-index: 1;
+}
+body.theme-v2 .ruler-sub {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 2px;
+  padding: 1px 3px;
+  min-height: 20px;
+}
+body.theme-v2 .ruler-sub.current {
+  background: rgba(255,255,255,0.06);
+}
+
 /* ============================================================
    EVENT DECK — card-like, above contracts
    ============================================================ */

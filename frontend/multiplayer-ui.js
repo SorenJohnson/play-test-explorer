@@ -172,24 +172,58 @@
       resourcesAtPos[pos].push(r);
     }
   
-    ruler.innerHTML = `
-      <div class="ruler-track">
-        ${PRICE_TRACK.map((p, i) => {
-          const isCurrent = i === selectedPos;
-          const resHere = resourcesAtPos[i] || [];
-          const isV2 = document.body.classList.contains("theme-v2");
-          const dots = resHere.map(r => {
-            const isSelected = r === selectedRes;
-            const label = isV2 ? r : '';
-            return `<span class="ruler-res-dot ${isSelected ? 'selected' : ''}" style="background:${RESOURCE_COLORS[r]};color:${MP.pipTextColor(r)}" title="${r}">${label}</span>`;
-          }).join("");
-          return `<span class="ruler-pip ${isCurrent ? 'current' : ''}" style="${isCurrent ? 'border-color:' + selectedColor : ''}">
-            <span class="ruler-dots-row">${dots}</span>
-            <span class="ruler-price">$${p}</span>
-          </span>`;
-        }).join("")}
-      </div>
-    `;
+    const isV2 = document.body.classList.contains("theme-v2");
+
+    if (isV2) {
+      // Group positions by price into parent sections
+      const groups = [];
+      let cur = null;
+      PRICE_TRACK.forEach((p, i) => {
+        if (!cur || cur.price !== p) {
+          cur = {price: p, positions: []};
+          groups.push(cur);
+        }
+        cur.positions.push(i);
+      });
+
+      ruler.innerHTML = `
+        <div class="ruler-track">
+          ${groups.map(g => {
+            const subSlots = g.positions.map(i => {
+              const isCurrent = i === selectedPos;
+              const resHere = resourcesAtPos[i] || [];
+              const dots = resHere.map(r => {
+                const isSelected = r === selectedRes;
+                return `<span class="ruler-res-dot ${isSelected ? 'selected' : ''}" style="background:${RESOURCE_COLORS[r]};color:${MP.pipTextColor(r)}" title="${r}">${r}</span>`;
+              }).join("");
+              return `<div class="ruler-sub ${isCurrent ? 'current' : ''}">${dots}</div>`;
+            }).join("");
+            const hasSelected = g.positions.includes(selectedPos);
+            return `<div class="ruler-group ${hasSelected ? 'has-selected' : ''}">
+              <div class="ruler-group-label">$${g.price}</div>
+              <div class="ruler-group-slots">${subSlots}</div>
+            </div>`;
+          }).join("")}
+        </div>
+      `;
+    } else {
+      ruler.innerHTML = `
+        <div class="ruler-track">
+          ${PRICE_TRACK.map((p, i) => {
+            const isCurrent = i === selectedPos;
+            const resHere = resourcesAtPos[i] || [];
+            const dots = resHere.map(r => {
+              const isSelected = r === selectedRes;
+              return `<span class="ruler-res-dot ${isSelected ? 'selected' : ''}" style="background:${RESOURCE_COLORS[r]}" title="${r}"></span>`;
+            }).join("");
+            return `<span class="ruler-pip ${isCurrent ? 'current' : ''}" style="${isCurrent ? 'border-color:' + selectedColor : ''}">
+              <span class="ruler-dots-row">${dots}</span>
+              <span class="ruler-price">$${p}</span>
+            </span>`;
+          }).join("")}
+        </div>
+      `;
+    }
   }
   
   function renderMarketChart(s) {
