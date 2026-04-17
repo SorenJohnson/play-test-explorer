@@ -199,8 +199,9 @@
               return `<div class="ruler-sub ${isCurrent ? 'current' : ''}">${dots}</div>`;
             }).join("");
             const hasSelected = g.positions.includes(selectedPos);
+            const labelSize = 1.2 + (g.positions.length * 0.6);
             return `<div class="ruler-group ${hasSelected ? 'has-selected' : ''}" style="flex:${g.positions.length}">
-              <div class="ruler-group-label">$${g.price}</div>
+              <div class="ruler-group-label" style="font-size:${labelSize}rem">$${g.price}</div>
               <div class="ruler-group-slots">${subSlots}</div>
             </div>`;
           }).join("")}

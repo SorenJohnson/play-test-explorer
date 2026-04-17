@@ -380,9 +380,9 @@ body.theme-v2 .ruler-pip.current .ruler-price {
 /* Grouped ruler: price sections with subsections */
 body.theme-v2 .ruler-group {
   position: relative;
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 3px;
-  margin-bottom: 1px;
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 4px;
+  margin-bottom: 2px;
   overflow: hidden;
 }
 body.theme-v2 .ruler-group.has-selected {
@@ -420,10 +420,13 @@ body.theme-v2 .ruler-sub {
   min-height: 26px;
 }
 body.theme-v2 .ruler-sub + .ruler-sub {
-  border-top: 1px dashed rgba(255,255,255,0.06);
+  border-top: 1px solid rgba(255,255,255,0.12);
+}
+body.theme-v2 .ruler-sub:nth-child(odd) {
+  background: rgba(255,255,255,0.03);
 }
 body.theme-v2 .ruler-sub.current {
-  background: rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.1);
 }
 
 /* ============================================================
