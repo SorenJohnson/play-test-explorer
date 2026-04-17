@@ -200,13 +200,12 @@ body.theme-v2 .board-zone > section:nth-child(2) > .section-title {
   display: none;
 }
 
-/* Market chips (resource prices) — tight vertical stack, top-aligned */
+/* Market chips (resource prices) — vertical stack, fill ruler height */
 body.theme-v2 .market-grid {
   display: flex;
   flex-direction: column;
   gap: 0;
   flex-shrink: 0;
-  align-self: flex-start;           /* top-aligned, not stretched          */
 }
 body.theme-v2 .market-cell {
   padding: 2px 4px;
@@ -215,6 +214,7 @@ body.theme-v2 .market-cell {
   align-items: center;
   gap: 3px;
   border-radius: 3px;
+  flex: 1;                          /* fill same vertical space as ruler   */
 }
 body.theme-v2 .market-cell .res-name {
   font-size: 0.6rem;
@@ -236,7 +236,7 @@ body.theme-v2 .market-cell .res-price-wrap {
 /* Vertical ruler — tall, thin, rate-tracker style */
 body.theme-v2 .market-ruler {
   display: flex;
-  flex: 0 0 50px;                   /* fixed narrow width                  */
+  flex: 0 0 70px;                   /* slightly wider for readability      */
   margin-top: 0;
   padding: 2px;
 }
@@ -354,10 +354,16 @@ body.theme-v2 .pool-card {
   font-size: 0.72rem;
 }
 
-/* Contracts: subtle warm accent */
+/* Contracts: single row, compact */
+body.theme-v2 .contracts-grid {
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 4px;
+}
 body.theme-v2 .contract-card {
   background: var(--bg-card);
   border-left: 2px solid var(--contract-border);
+  padding: 4px 6px;
+  font-size: 0.7rem;
 }
 body.theme-v2 .contract-card.selected {
   border-color: var(--accent-blue);
