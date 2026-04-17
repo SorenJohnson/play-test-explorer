@@ -82,15 +82,16 @@ body.theme-v2 .board-zone > section:nth-child(4) {
   overflow-y: auto;
 }
 
-/* Player zone → right column, below pool (rate tracker + hand + actions together) */
+/* Player zone → right column, below pool with breathing room */
 body.theme-v2 .player-zone {
   grid-column: 3;
   grid-row: 3;
   background: var(--bg-player-mat);
-  border-top: 1px solid rgba(88, 166, 255, 0.15);
-  margin-top: 0;
-  padding: 6px 8px;
+  border-top: 2px solid rgba(88, 166, 255, 0.2);
+  margin-top: 12px;
+  padding: 8px;
   overflow-y: auto;
+  border-radius: 6px;
 }
 
 body.theme-v2 #event-feed {
@@ -105,11 +106,11 @@ body.theme-v2 #event-feed {
 
 body.theme-v2 .section-title {
   text-transform: uppercase;
-  font-size: 0.6rem;
-  letter-spacing: 0.1em;
-  color: var(--text-dim);
-  margin-bottom: 6px;
-  font-weight: 600;
+  font-size: 0.8rem;
+  letter-spacing: 0.12em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  font-weight: 700;
 }
 
 
@@ -157,6 +158,16 @@ body.theme-v2 .opponent-card.is-you {
   border-color: rgba(88, 166, 255, 0.3);
 }
 
+/* Player stats: clear rows, readable font */
+body.theme-v2 .opponent-stats-v2 {
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+body.theme-v2 .opponent-stats-v2 strong {
+  font-weight: 700;
+}
+
 /* Turn indicator dot */
 body.theme-v2 .turn-dot {
   color: var(--accent-green);
@@ -184,16 +195,17 @@ body.theme-v2 .player-stats-specials {
   font-size: 0.7rem;
 }
 
-/* Opponent rate chips: non-zero only, compact */
+/* Opponent rate chips: non-zero only, readable size */
 body.theme-v2 .opponent-rates-grid {
   display: flex;
   flex-wrap: wrap;
-  gap: 2px;
+  gap: 3px;
+  margin-top: 3px;
 }
 body.theme-v2 .opponent-rates-grid .rate-chip.sm {
-  padding: 1px 3px;
-  font-size: 0.55rem;
-  border-radius: 2px;
+  padding: 2px 5px;
+  font-size: 0.68rem;
+  border-radius: 3px;
 }
 
 /* Hide building lists in opponents to keep them compact */
@@ -339,6 +351,40 @@ body.theme-v2 .ruler-pip.current .ruler-price {
   opacity: 0.6;
   color: var(--text-primary);
 }
+
+/* ============================================================
+   EVENT DECK — card-like, above contracts
+   ============================================================ */
+
+body.theme-v2 #event-deck-area {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  align-items: stretch;
+}
+
+body.theme-v2 .event-card-back {
+  min-width: 60px;
+  min-height: 80px;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+}
+
+body.theme-v2 .event-card-face {
+  min-width: 100px;
+  min-height: 80px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  padding: 6px;
+}
+
 
 /* Hide market chart + market chips in v2 */
 body.theme-v2 #market-chart-wrap {

@@ -64,8 +64,18 @@
     renderOpponents(s);
     MP.anim.renderDeckViewer();
 
-    // (V2: player zone stays together — rate tracker + hand + actions
-    // are never separated. CSS grid places the whole unit in col 3.)
+    // V2: move the event deck area from the status bar to above
+    // the contracts section so it looks like a card deck on the board.
+    const deckArea = document.getElementById("event-deck-area");
+    const contractsSection = document.querySelector(".board-zone > section:nth-child(3)");
+    const statusBar = document.getElementById("status-bar");
+    if (deckArea && document.body.classList.contains("theme-v2")) {
+      if (contractsSection && deckArea.parentElement !== contractsSection) {
+        contractsSection.insertBefore(deckArea, contractsSection.firstChild);
+      }
+    } else if (deckArea && statusBar && deckArea.parentElement !== statusBar) {
+      statusBar.appendChild(deckArea);
+    }
   }
   
   const PRICE_TRACK = [1,1,1,2,2,2,3,3,4,4,5,5,6,7,8,9,10];
@@ -839,9 +849,17 @@
             <span class="opponent-name" style="color:${color}">${turnIndicator}${p.name}${aiTag}${youTag}</span>
             <span class="opponent-nw" style="color:${p.net_worth >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'}">NW $${p.net_worth}</span>
           </div>
-          <div class="opponent-money">
-            $${p.money}${p.debt > 0 ? ` | <span style="color:var(--accent-red)">D$${p.debt}</span>` : ''} | ${p.contracts_fulfilled || 0}C
-          </div>
+          ${isV2 ? `
+            <div class="opponent-stats-v2">
+              <div>Cash: <strong>$${p.money}</strong></div>
+              ${p.debt > 0 ? `<div style="color:var(--accent-red)">Debt: <strong>$${p.debt}</strong></div>` : ''}
+              <div>Contracts: <strong>${p.contracts_fulfilled || 0}</strong></div>
+            </div>
+          ` : `
+            <div class="opponent-money">
+              $${p.money}${p.debt > 0 ? ` | <span style="color:var(--accent-red)">Debt $${p.debt}</span>` : ''} | ${p.contracts_fulfilled || 0} contracts
+            </div>
+          `}
           <div class="opponent-rates-grid">${ratesGrid}</div>
           <div class="opponent-buildings">${buildingList}</div>
           ${specialList ? `<div class="opponent-specials">${specialList}</div>` : ''}
