@@ -36,22 +36,22 @@ body.theme-v2 #game-layout {
   grid-template-columns: 1fr min(200px, 20vw);
   grid-template-rows: 1fr;
 }
+/* game-area: flex column so board + player zone both shrink */
 body.theme-v2 #game-area {
+  display: flex;
+  flex-direction: column;
   height: 100%;
+  overflow: hidden;
 }
 
-/* game-area: 3-column grid — players | market | contracts+pool */
-body.theme-v2 #game-area {
+/* board-zone: 3-column grid, shrinks with flex */
+body.theme-v2 .board-zone {
   display: grid;
   grid-template-columns: min(200px, 20vw) min(130px, 14vw) 1fr;
-  grid-template-rows: 1fr 1fr 1fr 2fr;        /* all rows share space, all shrink   */
+  grid-template-rows: 1fr;
+  flex: 3;
+  min-height: 0;
   overflow: hidden;
-  gap: 0;
-}
-
-/* board-zone children become direct grid children */
-body.theme-v2 .board-zone {
-  display: contents;
 }
 
 /* Players → narrow left column */
@@ -98,16 +98,16 @@ body.theme-v2 .board-zone > section:nth-child(4) {
   min-height: 0;
 }
 
-/* Player zone → spans cols 2-3, below the board */
+/* Player zone → below the board, shrinks with flex */
 body.theme-v2 .player-zone {
-  grid-column: 2 / 4;
+  flex: 2;
+  min-height: 0;
   background: var(--bg-player-mat);
   border-top: 2px solid rgba(88, 166, 255, 0.2);
   margin-top: 12px;
   padding: 8px;
   overflow: hidden;
   border-radius: 6px;
-  min-height: 0;                     /* allow shrinking below content       */
 }
 
 body.theme-v2 #event-feed {
