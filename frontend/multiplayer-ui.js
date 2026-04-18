@@ -701,6 +701,11 @@
       const selCard = selCardIdx >= 0 ? (s.players[MP.mySeat]?.hand || [])[selCardIdx] : null;
       const canSellV2 = myTurn && intent === "sell" && selCard?.can_sell?.length > 0 && cr >= 1;
       const isContractCard = selCard?.can_fulfill_contract && !(selCard?.can_sell?.length > 0);
+      // Launch Pad path: free contract that bypasses cards_remaining. Available
+      // when LP is owned, unused this turn, a contract is selected, and no
+      // hand card is in the picture (no card means use LP).
+      const lpAvail = MP.currentLegal?.launch_pad_status?.available;
+      const canLPContract = myTurn && lpAvail && MP.selectedContract >= 0 && !MP.selectedCards.size;
 
       if (intent === "sell" && isContractCard && MP.selectedContract >= 0) {
         buildBtn.textContent = "Contract";
@@ -713,6 +718,9 @@
         buildBtn.disabled = false;
       } else if (intent === "build" && canBuild) {
         buildBtn.textContent = "Build";
+        buildBtn.disabled = false;
+      } else if (canLPContract) {
+        buildBtn.textContent = "Contract (LP)";
         buildBtn.disabled = false;
       } else if (!intent && !MP.selectedCards.size) {
         buildBtn.textContent = "Select a card";
@@ -1607,10 +1615,31 @@
     });
   
     document.getElementById("mp-build-btn").addEventListener("click", () => {
+      const isV2 = document.body.classList.contains("theme-v2");
+
+      // V2 Launch Pad path: contract selected, no card selected, LP available.
+      // Free contract that doesn't spend an action — works even when the
+      // player has already used both AP for the turn.
+      if (isV2 && MP.selectedCards.size === 0 && MP.selectedContract >= 0
+          && MP.currentLegal?.launch_pad_status?.available) {
+        const action = {type: "contract", contract_idx: MP.selectedContract, use_launch_pad: true};
+        const seTargetEl = document.getElementById("se-target");
+        if (seTargetEl?.value) action.elevator_target = seTargetEl.value;
+        const contractForAnim = MP.currentState?.available_contracts?.[MP.selectedContract];
+        clearSelection();
+        const ok = sendAction(action);
+        if (ok && contractForAnim) {
+          // Animate reward popup near the player panel.
+          const youEl = document.querySelector("#mp-opponents .opponent-card.is-you");
+          const rect = youEl?.getBoundingClientRect();
+          if (rect) MP.anim.animateReward(rect, `+$${contractForAnim.reward}`);
+        }
+        return;
+      }
+
       if (MP.selectedCards.size === 0) return;
 
       // V2: dispatch sell or contract based on intent
-      const isV2 = document.body.classList.contains("theme-v2");
       if (isV2 && MP._v2CardIntent === "sell") {
         if (MP.selectedCards.size !== 1) return;
         const cardIdx = Number([...MP.selectedCards][0]);
