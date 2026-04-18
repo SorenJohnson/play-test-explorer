@@ -1001,8 +1001,11 @@
       const abs = Math.abs(e.val);
       const neg = e.val < 0;
       const ones = abs <= 5 ? abs : abs % 5;
-      const fives = Math.floor(abs / 5);
-  
+      // The fives row only kicks in starting at |val|=6. At exactly ±5 the
+      // value lives entirely in the ones row (pip at ±5); a fives pip at
+      // ±5 here would visually read as ±10.
+      const fives = abs <= 5 ? 0 : Math.floor(abs / 5);
+
       let onesSlot = 5;
       if (ones > 0) onesSlot = neg ? 5 - ones : 5 + ones;
       onesSlots[onesSlot].push(e);
