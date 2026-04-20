@@ -76,6 +76,21 @@ body {
 .lobby-btn.primary:hover { background: var(--brand-green-hover); }
 .lobby-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+.lobby-options {
+  margin: 12px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.lobby-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
 .room-code {
   font-size: 2rem;
   font-weight: bold;
@@ -682,15 +697,15 @@ body {
   z-index: 1;
 }
 
-/* ===== Modals ===== */
+/* ===== Modals (non-blocking + draggable; same pattern as .draft-panel) ===== */
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.7);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 100;
+  pointer-events: none; /* board stays interactive behind the modal */
 }
 .modal-box {
   background: var(--bg-elevated);
@@ -699,9 +714,17 @@ body {
   padding: 24px;
   max-width: 500px;
   width: 90%;
+  pointer-events: auto;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 .modal-box.wide { max-width: 700px; }
-.modal-box h2 { margin-top: 0; color: var(--accent-blue); }
+.modal-box h2 {
+  margin-top: 0;
+  color: var(--accent-blue);
+  cursor: move;
+  user-select: none;
+}
+.modal-overlay.dragging .modal-box { opacity: 0.9; }
 
 .prompt-row {
   display: flex;
@@ -1026,4 +1049,98 @@ details.feed-group > summary.feed-group-title::-webkit-details-marker { color: v
     max-height: 300px;
     position: static;
   }
+}
+
+/* ===== Corporation draft (floating draggable card) ===== */
+/* Non-blocking: the board behind stays visible + interactive, so players
+   can check the market / their hand while picking. Drag the title bar
+   to reposition the card. */
+.draft-panel {
+  position: fixed;
+  top: 70px;
+  left: 16px;
+  z-index: 200;
+  max-width: 420px;
+  pointer-events: none; /* overlay doesn't block; card below re-enables */
+}
+.draft-panel .draft-card {
+  pointer-events: auto;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.draft-panel .draft-title {
+  margin: 0 0 12px 0;
+  text-align: center;
+  color: var(--brand-green);
+  cursor: move;
+  user-select: none;
+}
+.draft-panel.dragging .draft-card {
+  opacity: 0.9;
+}
+.draft-panel .draft-headline {
+  text-align: center;
+  margin-bottom: 16px;
+  color: var(--text-primary);
+  font-size: 1.05rem;
+}
+.draft-panel .draft-pool {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: center;
+  max-width: 860px;
+  margin: 0 auto;
+}
+.draft-panel .draft-corp {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.draft-panel .draft-corp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.draft-panel .draft-corp-name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.draft-panel .draft-corp-rates {
+  font-size: 0.85rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.draft-panel .draft-history {
+  margin-top: 18px;
+  max-width: 860px;
+  margin-left: auto;
+  margin-right: auto;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  font-size: 0.88rem;
+}
+.draft-panel .draft-history-title {
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.draft-panel .draft-pick-row {
+  color: var(--text-primary);
+  padding: 2px 0;
+}
+.draft-panel .draft-card {
+  background: var(--bg-canvas);
+  padding: 24px 28px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  max-width: 920px;
+  width: 100%;
+  max-height: 85vh;
+  overflow-y: auto;
 }

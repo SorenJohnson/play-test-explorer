@@ -77,11 +77,12 @@
 
     prog.textContent = "Creating game...";
     const seed = Math.floor(Math.random() * 100000);
+    const corpMode = document.getElementById("opt-corp-draft")?.checked ? "draft" : "random";
     const createCode = `
 from my_project.play_adapter import PlayableGame
 _seats = ${JSON.stringify(seats)}
 _names = ${JSON.stringify(names)}
-game = PlayableGame(seed=${seed}, seats=_seats, names=_names)
+game = PlayableGame(seed=${seed}, seats=_seats, names=_names, corporation_assignment="${corpMode}")
 game
 `;
     MP.game = MP.pyodide.runPython(createCode);
@@ -105,16 +106,27 @@ game
 
     showGameScreen();
 
-    // Kickoff feed entry with game setup info
-    const initState = MP.game.state_dict().toJs({dict_converter: Object.fromEntries});
-    const setupLines = initState.players.map((p, i) => {
+    // Kickoff feed entry with game setup info. In draft mode we wait
+    // until the draft completes so the summary shows the picked corps
+    // and their starting rates — otherwise it would render empty rates.
+    if (MP.game.is_draft_active()) {
+      hostAdvanceDraft();
+    } else {
+      broadcastGameKickoff();
+      hostAdvanceGame();
+    }
+  }
+
+  function broadcastGameKickoff() {
+    const state = MP.game.state_dict().toJs({dict_converter: Object.fromEntries});
+    const setupLines = state.players.map(p => {
       const rates = RESOURCE_ORDER.map(r => {
         const v = p.rates?.[r] || 0;
         return v !== 0 ? `${v > 0 ? "+" : ""}${v}${r}` : null;
       }).filter(Boolean).join(" ");
       return `${p.name}${p.corporation ? " (" + p.corporation + ")" : ""}: ${rates || "no rates"}`;
     }).join("\n");
-    const marketLine = RESOURCE_ORDER.map(r => `${r}=$${initState.market[r]}`).join(" ");
+    const marketLine = RESOURCE_ORDER.map(r => `${r}=$${state.market[r]}`).join(" ");
     const kickoff = {
       kind: "turn-start",
       text: "Game started!",
@@ -122,8 +134,6 @@ game
     };
     addFeedEntry(kickoff);
     MP.network.broadcastFeed(kickoff);
-
-    hostAdvanceGame();
   }
 
   function showGameScreen() {
@@ -154,6 +164,81 @@ game
 
   function hostAdvanceGame() {
     hostAdvanceStep();
+  }
+
+  // ===== Host: Corporation Draft =====
+
+  const AI_DRAFT_DELAY = 500; // ms between AI draft picks
+
+  function hostAdvanceDraft() {
+    if (!MP.game.is_draft_active()) {
+      // Draft just finished — emit the kickoff summary (now that corps
+      // are assigned) and kick off the real game loop.
+      hostRefreshState();
+      broadcastGameKickoff();
+      hostAdvanceGame();
+      return;
+    }
+    const picker = MP.game.current_draft_picker();
+    const humans = MP.currentState?.human_indices || [];
+    // Always refresh first so the UI sees the latest draft state.
+    hostRefreshState();
+    if (humans.includes(picker)) {
+      // Human seat (could be host or remote). Wait for a click / network msg.
+      return;
+    }
+    // AI seat picks after a short delay so the UI can show who's picking.
+    setTimeout(() => {
+      const result = MP.game.step_draft_ai().toJs({dict_converter: Object.fromEntries});
+      if (result?.ok) {
+        const name = MP.currentState?.players[result.seat]?.name || `Seat ${result.seat}`;
+        const entry = {
+          kind: "free-action",
+          text: `${name} drafts ${result.corp}`,
+        };
+        addFeedEntry(entry);
+        MP.network.broadcastFeed(entry);
+      }
+      hostAdvanceDraft();
+    }, AI_DRAFT_DELAY);
+  }
+
+  function handleHostDraftPick(corpName) {
+    if (!MP.game.is_draft_active()) return;
+    const picker = MP.game.current_draft_picker();
+    if (picker !== MP.mySeat) return;
+    const result = MP.game.submit_draft_pick(MP.mySeat, corpName).toJs({dict_converter: Object.fromEntries});
+    if (!result?.ok) {
+      alert(result?.reason || "Draft pick failed");
+      hostRefreshState();
+      return;
+    }
+    const name = MP.currentState?.players[MP.mySeat]?.name || "You";
+    const entry = {kind: "free-action", text: `${name} drafts ${result.corp}`};
+    addFeedEntry(entry);
+    MP.network.broadcastFeed(entry);
+    hostAdvanceDraft();
+  }
+
+  function handleRemoteDraftPick(peerId, msg) {
+    const seatIdx = MP.clientSeats[peerId];
+    if (seatIdx === undefined) return;
+    if (!MP.game.is_draft_active()) return;
+    if (MP.game.current_draft_picker() !== seatIdx) return;
+    const result = MP.game.submit_draft_pick(seatIdx, msg.corp).toJs({dict_converter: Object.fromEntries});
+    if (!result?.ok) {
+      // Tell the client so they see an error instead of a hang.
+      const conn = MP.connections[peerId];
+      if (conn) {
+        conn.send(JSON.stringify({type: "action_result", ok: false, reason: result?.reason || "Draft pick rejected"}));
+      }
+      return;
+    }
+    const name = MP.currentState?.players[seatIdx]?.name || `Seat ${seatIdx}`;
+    const entry = {kind: "free-action", text: `${name} drafts ${result.corp}`};
+    addFeedEntry(entry);
+    MP.network.broadcastFeed(entry);
+    hostAdvanceDraft();
   }
 
   function hostAdvanceStep() {
@@ -542,6 +627,9 @@ game
     hostRefreshState,
     hostAdvanceGame,
     hostAdvanceStep,
+    hostAdvanceDraft,
+    handleHostDraftPick,
+    handleRemoteDraftPick,
     handleHostPrompt,
     handleRemoteAction,
     handleRemoteEndTurn,

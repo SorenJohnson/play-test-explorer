@@ -71,6 +71,37 @@ def _load_corporations(data_dir: Path | None = None) -> list[tuple[str, dict[str
     return parse_corporations(data_dir / "Corporations.csv")
 
 
+def apply_corporation(
+    player: "Player",
+    corp_name: str,
+    corp_rates: dict[str, int],
+    log: "GameLog | None" = None,
+    player_idx: int = -1,
+) -> None:
+    """Assign a corporation's starting rates to a player.
+
+    Used by both the random-assignment path in GameState.create and the
+    draft path in PlayableGame.submit_draft_pick, so both routes write
+    the same four pieces of state (corporation name, starting_rates
+    snapshot, live rates, ledger rate) in lockstep.
+
+    When `log` is supplied, wraps the writes in a "corp_assigned" log
+    entry so the draft picks show up as mutations in the action log.
+    """
+    if log is not None:
+        log.begin("corp_assigned", player.name, player_idx, f"{corp_name}")
+    player.corporation = corp_name
+    player.starting_rates = dict(corp_rates)
+    for r_str, v in corp_rates.items():
+        res = Resource(r_str)
+        player.rates[res] = v
+        # Sync to ledger so contract/build cost tracking is consistent.
+        # Starting rates have zero cost basis (free from corporation).
+        player.ledger.accounts[res].rate = v
+    if log is not None:
+        log.end()
+
+
 @dataclass
 class Market:
     """Tracks price position (index into PRICE_TRACK) for each resource."""
@@ -787,6 +818,7 @@ class GameState:
         news_deck: list[NewsCard] | None = None,
         patent_pile: list[Card] | None = None,
         num_rounds: int = 1,
+        skip_corporations: bool = False,
     ) -> GameState:
         market = Market.create(start_market_pos)
 
@@ -829,8 +861,12 @@ class GameState:
             random.shuffle(patent_pile)
 
         # Create players. Assign unique corporations randomly (capped at # of corps).
-        corp_pool = list(_load_corporations())
-        random.shuffle(corp_pool)
+        # When skip_corporations is True (draft mode), leave corp/rates empty;
+        # PlayableGame will apply them via apply_corporation() as picks come in.
+        corp_pool: list[tuple[str, dict[str, int]]] = []
+        if not skip_corporations:
+            corp_pool = list(_load_corporations())
+            random.shuffle(corp_pool)
         players = []
         for i in range(num_players):
             p = Player(name=f"Player_{i+1}", money=start_money)
@@ -841,14 +877,7 @@ class GameState:
                     p.rates[r] = v
             elif i < len(corp_pool):
                 corp_name, corp_rates = corp_pool[i]
-                p.corporation = corp_name
-                p.starting_rates = dict(corp_rates)
-                for r_str, v in corp_rates.items():
-                    res = Resource(r_str)
-                    p.rates[res] = v
-                    # Sync to ledger so contract/build cost tracking is consistent.
-                    # Starting rates have zero cost basis (free from corporation).
-                    p.ledger.accounts[res].rate = v
+                apply_corporation(p, corp_name, corp_rates)
 
             hand = deck.draw(p.hand_size)
             p.hand = hand

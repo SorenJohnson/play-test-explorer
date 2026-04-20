@@ -21,7 +21,12 @@
   
   function isMyTurn(s) {
     s = s || MP.currentState;
-    return s && s.current_player_index === MP.mySeat && !s.is_over;
+    if (!s || s.is_over) return false;
+    // During the corporation draft the "active seat" is the drafter, not a
+    // regular-turn seat — action buttons / hand interactions must stay
+    // disabled for everyone until the draft completes.
+    if (s.draft_state && !s.draft_state.is_complete) return false;
+    return s.current_player_index === MP.mySeat;
   }
   
   function renderGame() {
@@ -62,6 +67,7 @@
     renderActions(s);
     renderPlayerPanel(s);
     renderOpponents(s);
+    renderDraftPanel(s);
     MP.anim.renderDeckViewer();
 
     // V2: DOM relocations
@@ -83,6 +89,160 @@
     }
   }
   
+  // ===== Draggable popups =====
+
+  // Make `host` draggable by its `handle` element. The host becomes
+  // position:fixed at its first-paint coordinates so the drag can shift
+  // it in pixel space. `onDrag` (optional) is called with {left, top}
+  // as drag progresses so callers can persist the position across
+  // re-renders. Window listeners are scoped to the live drag so they
+  // don't accumulate on repeated installs.
+  function makeDraggable(host, handle, onDrag) {
+    if (!host || !handle) return;
+    handle.addEventListener("mousedown", e => {
+      const rect = host.getBoundingClientRect();
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const startLeft = rect.left;
+      const startTop = rect.top;
+      // Switch from whatever positioning was inherited (flex-centered,
+      // etc.) to pixel coords we control for the rest of the drag.
+      host.style.position = "fixed";
+      host.style.left = startLeft + "px";
+      host.style.top = startTop + "px";
+      host.style.transform = "none";
+      host.classList.add("dragging");
+      e.preventDefault();
+      const onMove = (ev) => {
+        const newLeft = Math.max(0, startLeft + (ev.clientX - startX));
+        const newTop = Math.max(0, startTop + (ev.clientY - startY));
+        host.style.left = newLeft + "px";
+        host.style.top = newTop + "px";
+        if (onDrag) onDrag({left: newLeft, top: newTop});
+      };
+      const onUp = () => {
+        host.classList.remove("dragging");
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    });
+  }
+
+  // ===== Corporation draft =====
+
+  // Persist drag offset across re-renders — renderDraftPanel rewrites
+  // innerHTML on every state refresh, so the element + its position
+  // would otherwise reset every tick.
+  let _draftDragOffset = null;  // {left: px, top: px} or null
+
+  function _installDraftDrag(host) {
+    const title = host.querySelector(".draft-title");
+    makeDraggable(host, title, pos => { _draftDragOffset = pos; });
+  }
+
+  // Install drag on a .modal-overlay by its inner .modal-box h2 title.
+  // Called on every modal-open so freshly-rewritten content gets the
+  // handler attached. Resets position on each open so the modal re-
+  // centers in the flex layout instead of stacking at a stale drag offset.
+  function _installModalDrag(overlayId) {
+    const overlay = document.getElementById(overlayId);
+    if (!overlay) return;
+    const box = overlay.querySelector(".modal-box");
+    if (!box) return;
+    const title = box.querySelector("h2");
+    // Clear any stale pixel-coord positioning so flex-centering kicks in
+    // again on the new open.
+    box.style.position = "";
+    box.style.left = "";
+    box.style.top = "";
+    box.style.transform = "";
+    makeDraggable(box, title);
+  }
+
+  function renderDraftPanel(s) {
+    const host = document.getElementById("mp-draft-panel");
+    const d = s.draft_state;
+    if (!host) return;
+    if (!d || d.is_complete) {
+      host.style.display = "none";
+      host.innerHTML = "";
+      _draftDragOffset = null;
+      return;
+    }
+
+    const picker = d.current_picker;
+    const picks = d.picks || {};
+    const myPick = picker === MP.mySeat;
+    const pickerName = s.players?.[picker]?.name || `Seat ${picker}`;
+
+    // Pick history — order by the reverse-turn pick_order so players can
+    // see the sequence as it unfolds.
+    const history = (d.pick_order || [])
+      .filter(seat => picks[seat])
+      .map(seat => {
+        const name = s.players?.[seat]?.name || `Seat ${seat}`;
+        return `<div class="draft-pick-row"><strong>${name}</strong> — ${picks[seat]}</div>`;
+      }).join("");
+
+    // Available corporations — show name + starting rates. Button enabled
+    // only when it's this client's turn to pick.
+    const formatRates = (rates) => {
+      const entries = Object.entries(rates || {}).filter(([, v]) => v !== 0);
+      if (!entries.length) return '<span style="color:var(--text-muted)">no starting rates</span>';
+      return entries.map(([r, v]) => {
+        const cls = v > 0 ? "rate-pos" : "rate-neg";
+        const color = RESOURCE_COLORS[r] || "var(--text-muted)";
+        return `<span class="${cls}" style="color:${color}">${v > 0 ? '+' : ''}${v} ${r}</span>`;
+      }).join(" ");
+    };
+    const pool = (d.available || []).map(corp => {
+      const btnAttrs = myPick ? '' : 'disabled';
+      return `<div class="draft-corp">
+        <div class="draft-corp-head">
+          <span class="draft-corp-name">${corp.name}</span>
+          <button class="action-btn draft-pick-btn" data-corp="${corp.name}" ${btnAttrs}>Pick</button>
+        </div>
+        <div class="draft-corp-rates">${formatRates(corp.rates)}</div>
+      </div>`;
+    }).join("");
+
+    const headline = myPick
+      ? `<strong>Your pick</strong> — choose a corporation`
+      : `Waiting for <strong>${pickerName}</strong> to pick…`;
+
+    host.innerHTML = `
+      <div class="draft-card">
+        <h3 class="draft-title" title="Drag to reposition">Corporation Draft</h3>
+        <div class="draft-headline">${headline}</div>
+        <div class="draft-pool">${pool}</div>
+        ${history ? `<div class="draft-history"><div class="draft-history-title">Picks so far</div>${history}</div>` : ''}
+      </div>
+    `;
+    host.style.display = "block";
+    // Preserve the drag-set position across re-renders; otherwise each
+    // refresh would snap the card back to its CSS default.
+    if (_draftDragOffset) {
+      host.style.left = _draftDragOffset.left + "px";
+      host.style.top = _draftDragOffset.top + "px";
+    }
+    _installDraftDrag(host);
+
+    if (myPick) {
+      host.querySelectorAll(".draft-pick-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const corp = btn.dataset.corp;
+          if (MP.role === "host") {
+            MP.core.handleHostDraftPick(corp);
+          } else if (MP.hostConn) {
+            MP.hostConn.send(JSON.stringify({type: "draft_pick", corp}));
+          }
+        });
+      });
+    }
+  }
+
   const PRICE_TRACK = [1,1,1,2,2,2,3,3,4,4,5,5,6,7,8,9,10];
   let expandedMarketResource = null;
   
@@ -1481,6 +1641,7 @@
       </div>
     `;
     document.getElementById("prompt-modal").style.display = "flex";
+    _installModalDrag("prompt-modal");
     bodyEl.querySelectorAll(".patent-pick-btn").forEach(btn => {
       btn.addEventListener("click", () => {
         document.getElementById("prompt-modal").style.display = "none";
@@ -1488,9 +1649,9 @@
       });
     });
   }
-  
+
   // ===== Prompt Modal =====
-  
+
   function showPrompt(prompt) {
     const titleEl = document.getElementById("prompt-title");
     const bodyEl = document.getElementById("prompt-body");
@@ -1551,6 +1712,7 @@
     }
 
     document.getElementById("prompt-modal").style.display = "flex";
+    _installModalDrag("prompt-modal");
   }
   
   // ===== Endgame =====
@@ -1576,6 +1738,7 @@
     }).join("");
     renderEndgameChart();
     overlay.style.display = "flex";
+    _installModalDrag("endgame-overlay");
   }
   
   function renderEndgameChart() {

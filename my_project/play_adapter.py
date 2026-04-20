@@ -42,7 +42,9 @@ from my_project.simulation import (
     MAX_CARDS_PER_TURN,
     Player,
     _default_ai_bid,
+    _load_corporations,
     _player_owns_patent,
+    apply_corporation,
     compute_build_deficit,
     effective_contract_requirements,
     execute_build,
@@ -81,6 +83,46 @@ def _resolve_strategy(seat: str):
 
 
 @dataclass
+class DraftState:
+    """Tracks the corporation draft that precedes turn 1.
+
+    Players pick from `available` in `pick_order` (which is the reverse of
+    game turn order — whoever goes last in the game picks first). Each
+    pick pops from `available`, writes to `picks`, and advances
+    `current_pick_idx`. When `is_complete`, PlayableGame falls through to
+    normal turn-1 play.
+    """
+
+    available: list[tuple[str, dict[str, int]]]  # (name, rates) still pickable
+    pick_order: list[int]                         # seat indices in pick order
+    picks: dict[int, str] = field(default_factory=dict)  # seat -> corp name
+    current_pick_idx: int = 0
+
+    @property
+    def is_complete(self) -> bool:
+        return self.current_pick_idx >= len(self.pick_order)
+
+    @property
+    def current_picker(self) -> int | None:
+        if self.is_complete:
+            return None
+        return self.pick_order[self.current_pick_idx]
+
+    def to_dict(self) -> dict:
+        return {
+            "available": [
+                {"name": name, "rates": dict(rates)}
+                for name, rates in self.available
+            ],
+            "pick_order": list(self.pick_order),
+            "picks": dict(self.picks),
+            "current_pick_idx": self.current_pick_idx,
+            "current_picker": self.current_picker,
+            "is_complete": self.is_complete,
+        }
+
+
+@dataclass
 class PlayableGame:
     """Stepwise game driver for one or more humans vs AI players.
 
@@ -106,8 +148,18 @@ class PlayableGame:
     # human prompts (auctions / OC picks). Live play uses False.
     disable_prompts: bool = False
     data_dir: Path = field(default_factory=lambda: DEFAULT_DATA_DIR)
+    # "random" (default) assigns corporations up-front as before. "draft"
+    # deals hands + rolls the market first, then runs a reverse-turn-order
+    # draft where each seat picks from a shared pool of `draft_pool_size`
+    # corps (default num_players + 1). AI seats use step_draft_ai() to
+    # pick randomly from remaining corps.
+    corporation_assignment: str = "random"
+    draft_pool_size: int | None = None
 
     state: GameState = field(init=False)
+    # None unless corporation_assignment == "draft". Tracks remaining pool,
+    # pick order, and picks made so far. Cleared once draft completes.
+    draft_state: "DraftState | None" = field(default=None, init=False)
     _human_indices: set[int] = field(default_factory=set, init=False)
     last_event: str = field(default="", init=False)
     last_ai_actions: list[dict] = field(default_factory=list, init=False)
@@ -163,6 +215,12 @@ class PlayableGame:
         # Patents.csv may not exist in older asset bundles — graceful fallback.
         patents_path = self.data_dir / "Patents.csv"
         patents = parse_patents(patents_path) if patents_path.exists() else []
+        if self.corporation_assignment not in ("random", "draft"):
+            raise ValueError(
+                f"corporation_assignment must be 'random' or 'draft', "
+                f"got {self.corporation_assignment!r}"
+            )
+        draft_mode = self.corporation_assignment == "draft"
         self.state = GameState.create(
             all_cards=cards,
             all_contracts=contracts,
@@ -174,7 +232,10 @@ class PlayableGame:
             event_deck=self.custom_event_deck,
             patent_pile=patents,
             num_rounds=self.num_rounds,
+            skip_corporations=draft_mode,
         )
+        if draft_mode:
+            self._init_draft_state()
         # Apply custom names if provided. Strict length check, empty entries
         # silently keep the engine's `Player_{i+1}` default so the UI can pass
         # a same-length parallel array without filtering empties first.
@@ -190,6 +251,12 @@ class PlayableGame:
         # to pause for human input on auctions / OC picks. Tests that drive
         # the engine end-to-end can set disable_prompts=True to bypass.
         self.state._is_human_game = bool(self._human_indices) and not self.disable_prompts
+        # With disable_prompts, draft mode also runs synchronously so tests
+        # don't have to step the draft manually. Each seat picks randomly
+        # from remaining corps, matching what step_draft_ai does live.
+        if draft_mode and self.disable_prompts:
+            while self.is_draft_active():
+                self.step_draft_ai()
         # Seed history with the starting market so the UI chart has a turn-0 anchor.
         self._snapshot_market(turn=0)
 
@@ -224,18 +291,17 @@ class PlayableGame:
         return self._active_player_idx >= 0
 
     def is_over(self) -> bool:
-        # Game ends when the event deck is exhausted AND no more rounds remain.
-        # After END_ROUND the deck gets reshuffled, so being at the end of
-        # round 1's deck is NOT game over.
+        # Game ends when END_GAME has been consumed. After END_ROUND the
+        # deck gets reshuffled, so being at the end of a non-final round's
+        # deck is NOT game over. Keying on the deck's terminal card type
+        # is cleaner than counting END_ROUND events, because reshuffle
+        # replaces the deck and resets the consumed count.
         if self._turn_in_progress():
             return False
         if self.state.event_idx < len(self.state.event_deck):
             return False
-        # Deck exhausted — check if there's a pending reshuffle (END_ROUND
-        # was the last card but more rounds remain)
-        if self.deck_round_number() < self.num_rounds:
-            return False
-        return True
+        terminal = self.state.event_deck[-1]
+        return terminal.type == EventType.END_GAME
 
     def current_player_index(self) -> int:
         """Index of the player whose turn is now active (0-based).
@@ -250,6 +316,10 @@ class PlayableGame:
 
     def is_human_turn(self) -> bool:
         if self.is_over():
+            return False
+        # Draft isn't a turn — prevents regular action handlers from firing
+        # while the draft phase is active.
+        if self.is_draft_active():
             return False
         return self.current_player_index() in self._human_indices
 
@@ -295,6 +365,88 @@ class PlayableGame:
         consumed = self.state.event_deck[: self.state.event_idx]
         end_rounds_seen = sum(1 for e in consumed if e.type == EventType.END_ROUND)
         return end_rounds_seen + 1
+
+    # --- Corporation draft ---
+
+    def _init_draft_state(self) -> None:
+        """Build the draft pool and pick order after GameState.create.
+
+        Raises ValueError when the corporation list is smaller than
+        num_players (every seat must end up with a corp).
+        """
+        all_corps = list(_load_corporations())
+        if len(all_corps) < self.num_players:
+            raise ValueError(
+                f"Corporation pool has {len(all_corps)} entries but "
+                f"{self.num_players} players need one each"
+            )
+        desired = self.draft_pool_size or (self.num_players + 1)
+        pool_size = max(self.num_players, min(desired, len(all_corps)))
+        random.shuffle(all_corps)
+        pool = all_corps[:pool_size]
+        # Reverse game-turn order: player who plays last picks first.
+        pick_order = list(range(self.num_players - 1, -1, -1))
+        self.draft_state = DraftState(
+            available=pool,
+            pick_order=pick_order,
+        )
+
+    def is_draft_active(self) -> bool:
+        return self.draft_state is not None and not self.draft_state.is_complete
+
+    def current_draft_picker(self) -> int | None:
+        if self.draft_state is None:
+            return None
+        return self.draft_state.current_picker
+
+    def submit_draft_pick(self, seat_idx: int, corp_name: str) -> dict:
+        """Apply one player's corp pick. Returns a structured result.
+
+        Never raises — the frontend and network paths both need a dict
+        they can inspect (ok / reason) without try/except.
+        """
+        if not self.is_draft_active():
+            return {"ok": False, "reason": "Draft not active"}
+        picker = self.draft_state.current_picker
+        if seat_idx != picker:
+            return {
+                "ok": False,
+                "reason": f"Not seat {seat_idx}'s turn (current picker: {picker})",
+            }
+        match_idx = next(
+            (i for i, (name, _) in enumerate(self.draft_state.available)
+             if name == corp_name),
+            None,
+        )
+        if match_idx is None:
+            return {"ok": False, "reason": f"{corp_name} not available"}
+        name, rates = self.draft_state.available.pop(match_idx)
+        player = self.state.players[seat_idx]
+        apply_corporation(
+            player, name, rates, log=self.state.log, player_idx=seat_idx,
+        )
+        self.draft_state.picks[seat_idx] = name
+        self.draft_state.current_pick_idx += 1
+        return {
+            "ok": True,
+            "seat": seat_idx,
+            "corp": name,
+            "complete": self.draft_state.is_complete,
+        }
+
+    def step_draft_ai(self) -> dict:
+        """Pick a random remaining corp for the current picker (AI seat).
+
+        Callers (the play-mode host loop) are responsible for pacing —
+        this runs synchronously. Returns submit_draft_pick's dict.
+        """
+        if not self.is_draft_active():
+            return {"ok": False, "reason": "Draft not active"}
+        seat = self.draft_state.current_picker
+        if not self.draft_state.available:
+            return {"ok": False, "reason": "No corporations available"}
+        name, _ = random.choice(self.draft_state.available)
+        return self.submit_draft_pick(seat, name)
 
     # --- Human turn control ---
 
@@ -1091,6 +1243,8 @@ class PlayableGame:
             "patent_pile_remaining": max(0, len(s.patent_pile) - s.patent_idx),
             # Mid-event prompt (None when no prompt is active)
             "pending_prompt": dict(s.pending_prompt) if s.pending_prompt else None,
+            # Corporation draft (None when draft mode disabled / already done)
+            "draft_state": self.draft_state.to_dict() if self.draft_state else None,
             # Terminal event results (END_ROUND / END_GAME) that fired as
             # cleanup. The frontend should log these and then clear them.
             "terminal_events": list(self.pending_terminal_results),

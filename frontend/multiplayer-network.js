@@ -170,6 +170,9 @@
       case "patent_office_pick":
         if (MP.game) MP.core.handlePatentOfficePick(conn.peer, msg.pick_idx);
         break;
+      case "draft_pick":
+        if (MP.game) MP.core.handleRemoteDraftPick(conn.peer, msg);
+        break;
     }
   }
 

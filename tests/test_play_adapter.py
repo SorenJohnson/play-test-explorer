@@ -2,6 +2,7 @@
 
 import pytest
 
+from my_project.models import Resource
 from my_project.play_adapter import PlayableGame
 from my_project.simulation import EventType
 
@@ -89,6 +90,35 @@ def test_full_game_completes():
     scores = game.final_scores()
     assert len(scores) == 3
     assert scores[0]["net_worth"] >= scores[-1]["net_worth"]
+
+
+def test_two_round_game_stops_after_end_game():
+    """Regression: is_over() must flip True as soon as END_GAME fires at the
+    end of the last round, even though reshuffle between rounds replaces
+    the event deck. An earlier version counted END_ROUND events inside the
+    current deck, which always read 1 post-reshuffle and left the host
+    looping past end-of-game."""
+    game = PlayableGame(seed=42, max_turns=8, num_rounds=2, disable_prompts=True)
+    safety = 0
+    while not game.is_over():
+        if game.is_human_turn():
+            game.begin_human_turn()
+            if game.is_over():
+                break
+            game.apply_human_action({"type": "pass"})
+            game.end_human_turn()
+        else:
+            result = game.step_ai_turn()
+            if not result.get("ok"):
+                break
+        safety += 1
+        assert safety < 200, "2-round game did not terminate"
+    assert game.is_over()
+    # The last event to fire must be END_GAME (not a mid-round event that
+    # happened to leave the deck empty). Last card of the final deck is the
+    # terminal.
+    assert game.state.event_deck[-1].type == EventType.END_GAME
+    assert game.state.event_idx == len(game.state.event_deck)
 
 
 def test_legal_actions_reports_affordable_builds():
@@ -443,3 +473,167 @@ def test_turn_counts_balanced_when_redraw_chain_absorbs_terminal():
         f"Turn counts unbalanced: P0={turns_per_player[0]}, P1={turns_per_player[1]}"
     )
     assert turns_per_player == [2, 2]
+
+
+# --- Corporation draft ---
+
+
+class TestCorporationDraft:
+    def test_draft_state_initialized(self):
+        """Opting into draft mode creates a DraftState with a randomly
+        sub-sampled pool and leaves player corporations unassigned until
+        picks come in."""
+        game = PlayableGame(
+            seed=42, seats=["human", "smart"],
+            corporation_assignment="draft",
+        )
+        assert game.draft_state is not None
+        assert game.is_draft_active()
+        # Default pool size is num_players + 1
+        assert len(game.draft_state.available) == 3
+        assert game.draft_state.picks == {}
+        # No player should have a corp yet
+        for p in game.state.players:
+            assert p.corporation == ""
+            assert p.starting_rates == {}
+
+    def test_draft_pick_order_is_reversed(self):
+        """Last-in-game-turn picks first."""
+        game = PlayableGame(
+            seed=1, seats=["human", "smart", "smart"],
+            corporation_assignment="draft",
+        )
+        assert game.draft_state.pick_order == [2, 1, 0]
+        assert game.current_draft_picker() == 2
+
+    def test_step_draft_ai_completes_all_ai_game(self):
+        """A pure-AI game can finish the draft via repeated step_draft_ai."""
+        game = PlayableGame(
+            seed=1, seats=["smart", "smart", "smart"],
+            corporation_assignment="draft",
+        )
+        while game.is_draft_active():
+            result = game.step_draft_ai()
+            assert result["ok"]
+        assert not game.is_draft_active()
+        for p in game.state.players:
+            assert p.corporation != ""
+
+    def test_submit_pick_applies_rates_like_random_mode(self):
+        """Draft-applied corps should match the random-path invariants:
+        corporation name, starting_rates snapshot, live rates, ledger
+        rate all in lockstep."""
+        game = PlayableGame(
+            seed=1, seats=["human", "smart"],
+            corporation_assignment="draft",
+        )
+        picker = game.current_draft_picker()
+        name, rates = game.draft_state.available[0]
+        result = game.submit_draft_pick(picker, name)
+        assert result["ok"]
+        p = game.state.players[picker]
+        assert p.corporation == name
+        assert p.starting_rates == rates
+        for r_str, v in rates.items():
+            res = Resource(r_str)
+            assert p.rates[res] == v
+            assert p.ledger.accounts[res].rate == v
+
+    def test_submit_pick_rejects_non_current_seat(self):
+        """A seat that isn't currently picking can't submit."""
+        game = PlayableGame(
+            seed=1, seats=["human", "smart", "smart"],
+            corporation_assignment="draft",
+        )
+        # Current picker is seat 2 (reverse order); seat 0 tries to jump in.
+        name = game.draft_state.available[0][0]
+        result = game.submit_draft_pick(0, name)
+        assert not result["ok"]
+        assert "turn" in result["reason"].lower()
+
+    def test_submit_pick_rejects_already_taken(self):
+        """Can't pick a corporation that's already been drafted."""
+        game = PlayableGame(
+            seed=1, seats=["human", "smart"],
+            corporation_assignment="draft",
+        )
+        first_picker = game.current_draft_picker()
+        taken = game.draft_state.available[0][0]
+        assert game.submit_draft_pick(first_picker, taken)["ok"]
+        # Next picker tries to pick the same corp
+        next_picker = game.current_draft_picker()
+        result = game.submit_draft_pick(next_picker, taken)
+        assert not result["ok"]
+        assert "not available" in result["reason"].lower()
+
+    def test_draft_completes_then_turn_one_begins(self):
+        """Once all seats have picked, normal turn flow starts with seat 0."""
+        game = PlayableGame(
+            seed=1, seats=["human", "smart"],
+            corporation_assignment="draft",
+            disable_prompts=True,
+        )
+        assert not game.is_draft_active()
+        assert game.current_player_index() == 0
+        assert game.is_human_turn()
+        # Seat 0 is the human — begin_human_turn should work normally.
+        game.begin_human_turn()
+        assert game.human_turn_in_progress
+
+    def test_draft_is_not_human_turn(self):
+        """While draft is active, is_human_turn() returns False even if
+        the current picker is a human seat (prevents normal action
+        handlers from firing)."""
+        game = PlayableGame(
+            seed=1, seats=["human", "human"],
+            corporation_assignment="draft",
+        )
+        assert game.is_draft_active()
+        # Current picker is seat 1 (reverse order), who is human.
+        assert game.current_draft_picker() == 1
+        assert not game.is_human_turn()
+
+    def test_random_mode_unchanged(self):
+        """Default mode still assigns corps up front, draft_state stays None."""
+        game = PlayableGame(seed=42, seats=["human", "smart"])
+        assert game.draft_state is None
+        assert not game.is_draft_active()
+        for p in game.state.players:
+            assert p.corporation != ""
+
+    def test_state_dict_exposes_draft(self):
+        """state_dict includes draft_state for the frontend to render."""
+        game = PlayableGame(
+            seed=1, seats=["human", "smart"],
+            corporation_assignment="draft",
+        )
+        s = game.state_dict()
+        assert s["draft_state"] is not None
+        assert s["draft_state"]["current_picker"] == 1
+        assert len(s["draft_state"]["available"]) == 3
+        assert s["draft_state"]["is_complete"] is False
+
+    def test_pool_smaller_than_players_raises(self):
+        """If the CSV has fewer corps than seats, fail fast rather than
+        stranding a seat without a corporation."""
+        # Monkey-patch _load_corporations to return only one entry.
+        import my_project.play_adapter as pa
+        original = pa._load_corporations
+        pa._load_corporations = lambda: [("Solo Corp", {"PWR": 1})]
+        try:
+            with pytest.raises(ValueError, match="pool has 1 entries"):
+                PlayableGame(
+                    seed=1, seats=["human", "smart", "smart"],
+                    corporation_assignment="draft",
+                )
+        finally:
+            pa._load_corporations = original
+
+    def test_custom_pool_size(self):
+        """draft_pool_size overrides the default num_players + 1."""
+        game = PlayableGame(
+            seed=1, seats=["human", "smart"],
+            corporation_assignment="draft",
+            draft_pool_size=2,  # exactly enough for 2 seats, no extra
+        )
+        assert len(game.draft_state.available) == 2

@@ -30,6 +30,13 @@
         <h3>Seat Configuration</h3>
         <div id="seat-grid" class="seat-grid"></div>
 
+        <div class="lobby-options">
+          <label class="lobby-option">
+            <input type="checkbox" id="opt-corp-draft">
+            Corporation draft (pick in reverse turn order)
+          </label>
+        </div>
+
         <div id="host-status" class="connection-status"></div>
         <button id="btn-start" class="lobby-btn primary" disabled>Start Game</button>
       </div>
@@ -61,6 +68,7 @@
 
   <!-- ===== GAME SCREEN ===== -->
   <div id="game-wrapper" style="display:none">
+  <div id="mp-draft-panel" class="draft-panel" style="display:none"></div>
   <div id="game-screen">
     <!-- Status Bar -->
     <div id="status-bar">
