@@ -387,7 +387,12 @@ game
         result = MP.game.use_optimization_center(seatIdx, msg.resource).toJs({dict_converter: Object.fromEntries});
         break;
       case "teleport":
-        result = MP.game.use_teleportation(seatIdx, msg.resource).toJs({dict_converter: Object.fromEntries});
+        result = MP.game.use_teleportation(
+          seatIdx,
+          msg.resource,
+          msg.hacker_target || null,
+          msg.hacker_direction || 0,
+        ).toJs({dict_converter: Object.fromEntries});
         break;
     }
     if (result?.ok) {

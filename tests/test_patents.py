@@ -837,6 +837,53 @@ class TestTeleportation:
         result = game.use_teleportation(0, "BOGUS")
         assert not result["ok"]
 
+    def test_hacker_array_bonus_fires_on_teleport_sell(self):
+        """Teleportation is a free sell, and the Hacker Array rule says
+        "when selling: also shift a different resource's market price by
+        ±3". A HA owner who teleports should get the ±3 bump just like
+        they would on a regular card sell."""
+        game = _make_game_with_human()
+        p = game.state.players[0]
+        p.buildings_played.append(_patent("Teleportation"))
+        # Seed a Hacker Array into the player's built cards so the
+        # _count_buildings check passes.
+        ha_card = Card(
+            alternate="",
+            slot=4,
+            building="Hacker Array",
+            costs=[],
+            rates=[],
+            effect="",
+            can_sell=[Resource.FE, Resource.H2O],
+            can_fulfill_contract=False,
+        )
+        p.buildings_played.append(ha_card)
+        p.rates[Resource.FE] = 2
+        gls_pos_before = game.state.market.positions[Resource.GLS]
+        result = game.use_teleportation(
+            0, "FE", hacker_target="GLS", hacker_direction=1,
+        )
+        assert result["ok"]
+        # Hacker Array bumped GLS up by 3 positions.
+        assert (
+            game.state.market.positions[Resource.GLS] == gls_pos_before + 3
+        ), f"HA bonus missing: GLS pos {gls_pos_before} -> {game.state.market.positions[Resource.GLS]}"
+        assert "[HA:" in result["detail"]
+
+    def test_hacker_array_bonus_ignored_without_ha(self):
+        """Non-owners can't conjure the HA bump by passing the args."""
+        game = _make_game_with_human()
+        p = game.state.players[0]
+        p.buildings_played.append(_patent("Teleportation"))
+        p.rates[Resource.FE] = 2
+        gls_pos_before = game.state.market.positions[Resource.GLS]
+        result = game.use_teleportation(
+            0, "FE", hacker_target="GLS", hacker_direction=1,
+        )
+        assert result["ok"]
+        assert game.state.market.positions[Resource.GLS] == gls_pos_before
+        assert "[HA:" not in result["detail"]
+
 
 class TestPatentActionsLegalState:
     def test_patent_actions_all_unowned(self):

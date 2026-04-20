@@ -787,18 +787,6 @@ def _patent_to_dict(patent: Card) -> dict:
     }
 
 
-def _is_terminal_event(event: EventCard) -> bool:
-    """True for END_ROUND / END_GAME events, which stop redraw chains.
-
-    A redraw chain never consumes the terminal card: the terminal card
-    is always its own player turn. If the chain is allowed to eat the
-    terminal, a 2-player game can end up with an odd number of player
-    turns in a round, skipping one player's last turn AND bypassing the
-    end-of-round reshuffle (because the primary event wasn't END_ROUND).
-    """
-    return event.type in (EventType.END_ROUND, EventType.END_GAME)
-
-
 def execute_event_with_redraws(
     state: GameState,
     event: EventCard,
@@ -811,9 +799,9 @@ def execute_event_with_redraws(
     long as each fired card has `redraws=True`. The deck is sized in
     build_event_deck to account for these extra consumptions.
 
-    Redraw chains STOP before END_ROUND / END_GAME: the terminal card
-    stays in the deck and becomes the next player's turn. This keeps
-    player-turn counts even and preserves round-end reshuffle.
+    Chains may absorb END_ROUND / END_GAME; the play adapter's
+    _handle_post_event detects a consumed terminal by comparing
+    event_idx to the deck length.
 
     Mid-event interruptions: if any event in the chain needs human input
     (via _event_needs_prompt), the function pauses by setting
@@ -836,9 +824,6 @@ def execute_event_with_redraws(
     detail = execute_event(state, event, active_player)
     while event.redraws and state.event_idx < len(state.event_deck):
         next_event = state.event_deck[state.event_idx]
-        # Never chain into a terminal event — leave it for its own turn.
-        if _is_terminal_event(next_event):
-            break
         # Pause-check before firing the next chained event
         next_prompt = _event_needs_prompt(state, next_event)
         if next_prompt is not None and _has_human_player(state):
@@ -882,9 +867,6 @@ def resume_pending_event(state: GameState, active_player: Player) -> str:
     # If the suspended event was a redraw card, continue the chain
     while chain_active and state.event_idx < len(state.event_deck):
         next_event = state.event_deck[state.event_idx]
-        # Never chain into a terminal event — leave it for its own turn.
-        if _is_terminal_event(next_event):
-            break
         next_prompt = _event_needs_prompt(state, next_event)
         if next_prompt is not None and _has_human_player(state):
             state.event_idx += 1

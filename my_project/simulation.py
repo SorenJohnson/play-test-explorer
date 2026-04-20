@@ -2144,16 +2144,16 @@ def run_game(
 
         # Chain redraw events: execute event only (no actions).
         # Merge chained event details into the parent turn's history record.
-        # Chains stop before END_ROUND/END_GAME — the terminal is always its
-        # own player turn so reshuffle/turn counts stay correct.
+        # Chains may absorb END_ROUND/END_GAME; the reshuffle check below
+        # tracks whether END_ROUND fired in the primary or the chain.
         event = primary_event
+        end_round_consumed = primary_event.type == EventType.END_ROUND
         while event.redraws and state.event_idx < len(state.event_deck):
-            peek = state.event_deck[state.event_idx]
-            if _is_terminal_event(peek):
-                break
-            event = peek
+            event = state.event_deck[state.event_idx]
             state.event_idx += 1
             chain_detail = execute_event(state, event, player)
+            if event.type == EventType.END_ROUND:
+                end_round_consumed = True
             if state.history:
                 last = state.history[-1]
                 last.event = f"{last.event} | {chain_detail}"
@@ -2163,8 +2163,8 @@ def run_game(
                 last.market_snapshot = state.market.snapshot()
                 last.rates_snapshot = {r.value: player.rate(r) for r in Resource}
 
-        # Check if the primary event was END_ROUND → reshuffle for next round
-        if primary_event.type == EventType.END_ROUND:
+        # END_ROUND fired (primary or chained) → reshuffle for next round
+        if end_round_consumed:
             current_round += 1
             reshuffle_for_next_round(state, num_players, current_round, num_rounds)
 
@@ -2185,7 +2185,6 @@ from my_project.events import (  # noqa: E402
     _event_needs_prompt,
     _get_patent_base_values,
     _has_human_player,
-    _is_terminal_event,
     do_debt_collection,
     do_draw_building_card,
     do_futures_settlement,

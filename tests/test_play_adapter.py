@@ -359,3 +359,87 @@ def test_last_player_gets_full_turn_before_end_game():
     assert "end_game" in game.last_event.lower() or "END GAME" in game.last_event, (
         f"Last event was not END GAME: {game.last_event}"
     )
+
+
+def test_redraw_into_end_round_still_reshuffles():
+    """Regression: if a redraw chain absorbs END_ROUND into another turn's
+    event, the play adapter must still trigger the round-2 reshuffle.
+
+    Historic bug: _handle_post_event keyed on `event.type == END_ROUND`
+    (the primary), so a chained END_ROUND skipped reshuffle and the game
+    ended a round early. The fix keys on deck exhaustion vs remaining
+    rounds instead."""
+    from my_project.simulation import EventCard, EventType, _ec
+
+    # 2-player deck, round 1: a single redraw card followed by END_ROUND.
+    # The redraw chain will fire END_ROUND as its chained event — no
+    # player-turn starts with END_ROUND as primary.
+    round1_deck: list[EventCard] = [
+        _ec(EventType.NO_EVENT, redraws=True),
+        _ec(EventType.END_ROUND),
+    ]
+    game = PlayableGame(
+        seed=42,
+        num_players=2,
+        num_rounds=2,
+        custom_event_deck=round1_deck,
+        disable_prompts=True,
+    )
+
+    # Run one human turn — this should consume both cards and trigger reshuffle.
+    assert game.is_human_turn()
+    game.begin_human_turn()
+    game.apply_human_action({"type": "pass"})
+    game.end_human_turn()
+
+    # Reshuffle should have produced a fresh round-2 deck. Game must
+    # NOT be over (more rounds remain) and event_idx is reset to 0.
+    assert not game.is_over()
+    assert game.state.event_idx == 0
+    assert len(game.state.event_deck) > 0
+
+
+def test_turn_counts_balanced_when_redraw_chain_absorbs_terminal():
+    """Regression: when a redraw card lands just before the round's terminal,
+    the chain absorbs the terminal. This used to break `_is_terminal_event`'s
+    stop and give the next player an extra turn; now both players get equal
+    turn counts in a round."""
+    from my_project.simulation import EventCard, EventType, _ec
+
+    # 2-player single-round deck: 3 non-redraw "N" events, then 1 redraw, then END_GAME.
+    # Turns: P0(N), P1(N), P0(N), P1(redraw→END_GAME absorbed). 4 turns, 2 each.
+    deck: list[EventCard] = [
+        _ec(EventType.POWER_BILL),
+        _ec(EventType.POWER_BILL),
+        _ec(EventType.POWER_BILL),
+        _ec(EventType.NO_EVENT, redraws=True),
+        _ec(EventType.END_GAME),
+    ]
+    game = PlayableGame(
+        seed=42,
+        num_players=2,
+        num_rounds=1,
+        custom_event_deck=deck,
+        disable_prompts=True,
+    )
+
+    turns_per_player = [0, 0]
+    safety = 0
+    while not game.is_over():
+        pidx = game.current_player_index()
+        turns_per_player[pidx] += 1
+        if game.is_human_turn():
+            game.begin_human_turn()
+            game.apply_human_action({"type": "pass"})
+            game.end_human_turn()
+        else:
+            game.step_ai_turn()
+        safety += 1
+        assert safety < 20, "Game didn't terminate"
+
+    assert game.is_over()
+    # Both players must have had the same number of turns.
+    assert turns_per_player[0] == turns_per_player[1], (
+        f"Turn counts unbalanced: P0={turns_per_player[0]}, P1={turns_per_player[1]}"
+    )
+    assert turns_per_player == [2, 2]

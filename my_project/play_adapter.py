@@ -464,10 +464,8 @@ class PlayableGame:
         Call AFTER executing the primary event. Captures the primary
         event's structured data before chaining overwrites it.
 
-        Chains STOP before END_ROUND / END_GAME: the terminal card stays
-        in the deck and becomes the next player's turn. This keeps
-        player-turn counts even and preserves round-end reshuffle
-        (which only fires when the primary event of a turn is END_ROUND).
+        Chains may absorb END_ROUND / END_GAME. _handle_post_event detects
+        a consumed terminal by checking event_idx against deck length.
 
         Returns (combined_detail_string, chained_event_dicts, primary_structured_data).
         """
@@ -475,17 +473,11 @@ class PlayableGame:
         primary_data = getattr(self.state, "_last_event_data", None)
         primary_structured = dict(primary_data) if primary_data else {}
 
-        from my_project.simulation import (
-            _event_needs_prompt, _has_human_player, _is_terminal_event,
-        )
+        from my_project.simulation import _event_needs_prompt, _has_human_player
         details = []
         chained_events = []
         while event.redraws and self.state.event_idx < len(self.state.event_deck):
-            peek = self.state.event_deck[self.state.event_idx]
-            # Never chain into a terminal event — leave it for its own turn.
-            if _is_terminal_event(peek):
-                break
-            event = peek
+            event = self.state.event_deck[self.state.event_idx]
 
             # Check if this chained event needs a prompt BEFORE executing.
             # If so, suspend and let resume_pending_event handle it.
@@ -513,11 +505,23 @@ class PlayableGame:
             })
         return " | ".join(details) if details else "", chained_events, primary_structured
 
-    def _handle_post_event(self, event: EventCard) -> None:
-        """Shared post-event handling: snapshot market, reshuffle at round end."""
+    def _handle_post_event(self) -> None:
+        """Shared post-event handling: snapshot market, reshuffle at round end.
+
+        Reshuffle fires whenever the deck is exhausted AND the terminal of
+        the just-finished deck was END_ROUND (not END_GAME). This catches
+        both END_ROUND as a primary event AND END_ROUND absorbed into a
+        redraw chain of some other primary. Keying on the deck's terminal
+        card rather than is_over() avoids a subtle issue: after consuming
+        END_ROUND, deck_round_number() == num_rounds makes is_over() read
+        True *before* reshuffle replaces the deck.
+        """
         self._snapshot_market(turn=self.state.turn)
         from my_project.simulation import EventType as _ET
-        if event.type == _ET.END_ROUND:
+        if (
+            self.state.event_idx >= len(self.state.event_deck)
+            and self.state.event_deck[-1].type == _ET.END_ROUND
+        ):
             from my_project.simulation import reshuffle_for_next_round
             current_round = self.deck_round_number()
             reshuffle_for_next_round(
@@ -531,7 +535,7 @@ class PlayableGame:
         self.last_event = event_detail
         self.human_turn_in_progress = False
         self._active_player_idx = -1
-        self._handle_post_event(event)
+        self._handle_post_event()
         return {
             "type": event.type.value,
             "detail": event_detail,
@@ -761,10 +765,20 @@ class PlayableGame:
             **_nw_snapshot(player),
         }
 
-    def use_teleportation(self, seat_idx: int, resource: str) -> dict:
+    def use_teleportation(
+        self,
+        seat_idx: int,
+        resource: str,
+        hacker_target: str | None = None,
+        hacker_direction: int = 0,
+    ) -> dict:
         """Teleportation: free sell action. Sells your full rate of the
         chosen resource at market price (rate × price). Cost: -1 PWR rate
         (permanent). Does NOT decrement the sold rate. Once per turn.
+
+        Teleportation counts as a sell, so a player who also owns a Hacker
+        Array may supply `hacker_target` + `hacker_direction` to bump
+        another resource's market price by ±3 (same rule as execute_sell).
         """
         if seat_idx not in self._human_indices:
             return {"ok": False, "reason": "Not a human seat"}
@@ -787,11 +801,30 @@ class PlayableGame:
         player.money += revenue
         player.rates[Resource.PWR] = player.rate(Resource.PWR) - 1
         player.has_used_teleportation_this_turn = True
+
+        # Hacker Array bonus on teleport-sell (mirrors execute_sell).
+        ha_detail = ""
+        from my_project.simulation import _count_buildings
+        if (
+            _count_buildings(player, "Hacker Array") > 0
+            and hacker_target
+            and hacker_direction != 0
+        ):
+            try:
+                target = Resource(hacker_target)
+                if target != res:
+                    delta = 3 if hacker_direction > 0 else -3
+                    self.state.market.adjust(target, delta)
+                    sign = "+" if delta >= 0 else ""
+                    ha_detail = f" [HA: {sign}{delta} {target.value}]"
+            except ValueError:
+                pass
+
         self.state.log.end()
         return {
             "ok": True,
             "type": "patent",
-            "detail": f"Teleportation: sold {rate} {resource} for ${revenue}, -1 PWR",
+            "detail": f"Teleportation: sold {rate} {resource} for ${revenue}, -1 PWR{ha_detail}",
             **_nw_snapshot(player),
         }
 
@@ -977,7 +1010,7 @@ class PlayableGame:
         self.last_event = event_detail
         self._active_player_idx = -1
         self._suspended_ai_turn = None
-        self._handle_post_event(event)
+        self._handle_post_event()
         chained = getattr(self, "_last_chained_events", [])
         self._last_chained_events = []
         primary_data = getattr(self, "_primary_event_data", {})

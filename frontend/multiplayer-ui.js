@@ -859,7 +859,14 @@
     document.getElementById("pa-tele-btn")?.addEventListener("click", () => {
       const r = document.getElementById("pa-tele-resource")?.value;
       if (!r) return;
-      sendPatentAction("teleport", {resource: r});
+      // Teleportation is a sell — carry the Hacker Array pick through so
+      // HA owners get the ±3 market bump, matching a regular card sell.
+      const params = {resource: r};
+      if (MP._v2HackerTarget) {
+        params.hacker_target = MP._v2HackerTarget;
+        params.hacker_direction = MP._v2HackerDir ?? 1;
+      }
+      sendPatentAction("teleport", params);
     });
   }
   
@@ -877,7 +884,12 @@
           result = MP.game.use_optimization_center(MP.mySeat, params.resource).toJs({dict_converter: Object.fromEntries});
           break;
         case "teleport":
-          result = MP.game.use_teleportation(MP.mySeat, params.resource).toJs({dict_converter: Object.fromEntries});
+          result = MP.game.use_teleportation(
+            MP.mySeat,
+            params.resource,
+            params.hacker_target || null,
+            params.hacker_direction || 0,
+          ).toJs({dict_converter: Object.fromEntries});
           break;
       }
       if (result?.ok) {
@@ -996,7 +1008,7 @@
     // Two rows sharing 11 columns: -5 -4 -3 -2 -1 | 0 | +1 +2 +3 +4 +5
     const onesSlots = Array.from({length: 11}, () => []);
     const fivesSlots = Array.from({length: 11}, () => []);
-  
+
     for (const e of entries) {
       const abs = Math.abs(e.val);
       const neg = e.val < 0;
@@ -1009,7 +1021,7 @@
       let onesSlot = 5;
       if (ones > 0) onesSlot = neg ? 5 - ones : 5 + ones;
       onesSlots[onesSlot].push(e);
-  
+
       if (fives > 0) {
         let fivesSlot = neg ? 5 - fives : 5 + fives;
         fivesSlot = Math.max(0, Math.min(10, fivesSlot));

@@ -346,11 +346,12 @@ class TestRedrawCascade:
         execute_event_with_redraws(state, event, state.players[0])
         assert state.event_idx == 1  # only the no-op consumed
 
-    def test_redraw_chain_stops_before_end_game(self):
-        """Redraw chains never consume END_GAME/END_ROUND — the terminal
-        card is always its own player turn. This prevents 2-player games
-        from skipping a player's last turn when a redraw happens to land
-        immediately before the terminal."""
+    def test_redraw_chain_absorbs_end_game(self):
+        """A redraw chain CAN consume END_GAME. The previous guard that
+        stopped the chain before a terminal was wrong: it caused an extra
+        player turn when a redraw landed just before END_GAME, unbalancing
+        the turn count (seen in a 2-player game where P0 ended up with 11
+        turns to P1's 10)."""
         cards, contracts = _load()
         custom = [
             _ec(EventType.NO_EVENT, redraws=True),
@@ -360,14 +361,14 @@ class TestRedrawCascade:
         event = state.event_deck[state.event_idx]
         state.event_idx += 1
         detail = execute_event_with_redraws(state, event, state.players[0])
-        # The chain fired the NO_EVENT redraw card but did NOT chain into END_GAME.
-        assert "END GAME" not in detail
-        # event_idx advanced past the redraw but NOT past the terminal
-        assert state.event_idx == 1
+        assert "END GAME" in detail
+        # Chain consumed BOTH the redraw and the terminal
+        assert state.event_idx == 2
 
-    def test_redraw_chain_stops_before_end_round(self):
-        """Same behavior for END_ROUND: a redraw chain leaves the terminal
-        in the deck so the next player's turn gets it (and reshuffle fires)."""
+    def test_redraw_chain_absorbs_end_round(self):
+        """Same for END_ROUND. The play adapter's _handle_post_event detects
+        a consumed terminal via the deck-position invariant (event_idx ==
+        len(event_deck) && not is_over) and still triggers reshuffle."""
         cards, contracts = _load()
         custom = [
             _ec(EventType.NO_EVENT, redraws=True),
@@ -378,9 +379,9 @@ class TestRedrawCascade:
         event = state.event_deck[state.event_idx]
         state.event_idx += 1
         detail = execute_event_with_redraws(state, event, state.players[0])
-        assert "END OF ROUND" not in detail
-        # event_idx advanced past the redraw but NOT past END_ROUND
-        assert state.event_idx == 1
+        assert "END OF ROUND" in detail
+        # Chain consumed the redraw and END_ROUND; END_GAME still in deck.
+        assert state.event_idx == 2
 
 
 # --- PATENT_AUCTION (silent auction with bid heuristic) ---
