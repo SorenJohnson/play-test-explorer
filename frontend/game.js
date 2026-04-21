@@ -120,6 +120,16 @@ function buildTurns(data) {
     rates: { ...players[playerIdx].rates },
     market: { ...market },
   });
+  // Snapshot every player's state so NW/market charts can plot all lines
+  // at every turn — not just at each player's own turns. END_GAME's debt
+  // settlement fires on the last turn-taker's record but changes everyone.
+  const allPlayerStates = () => players.map((p) => ({
+    money: p.money,
+    debt: p.debt,
+    credit: p.credit,
+    contracts: p.contracts,
+    rates: { ...p.rates },
+  }));
 
   const out = [];
   let pending = [];
@@ -150,6 +160,7 @@ function buildTurns(data) {
         last.contracts = snap.contracts;
         last.market = snap.market;
         last.rates = snap.rates;
+        last.player_states = allPlayerStates();
         pending = [];
         continue;
       }
@@ -207,6 +218,7 @@ function buildTurns(data) {
         contracts: snap.contracts,
         market: snap.market,
         rates: snap.rates,
+        player_states: allPlayerStates(),
       });
       pending = [];
     } else {
@@ -214,13 +226,6 @@ function buildTurns(data) {
     }
   }
 
-  return out;
-}
-
-function perPlayerTurns() {
-  const numPlayers = gameData.players.length;
-  const out = Array.from({ length: numPlayers }, () => []);
-  for (const t of turns) out[t._player_idx].push(t);
   return out;
 }
 
@@ -234,32 +239,48 @@ function axisStyle(title) {
 
 function renderNetWorthChart() {
   const datasets = [];
-  const byPlayer = perPlayerTurns();
-  byPlayer.forEach((pTurns, i) => {
+  const numPlayers = gameData.players.length;
+  for (let i = 0; i < numPlayers; i++) {
     const color = PLAYER_COLORS[i % PLAYER_COLORS.length];
     const strategy = gameData.players[i]?.strategy || "?";
+    // One point per turn for THIS player, using the all-players snapshot
+    // captured at the end of each turn. That way END_GAME debt settlement
+    // (which fires on the last turn-taker) shows up on every player's line.
+    const series = turns
+      .map((t) => {
+        const ps = t.player_states && t.player_states[i];
+        if (!ps) return null;
+        return {
+          x: t.turn,
+          money: ps.money,
+          debt: ps.debt || 0,
+          contracts: ps.contracts || 0,
+          credit: ps.credit || 0,
+        };
+      })
+      .filter(Boolean);
     datasets.push({
       label: `P${i + 1} (${strategy}) — Money`,
-      data: pTurns.map((t) => ({ x: t.turn, y: t.money_after })),
+      data: series.map((s) => ({ x: s.x, y: s.money })),
       borderColor: color, backgroundColor: "transparent",
       tension: 0.2, borderWidth: 2, pointRadius: 0,
     });
     datasets.push({
       label: `P${i + 1} — Debt`,
-      data: pTurns.map((t) => ({ x: t.turn, y: -(t.debt || 0) })),
+      data: series.map((s) => ({ x: s.x, y: -s.debt })),
       borderColor: color, backgroundColor: "transparent",
       tension: 0.2, borderWidth: 1, borderDash: [5, 5], pointRadius: 0,
     });
     datasets.push({
       label: `P${i + 1} — Net Worth`,
-      data: pTurns.map((t) => ({
-        x: t.turn,
-        y: t.money_after - (t.debt || 0) + (t.contracts || 0) * CONTRACT_REWARD,
+      data: series.map((s) => ({
+        x: s.x,
+        y: s.money - s.debt + s.credit + s.contracts * CONTRACT_REWARD,
       })),
       borderColor: color, backgroundColor: color + "22",
       tension: 0.2, borderWidth: 3, fill: true, pointRadius: 0,
     });
-  });
+  }
 
   new Chart(document.getElementById("networth-chart"), {
     type: "line",
@@ -304,9 +325,14 @@ function renderMarketChart() {
 function renderRateCharts() {
   const container = document.getElementById("rate-charts");
   container.innerHTML = "";
-  const byPlayer = perPlayerTurns();
-  byPlayer.forEach((pTurns, i) => {
-    if (!pTurns.length) return;
+  const numPlayers = gameData.players.length;
+  for (let i = 0; i < numPlayers; i++) {
+    const series = turns
+      .map((t) => t.player_states && t.player_states[i]
+        ? { x: t.turn, rates: t.player_states[i].rates }
+        : null)
+      .filter(Boolean);
+    if (!series.length) continue;
     const div = document.createElement("div");
     div.className = "chart-container";
     div.style.marginBottom = "16px";
@@ -315,15 +341,15 @@ function renderRateCharts() {
     div.appendChild(canvas);
     container.appendChild(div);
 
-    const allResources = Object.keys(pTurns[0].rates);
+    const allResources = Object.keys(series[0].rates);
     const datasets = allResources
       .filter((r) => {
-        const vals = pTurns.map((t) => t.rates[r] || 0);
+        const vals = series.map((s) => s.rates[r] || 0);
         return Math.max(...vals) !== Math.min(...vals);
       })
       .map((r) => ({
         label: r,
-        data: pTurns.map((t) => ({ x: t.turn, y: t.rates[r] || 0 })),
+        data: series.map((s) => ({ x: s.x, y: s.rates[r] || 0 })),
         borderColor: RESOURCE_COLORS[r] || "#888",
         backgroundColor: "transparent",
         tension: 0.2, borderWidth: 2, pointRadius: 0,
@@ -346,7 +372,7 @@ function renderRateCharts() {
         scales: { x: { type: "linear", ...axisStyle("Turn") }, y: axisStyle("Rate") },
       },
     });
-  });
+  }
 }
 
 function renderTurnLog() {
