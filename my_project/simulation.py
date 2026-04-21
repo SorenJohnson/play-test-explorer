@@ -618,6 +618,9 @@ def reshuffle_for_next_round(
     # Replace the event deck and reset the index
     state.event_deck = converted
     state.event_idx = 0
+    # Bump state.current_round so AI valuation (remaining_events_full_game)
+    # can tell how many more rounds remain beyond the one being entered.
+    state.current_round = current_round + 1
 
 
 # --- Actions ---
@@ -750,12 +753,69 @@ class GameState:
     last_event_lines: list[dict] = field(default_factory=list)
     max_turns: int = DEFAULT_MAX_TURNS
     num_rounds: int = 1
+    # 1-indexed current deck-round. Starts at 1 and increments at each
+    # reshuffle_for_next_round call. Read by remaining_events_full_game()
+    # so AI valuation can account for events in un-started future rounds.
+    current_round: int = 1
 
     def remaining_events(self) -> dict[EventType, int]:
-        """Count remaining events from current position in event deck."""
+        """Count remaining events from current position in event deck.
+
+        IMPORTANT: only walks the CURRENT deck — future rounds that haven't
+        been reshuffled in yet are invisible to this count. AI valuation
+        code should call remaining_events_full_game() instead so the horizon
+        includes the un-started rounds."""
         counts: dict[EventType, int] = {e: 0 for e in EventType}
         for ec in self.event_deck[self.event_idx:]:
             counts[ec.type] += 1
+        return counts
+
+    def remaining_events_full_game(self) -> dict[EventType, int]:
+        """Events remaining across the WHOLE game, including unplayed future
+        rounds. Needed so AI valuation (rate ongoing value, expected sell
+        events, contract proximity, etc.) doesn't treat end-of-round as
+        end-of-game.
+
+        The future rounds' composition is deterministic: the stored base
+        pool (_event_pool) goes through the same round-2 conversion applied
+        at reshuffle — patents become draw_building_card with a redraw flag
+        that depends on num_players — plus a terminal (END_ROUND for
+        non-last rounds, END_GAME for the last)."""
+        counts = dict(self.remaining_events())
+        future_rounds = max(0, self.num_rounds - self.current_round)
+        if future_rounds == 0:
+            return counts
+
+        # Per-round composition (converted pool + terminal). Runs once per
+        # call; cheap (~20 entries in the pool).
+        from my_project.parsing import _condition_matches
+        type_map = {e.value: e for e in EventType}
+        per_round: dict[EventType, int] = {e: 0 for e in EventType}
+        pool = getattr(self, "_event_pool", []) or []
+        num_players = max(len(self.players), 1)
+        for e in pool:
+            r2_name = getattr(e, "_round2_event", "")
+            if r2_name:
+                r2_type = type_map.get(r2_name)
+                if r2_type:
+                    # Count ALL entries (redraws too) — matches
+                    # remaining_events() behavior on the current deck,
+                    # which also counts redraw slots.
+                    per_round[r2_type] = per_round.get(r2_type, 0) + 1
+            elif e.type == EventType.PATENT_AUCTION:
+                continue  # dropped at reshuffle when no r2 conversion
+            else:
+                per_round[e.type] = per_round.get(e.type, 0) + 1
+
+        # Terminal card: last un-started round is END_GAME, middle rounds
+        # END_ROUND. Both count as settlements for valuation, but stay
+        # precise so consumers that care about the distinction get it.
+        for r_offset in range(future_rounds):
+            is_last = (self.current_round + 1 + r_offset) == self.num_rounds
+            term = EventType.END_GAME if is_last else EventType.END_ROUND
+            for t, n in per_round.items():
+                counts[t] = counts.get(t, 0) + n
+            counts[term] = counts.get(term, 0) + 1
         return counts
 
     def _init_observables(self) -> None:
@@ -953,7 +1013,7 @@ def compute_rate_time_value(resource: Resource, state: GameState) -> float:
     settlement, so they count toward both PWR and non-PWR collection
     totals.  FUTURES_TRADING events only push prices (no debt).
     """
-    remaining = state.remaining_events()
+    remaining = state.remaining_events_full_game()
     price = state.market.price(resource)
     end_game = remaining.get(EventType.END_GAME, 0)
     end_round = remaining.get(EventType.END_ROUND, 0)
@@ -1732,7 +1792,7 @@ def _expected_price(resource: Resource, state: GameState) -> float:
     if not state.players:
         return float(state.market.price(resource))
 
-    remaining = state.remaining_events()
+    remaining = state.remaining_events_full_game()
 
     # For PWR, use PWR_ADJUST events; for others, use sell/settlement events
     if resource == Resource.PWR:
@@ -1771,7 +1831,7 @@ def _expected_sell_events(
     Does NOT include Teleportation free sells (valued separately as
     a patent effect to avoid double-counting).
     """
-    remaining = state.remaining_events()
+    remaining = state.remaining_events_full_game()
     total_events = sum(remaining.values())
     player_turns = total_events / max(len(state.players), 1)
 
@@ -1833,7 +1893,7 @@ def _rate_ongoing_value(
         <= 0 only), and contract proximity bonus.
     Non-PWR without player: futures cost only.
     """
-    remaining = state.remaining_events()
+    remaining = state.remaining_events_full_game()
 
     if resource == Resource.PWR:
         bills = (

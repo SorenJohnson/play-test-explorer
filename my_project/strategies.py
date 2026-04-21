@@ -422,7 +422,7 @@ def _mechanical_building_value(card: Card, state: GameState, player: Player) -> 
         _count_buildings, _rate_ongoing_value,
     )
     name = card.building
-    remaining = state.remaining_events()
+    remaining = state.remaining_events_full_game()
 
     if name == "Pleasure Dome":
         # Earns a bonus at each power bill. Passive — no card/AP cost.
@@ -749,7 +749,7 @@ def _contract_proximity_bonus(
     Closer contracts → higher bonus. Less time remaining → lower bonus.
     Returns the best bonus across all available contracts.
     """
-    remaining = state.remaining_events()
+    remaining = state.remaining_events_full_game()
     total_events = sum(remaining.values())
     player_turns = total_events / max(len(state.players), 1)
 
