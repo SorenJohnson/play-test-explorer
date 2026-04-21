@@ -645,7 +645,12 @@ function extractTrajectoriesFromGames(games) {
     const initMarket = game.initial_market || {};
     const seen = new Set();
     const perGame = {};
-    for (const rec of game.action_history || []) {
+    // Prefer the lean per-turn market_history written by cmd_publish;
+    // fall back to action_history for older sim files that still embed it.
+    const snapshots = game.market_history && game.market_history.length
+      ? game.market_history
+      : (game.action_history || []);
+    for (const rec of snapshots) {
       if (seen.has(rec.turn)) continue;
       seen.add(rec.turn);
       const market = rec.market || {};

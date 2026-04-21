@@ -248,6 +248,19 @@ def cmd_publish(args: argparse.Namespace) -> None:
             }
             with open(detail_dir / f"{g['game_id']}.json", "w") as fh:
                 json.dump(detail, fh)
+            # Preserve a lean market trajectory (one snapshot per unique turn)
+            # so compare.html's market spread bands + volatility column can
+            # still reconstruct per-game trajectories without loading the
+            # full action_log / action_history.
+            seen = set()
+            trimmed = []
+            for rec in g.get("action_history", []):
+                turn = rec.get("turn")
+                if turn in seen:
+                    continue
+                seen.add(turn)
+                trimmed.append({"turn": turn, "market": rec.get("market", {})})
+            g["market_history"] = trimmed
             # Strip heavy fields from the summary file.
             g.pop("action_log", None)
             g.pop("action_history", None)
