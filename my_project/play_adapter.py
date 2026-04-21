@@ -188,6 +188,16 @@ class PlayableGame:
     # step_ai_turn call. Mid-turn this is the 1-indexed turn currently in
     # progress; between turns it's the count of completed turns.
     _turn_count: int = field(default=0, init=False)
+    # Count of deck-rounds finished (0 until first END_ROUND reshuffle fires,
+    # then 1 during round 2, etc.). Incremented in _handle_post_event after
+    # reshuffle. Source of truth for deck_round_number(); can't be derived
+    # from the current deck alone because reshuffle discards END_ROUND history.
+    _deck_rounds_completed: int = field(default=0, init=False)
+    # Precomputed at setup — total non-redraw events across every round's
+    # deck. Stable for the whole game, avoiding a step jump at reshuffle
+    # (each round's deck has a different non-redraw count because patent
+    # auctions convert with potentially different redraw flags).
+    _total_turns_cached: int = field(default=0, init=False)
     # Suspended AI turn state (set when an AI turn paused mid-event for a
     # human prompt). None when no AI turn is paused.
     _suspended_ai_turn: dict | None = field(default=None, init=False)
@@ -259,6 +269,7 @@ class PlayableGame:
                 self.step_draft_ai()
         # Seed history with the starting market so the UI chart has a turn-0 anchor.
         self._snapshot_market(turn=0)
+        self._total_turns_cached = self._compute_total_turns()
 
     def _snapshot_market(self, turn: int) -> None:
         self.market_history.append({
@@ -327,16 +338,45 @@ class PlayableGame:
     pending_terminal_results: list[dict] = field(default_factory=list, init=False)
 
     def _total_player_turns(self) -> int:
-        """Total player turns across ALL rounds.
-        Every non-redraw event is a player turn, including END_ROUND
-        and END_GAME. Count remaining non-redraw cards + turns already
-        completed (not counting the current in-progress turn)."""
-        remaining_cards = self.state.event_deck[self.state.event_idx:]
-        remaining_turns = sum(1 for e in remaining_cards if not e.redraws)
-        # _turn_count includes the current in-progress turn, but remaining
-        # also includes its event card. Subtract 1 if a turn is in progress.
-        completed = self._turn_count - (1 if self._turn_in_progress() else 0)
-        return completed + remaining_turns
+        """Total player turns across ALL rounds. Precomputed at setup and
+        stable for the whole game so the display denominator doesn't jump
+        when reshuffle replaces round N's deck with round N+1's (which
+        typically has a different non-redraw count after patent-auction
+        conversion)."""
+        return self._total_turns_cached
+
+    def _compute_total_turns(self) -> int:
+        """Count non-redraw events the game will fire across every round.
+        Round 1 is the current event_deck (respects custom_event_deck).
+        Round 2+ apply the deterministic reshuffle conversion to the base
+        pool: patent auctions become draw_building_card with a redraw flag
+        that depends on num_players. Terminals (END_ROUND / END_GAME) are
+        always non-redraw and add 1 per round after the first."""
+        from my_project.simulation import EventType
+        from my_project.parsing import _condition_matches
+        _type_map = {e.value: e for e in EventType}
+
+        r1_nr = sum(1 for e in self.state.event_deck if not e.redraws)
+        if self.num_rounds <= 1:
+            return r1_nr
+
+        round_n_nr = 0
+        for e in self.state._event_pool:
+            r2_type_str = getattr(e, "_round2_event", "")
+            if r2_type_str:
+                r2_type = _type_map.get(r2_type_str)
+                if r2_type is None:
+                    continue
+                r2_cond = getattr(e, "_round2_redraw", "")
+                is_redraw = bool(r2_cond) and _condition_matches(r2_cond, self.num_players)
+                if not is_redraw:
+                    round_n_nr += 1
+            elif e.type == EventType.PATENT_AUCTION:
+                continue  # dropped in reshuffle (no round-2 conversion)
+            elif not e.redraws:
+                round_n_nr += 1
+        round_n_nr += 1  # terminal card (END_ROUND or END_GAME)
+        return r1_nr + (self.num_rounds - 1) * round_n_nr
 
     def clear_terminal_results(self) -> None:
         """Clear the pending terminal event results after the frontend has logged them."""
@@ -347,24 +387,25 @@ class PlayableGame:
 
     def turn_number(self) -> int:
         """1-indexed player turn number (out of max_turns * num_players)."""
-        if self._turn_in_progress():
+        if self._turn_in_progress() or self.is_over():
             return self._turn_count
         return self._turn_count + 1
 
     def round_number(self) -> int:
         """1-indexed round within the current deck-round.
         Each round is num_players player-turns."""
-        effective = self._turn_count - 1 if self._turn_in_progress() else self._turn_count
+        if self._turn_in_progress() or self.is_over():
+            effective = self._turn_count - 1
+        else:
+            effective = self._turn_count
         return (effective // self.num_players) + 1
 
     def deck_round_number(self) -> int:
-        """1-indexed deck-round (1..num_rounds). Determined by how many
-        END_ROUND events have already been consumed in the deck."""
-        # Count END_ROUND events in the already-consumed portion of the deck
-        from my_project.simulation import EventType
-        consumed = self.state.event_deck[: self.state.event_idx]
-        end_rounds_seen = sum(1 for e in consumed if e.type == EventType.END_ROUND)
-        return end_rounds_seen + 1
+        """1-indexed deck-round (1..num_rounds). Tracked explicitly via
+        _deck_rounds_completed because reshuffle replaces the event deck,
+        so counting END_ROUND events in the current deck would reset to 1
+        at the start of every round after the first."""
+        return self._deck_rounds_completed + 1
 
     # --- Corporation draft ---
 
@@ -663,10 +704,7 @@ class PlayableGame:
         Reshuffle fires whenever the deck is exhausted AND the terminal of
         the just-finished deck was END_ROUND (not END_GAME). This catches
         both END_ROUND as a primary event AND END_ROUND absorbed into a
-        redraw chain of some other primary. Keying on the deck's terminal
-        card rather than is_over() avoids a subtle issue: after consuming
-        END_ROUND, deck_round_number() == num_rounds makes is_over() read
-        True *before* reshuffle replaces the deck.
+        redraw chain of some other primary.
         """
         self._snapshot_market(turn=self.state.turn)
         from my_project.simulation import EventType as _ET
@@ -680,6 +718,7 @@ class PlayableGame:
                 self.state, self.num_players,
                 current_round, self.num_rounds,
             )
+            self._deck_rounds_completed += 1
 
     def _finalize_human_turn(self, event: EventCard, event_detail: str) -> dict:
         """Finalize the in-progress human turn after the event has fully resolved."""

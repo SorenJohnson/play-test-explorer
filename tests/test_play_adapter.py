@@ -121,6 +121,107 @@ def test_two_round_game_stops_after_end_game():
     assert game.state.event_idx == len(game.state.event_deck)
 
 
+def test_round_and_turn_display_correct_at_game_end():
+    """On the final turn of a 2-round game, deck_round_number() must read
+    num_rounds (not 1), and turn_number() must not exceed _total_player_turns.
+    Regression for a display bug where the header showed 'Rd 1/2' and
+    'TURN N+1 / N' after END_GAME fired."""
+    game = PlayableGame(seed=42, max_turns=8, num_rounds=2, disable_prompts=True)
+    safety = 0
+    while not game.is_over():
+        if game.is_human_turn():
+            game.begin_human_turn()
+            if game.is_over():
+                break
+            game.apply_human_action({"type": "pass"})
+            game.end_human_turn()
+        else:
+            result = game.step_ai_turn()
+            if not result.get("ok"):
+                break
+        safety += 1
+        assert safety < 200
+    assert game.is_over()
+    assert game.deck_round_number() == game.num_rounds
+    assert game.turn_number() == game._total_player_turns()
+    # round_number must not tick past the last round when the game ends.
+    total_turns = game._total_player_turns()
+    expected_round = ((total_turns - 1) // game.num_players) + 1
+    assert game.round_number() == expected_round
+    state = game.state_dict()
+    assert state["deck_round"] == state["num_rounds"]
+    assert state["turn_index"] + 1 == state["total_turns"]
+    assert state["round"] == expected_round
+
+
+def test_total_player_turns_is_stable_across_game():
+    """total_turns must not change during a game — denominator in the UI
+    should be a constant. Regression for a bug where total was recomputed
+    from the current deck each call, stepping up at reshuffle because
+    round N+1's deck has a different non-redraw count than round N's."""
+    for seed in (42, 7, 13):
+        for num_players in (2, 3):
+            for num_rounds in (1, 2):
+                game = PlayableGame(
+                    seed=seed, num_players=num_players,
+                    num_rounds=num_rounds, disable_prompts=True,
+                )
+                predicted = game._total_player_turns()
+                seen = {predicted}
+                safety = 0
+                while not game.is_over():
+                    if game.is_human_turn():
+                        game.begin_human_turn()
+                        seen.add(game._total_player_turns())
+                        if game.is_over():
+                            break
+                        game.apply_human_action({"type": "pass"})
+                        game.end_human_turn()
+                    else:
+                        result = game.step_ai_turn()
+                        if not result.get("ok"):
+                            break
+                    seen.add(game._total_player_turns())
+                    safety += 1
+                    assert safety < 300
+                assert seen == {predicted}, (
+                    f"total_turns fluctuated for seed={seed} np={num_players} "
+                    f"nr={num_rounds}: saw {seen}"
+                )
+                assert predicted == game._turn_count, (
+                    f"predicted total {predicted} != actual turns {game._turn_count} "
+                    f"for seed={seed} np={num_players} nr={num_rounds}"
+                )
+
+
+def test_deck_round_number_advances_across_rounds():
+    """deck_round_number() is 1 during round 1, 2 during round 2, etc.
+    Regression: previously derived from END_ROUND events in the *current*
+    deck, which reset to 1 after reshuffle replaced the deck."""
+    game = PlayableGame(seed=42, max_turns=8, num_rounds=2, disable_prompts=True)
+    assert game.deck_round_number() == 1
+    saw_round_2_midgame = False
+    safety = 0
+    while not game.is_over():
+        if game.is_human_turn():
+            game.begin_human_turn()
+            if game.is_over():
+                break
+            game.apply_human_action({"type": "pass"})
+            game.end_human_turn()
+        else:
+            result = game.step_ai_turn()
+            if not result.get("ok"):
+                break
+        # After reshuffle and at least one more turn, deck_round should be 2
+        # even though the round-2 deck contains no END_ROUND events.
+        if game.deck_round_number() == 2 and not game.is_over():
+            saw_round_2_midgame = True
+        safety += 1
+        assert safety < 200
+    assert saw_round_2_midgame, "deck_round_number never reached 2 mid-game"
+
+
 def test_legal_actions_reports_affordable_builds():
     game = PlayableGame(seed=42)
     legal = game.legal_human_actions()
