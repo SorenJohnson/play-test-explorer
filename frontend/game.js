@@ -18,7 +18,8 @@ const RESOURCE_COLORS = {
 const PLAYER_COLORS = ["#3fb950", "#58a6ff", "#f85149", "#f0883e"];
 
 let gameData = null;
-let turns = [];  // turn-grouped view built from action_log
+let turns = [];   // turn-grouped view (one per player-turn) used by charts
+let blocks = []; // interleaved turn + event blocks used by the replay UI
 
 async function init() {
   const params = new URLSearchParams(window.location.search);
@@ -42,12 +43,13 @@ async function init() {
     return;
   }
 
-  turns = buildTurns(gameData);
+  const built = buildTurns(gameData);
+  turns = built.turns;
+  blocks = built.blocks;
   renderHeader(scenario);
   renderNetWorthChart();
   renderMarketChart();
   renderRateCharts();
-  renderEndGameBreakdown();
   renderTurnLog();
 }
 
@@ -112,14 +114,6 @@ function buildTurns(data) {
     }
   };
 
-  const turnSnapshot = (playerIdx) => ({
-    money: players[playerIdx].money,
-    debt: players[playerIdx].debt,
-    credit: players[playerIdx].credit,
-    contracts: players[playerIdx].contracts,
-    rates: { ...players[playerIdx].rates },
-    market: { ...market },
-  });
   // Snapshot every player's state so NW/market charts can plot all lines
   // at every turn — not just at each player's own turns. END_GAME's debt
   // settlement fires on the last turn-taker's record but changes everyone.
@@ -131,34 +125,49 @@ function buildTurns(data) {
     rates: { ...p.rates },
   }));
 
-  const out = [];
+  const turnsOut = [];      // one per player-turn (charts)
+  const blocksOut = [];     // interleaved turn + event blocks (replay)
   let pending = [];
   let turnNum = 0;
-  // Snapshot of all players + market at the moment the NEXT turn begins.
-  // Updated each time a turn closes so every turn record can show its own
-  // "before" state without needing to replay mutations in reverse.
-  let nextTurnStart = allPlayerStates();
-  let nextTurnMarket = { ...market };
+  let eventNum = 0;
+  let turnStartState = allPlayerStates();
+  let turnStartMarket = { ...market };
+
+  const sumDelta = (muts, field) => {
+    let d = 0;
+    for (const m of muts || []) {
+      if (m.field !== field) continue;
+      const a = typeof m.old === "number" ? m.old : 0;
+      const b = typeof m.new === "number" ? m.new : a;
+      d += b - a;
+    }
+    return d;
+  };
+
+  const perPlayerDeltas = (muts) => {
+    const out = [];
+    for (let pi = 0; pi < numPlayers; pi++) {
+      out.push({
+        money: sumDelta(muts, `player.${pi}.money`),
+        debt: sumDelta(muts, `player.${pi}.debt`),
+        credit: sumDelta(muts, `player.${pi}.credit`),
+      });
+    }
+    return out;
+  };
 
   for (const entry of data.action_log || []) {
-    // For terminal events (END_GAME / END_ROUND), snapshot pre-event state
-    // BEFORE applying mutations so the End-Game Scoring breakdown can show
-    // each player's starting rates / market prices / money at the moment
-    // scoring began.
-    let preState = null;
-    let preMarket = null;
-    const isTerminal = entry.type === "event:end_game" || entry.type === "event:end_round";
-    if (isTerminal) {
-      preState = allPlayerStates();
-      preMarket = { ...market };
-    }
-    // Apply this entry's mutations first so post-entry snapshots reflect its effect.
-    for (const m of entry.mutations || []) applyMutation(m);
+    // Snapshot state BEFORE applying this entry's mutations so each block
+    // can show an accurate "pre" side of its own waterfall.
+    const preState = allPlayerStates();
+    const preMarket = { ...market };
 
-    if (entry.type === "setup") continue;
+    for (const m of entry.mutations || []) applyMutation(m);
     if (entry.type === "contract" && entry.player_idx >= 0) {
       players[entry.player_idx].contracts += 1;
     }
+
+    if (["setup", "market_roll", "corp_assigned"].includes(entry.type)) continue;
 
     if (entry.type.startsWith("event:")) {
       const hasPlayerActions = pending.some(
@@ -166,150 +175,112 @@ function buildTurns(data) {
              || e.type.startsWith("free:")
       );
 
-      if (!hasPlayerActions && out.length) {
-        // Redraw chain — merge into previous turn.
-        const last = out[out.length - 1];
-        last.event += " | " + entry.summary;
-        const snap = turnSnapshot(last._player_idx);
-        last.money_after = snap.money;
-        last.debt = snap.debt;
-        last.contracts = snap.contracts;
-        last.market = snap.market;
-        last.rates = snap.rates;
-        last.player_states = allPlayerStates();
+      // If there were player actions buffered since the last event, close
+      // out a Turn block now — the player's actions are done and the event
+      // is about to fire.
+      if (hasPlayerActions) {
+        turnNum += 1;
+        const actor = pending.find((e) => e.player_idx >= 0);
+        const pidx = actor ? actor.player_idx : (turnNum - 1) % numPlayers;
+        const moneyField = `player.${pidx}.money`;
+        const debtField = `player.${pidx}.debt`;
+        const creditField = `player.${pidx}.credit`;
+
+        const actions = [];
+        for (const e of pending) {
+          const meta = e.metadata || {};
+          const moneyDelta = sumDelta(e.mutations, moneyField);
+          const debtDelta = sumDelta(e.mutations, debtField);
+          const creditDelta = sumDelta(e.mutations, creditField);
+          // Hacker Array: any market.* change on a resource other than the
+          // one being sold indicates the HA pushed a target price.
+          let hackerNote = "";
+          if (e.type === "sell") {
+            const sold = (meta.sell_resource || "").toUpperCase();
+            for (const m of e.mutations || []) {
+              const mm = /^market\.(\w+)$/.exec(m.field);
+              if (!mm || mm[1] === sold) continue;
+              if (typeof m.old !== "number" || typeof m.new !== "number") continue;
+              const delta = m.new - m.old;
+              if (delta === 0) continue;
+              hackerNote += ` · Hacker ${mm[1]} ${delta > 0 ? "+" : ""}${delta}`;
+            }
+          }
+          actions.push({
+            type: e.type,
+            detail: e.summary + hackerNote,
+            money_delta: moneyDelta,
+            debt_delta: debtDelta,
+            credit_delta: creditDelta,
+            meta,
+          });
+        }
+
+        // pre-event state = what just came in preState (before THIS event
+        // entry fired). turnStartState = snapshot taken when the previous
+        // turn closed, so it's the true "start" of this turn.
+        blocksOut.push({
+          kind: "turn",
+          turn_num: turnNum,
+          player_idx: pidx,
+          actions,
+          pre_state: turnStartState,
+          pre_market: turnStartMarket,
+          post_state: preState,
+          post_market: preMarket,
+        });
+
+        // Start a chart record for this player-turn. Its player_states /
+        // market will be updated each time an event fires within this turn.
+        turnsOut.push({
+          turn: turnNum,
+          _player_idx: pidx,
+          player_states: null,
+          market: null,
+        });
+
         pending = [];
-        continue;
       }
 
-      turnNum += 1;
-      const pidx = (turnNum - 1) % numPlayers;
-      const turnPlayer = data.players[pidx];
+      eventNum += 1;
+      const postState = allPlayerStates();
+      const postMarket = { ...market };
 
-      // actions = every log entry that belongs to this player-turn, excluding
-      // the terminating event. Includes free:* (teleportation, OC, etc.) and
-      // swaps so the turn log shows the full sequence. Also captures the
-      // acting player's money delta per entry so we can render a
-      // per-source money flow ($X sell, -$Y build, etc.).
-      const actions = [];
-      const moneyField = `player.${pidx}.money`;
-      const debtField = `player.${pidx}.debt`;
-      const creditField = `player.${pidx}.credit`;
-      let moneyBefore = null;
-
-      const sumDelta = (muts, field) => {
-        // Net change across mutations for `field` in this entry, using each
-        // mutation's own old→new delta so chained mutations of the same
-        // field inside one action don't cancel each other out.
-        let d = 0;
-        for (const m of muts || []) {
-          if (m.field !== field) continue;
-          const a = typeof m.old === "number" ? m.old : 0;
-          const b = typeof m.new === "number" ? m.new : a;
-          d += b - a;
-        }
-        return d;
-      };
-
-      for (const e of pending) {
-        if (["setup", "market_roll", "corp_assigned"].includes(e.type)) continue;
-        const meta = e.metadata || {};
-        const moneyDelta = sumDelta(e.mutations, moneyField);
-        const debtDelta = sumDelta(e.mutations, debtField);
-        const creditDelta = sumDelta(e.mutations, creditField);
-        // For sells, detect Hacker Array target mutations — any market.* move
-        // on a resource OTHER than the sold one is a hacker array shift.
-        let hackerNote = "";
-        if (e.type === "sell") {
-          const sold = (meta.sell_resource || "").toUpperCase();
-          for (const m of e.mutations || []) {
-            const mm = /^market\.(\w+)$/.exec(m.field);
-            if (!mm || mm[1] === sold) continue;
-            if (typeof m.old !== "number" || typeof m.new !== "number") continue;
-            const delta = m.new - m.old;
-            if (delta === 0) continue;
-            hackerNote += ` · Hacker ${mm[1]} ${delta > 0 ? "+" : ""}${delta}`;
-          }
-        }
-        actions.push({
-          type: e.type,
-          detail: e.summary + hackerNote,
-          money_delta: moneyDelta,
-          debt_delta: debtDelta,
-          credit_delta: creditDelta,
-          meta,
-        });
-        if (moneyBefore === null && e.player_idx === pidx) {
-          for (const m of e.mutations || []) {
-            if (m.field === moneyField) { moneyBefore = m.old; break; }
-          }
-        }
-      }
-
-      // Event's effect on the acting player's money/debt/credit.
-      const eventMoneyDelta = sumDelta(entry.mutations, moneyField);
-      const eventDebtDelta = sumDelta(entry.mutations, debtField);
-      const eventCreditDelta = sumDelta(entry.mutations, creditField);
-      // Per-player breakdown — power bill / futures settlement / debt
-      // collection / news rate_all all fire on one player's turn but mutate
-      // every player. Computing delta per player lets the turn log show
-      // "⚡ POWER BILL — P1 +$3, P2 -$4 debt, P3 -$0".
-      const eventPlayerDeltas = [];
-      for (let pi = 0; pi < numPlayers; pi++) {
-        eventPlayerDeltas.push({
-          money: sumDelta(entry.mutations, `player.${pi}.money`),
-          debt: sumDelta(entry.mutations, `player.${pi}.debt`),
-          credit: sumDelta(entry.mutations, `player.${pi}.credit`),
-        });
-      }
-
-      if (moneyBefore === null) {
-        for (const m of entry.mutations || []) {
-          if (m.field === moneyField) { moneyBefore = m.old; break; }
-        }
-      }
-
-      const snap = turnSnapshot(pidx);
-      out.push({
-        turn: turnNum,
-        _player_idx: pidx,
-        player: turnPlayer.strategy
-          ? `P${pidx + 1} (${turnPlayer.strategy})`
-          : `P${pidx + 1}`,
-        actions,
-        event: entry.summary,
-        event_type: entry.type,
-        event_metadata: entry.metadata || {},
-        event_money_delta: eventMoneyDelta,
-        event_debt_delta: eventDebtDelta,
-        event_credit_delta: eventCreditDelta,
-        event_player_deltas: eventPlayerDeltas,
-        event_pre_state: preState,
-        event_pre_market: preMarket,
-        // State at the start of the turn (before any actions). Used by the
-        // expandable turn log to show the "before" side of the waterfall.
-        turn_start_state: nextTurnStart,
-        turn_start_market: nextTurnMarket,
-        money_before: moneyBefore !== null ? moneyBefore : snap.money,
-        money_after: snap.money,
-        debt: snap.debt,
-        credit: snap.credit,
-        contracts: snap.contracts,
-        market: snap.market,
-        rates: snap.rates,
-        player_states: allPlayerStates(),
+      blocksOut.push({
+        kind: "event",
+        event_num: eventNum,
+        turn_num: turnNum,
+        type: entry.type,
+        summary: entry.summary,
+        metadata: entry.metadata || {},
+        pre_state: preState,
+        pre_market: preMarket,
+        post_state: postState,
+        post_market: postMarket,
+        player_deltas: perPlayerDeltas(entry.mutations),
       });
-      pending = [];
-      // Capture the state at the close of this turn as the NEXT turn's
-      // starting state. Done after pushing so the next iteration's pending
-      // entries begin from a fresh baseline.
-      nextTurnStart = allPlayerStates();
-      nextTurnMarket = { ...market };
+
+      // Keep the current player-turn's chart row updated to this event's
+      // post-state — final row per turn will reflect the state after the
+      // last chained event fires.
+      if (turnsOut.length) {
+        const last = turnsOut[turnsOut.length - 1];
+        last.player_states = postState;
+        last.market = postMarket;
+      }
+
+      // After each event chain step, future pending actions start from the
+      // new post-event state. (If the next entry is another chained event
+      // with no actions, this snapshot is fine — it won't be used as a
+      // turn-start.)
+      turnStartState = postState;
+      turnStartMarket = postMarket;
     } else {
       pending.push(entry);
     }
   }
 
-  return out;
+  return { turns: turnsOut, blocks: blocksOut };
 }
 
 function axisStyle(title) {
@@ -447,123 +418,6 @@ function positionToPrice(pos) {
   return PRICE_TRACK[clamped];
 }
 
-function renderEndGameBreakdown() {
-  const container = document.getElementById("end-game-breakdown");
-  if (!container) return;
-
-  // Look at every terminal turn (END_GAME and the END_ROUND one in a 2-round
-  // game) so the user can see both power-bill/futures settlements.
-  const terminals = turns.filter(
-    (t) => (t.event_type === "event:end_game" || t.event_type === "event:end_round")
-         && t.event_pre_state
-  );
-  if (!terminals.length) {
-    container.innerHTML = '<p class="subtitle">No terminal events found in this game.</p>';
-    return;
-  }
-
-  const numPlayers = gameData.players.length;
-  const signed = (n) => (n > 0 ? `+$${n}` : n < 0 ? `-$${Math.abs(n)}` : "$0");
-
-  const sections = terminals.map((t) => {
-    const meta = t.event_metadata || {};
-    const preState = t.event_pre_state;
-    const preMarket = t.event_pre_market || {};
-    const postState = t.player_states;
-    const perPlayerMeta = Array.isArray(meta.per_player) ? meta.per_player : [];
-    const pwrPrice = meta.pwr_price !== undefined
-      ? meta.pwr_price
-      : (preMarket.PWR !== undefined ? positionToPrice(preMarket.PWR) : null);
-
-    const rows = [];
-    for (let i = 0; i < numPlayers; i++) {
-      const player = gameData.players[i] || {};
-      const color = PLAYER_COLORS[i % PLAYER_COLORS.length];
-      const pre = preState[i] || {};
-      const post = (postState && postState[i]) || {};
-      const preRates = pre.rates || {};
-      const pmeta = perPlayerMeta[i] || {};
-
-      // Power bill: PWR rate × pwr_price (metadata.per_player confirms).
-      const pwrRate = preRates.PWR || 0;
-      const pwrShielded = !!pmeta.shielded;
-      const pwrEarning = pmeta.earning;
-      const pwrDebt = pmeta.debt;
-      const domeBonus = pmeta.dome_bonus || 0;
-
-      // Futures settlements: each negative non-PWR rate × current market price.
-      const futuresLines = [];
-      let futuresDebt = 0;
-      for (const [r, rate] of Object.entries(preRates)) {
-        if (r === "PWR") continue;
-        if ((rate || 0) >= 0) continue;
-        const units = Math.abs(rate);
-        const pos = preMarket[r];
-        const price = pos !== undefined ? positionToPrice(pos) : null;
-        const cost = price !== null ? units * price : null;
-        futuresLines.push(
-          `${units} ${r} @ ${price !== null ? `$${price}` : "?"} = ${cost !== null ? `$${cost}` : "?"}`
-        );
-        if (cost !== null) futuresDebt += cost;
-      }
-
-      const preNw = (pre.money || 0) - (pre.debt || 0) + (pre.credit || 0);
-      const postNw = (post.money || 0) - (post.debt || 0) + (post.credit || 0);
-      const nwDelta = postNw - preNw;
-
-      const pwrLine = pwrShielded
-        ? `Energy Vault shielded (${pwrRate > 0 ? "+" : ""}${pwrRate} PWR)`
-        : pwrRate > 0
-          ? `+$${pwrEarning !== undefined ? pwrEarning : pwrRate * (pwrPrice || 0)} (sold ${pwrRate} PWR @ $${pwrPrice || "?"})`
-          : pwrRate < 0
-            ? `-$${pwrDebt !== undefined ? pwrDebt : Math.abs(pwrRate) * (pwrPrice || 0)} debt (bought ${Math.abs(pwrRate)} PWR @ $${pwrPrice || "?"})`
-            : "no change (0 PWR)";
-
-      rows.push(`
-        <tr>
-          <td><span style="color:${color}; font-weight:600">P${i + 1}</span><br>
-              <span style="color:#8b949e; font-size:0.7rem">${player.strategy || "?"}${player.corporation ? ` · ${player.corporation}` : ""}</span></td>
-          <td style="font-size:0.72rem">money $${pre.money || 0} · debt $${pre.debt || 0} · credit $${pre.credit || 0}<br>
-              <span style="color:#8b949e">NW $${preNw}</span></td>
-          <td style="font-size:0.72rem">${
-            Object.entries(preRates)
-              .filter(([, v]) => v)
-              .map(([k, v]) => `<span style="color:${v > 0 ? "#3fb950" : "#f85149"}">${v > 0 ? "+" : ""}${v} ${k}</span>`)
-              .join(" ") || "<span style=\"color:#484f58\">no rates</span>"
-          }</td>
-          <td style="font-size:0.72rem">${pwrLine}${domeBonus ? `<br><span style=\"color:#a371f7\">+$${domeBonus} Pleasure Dome bonus</span>` : ""}</td>
-          <td style="font-size:0.72rem">${futuresLines.length ? futuresLines.join("<br>") + `<br><span style=\"color:#8b949e\">total: $${futuresDebt} debt</span>` : "<span style=\"color:#484f58\">no negative rates</span>"}</td>
-          <td style="font-size:0.72rem">money $${post.money || 0} · debt $${post.debt || 0} · credit $${post.credit || 0}<br>
-              <span style="color:${nwDelta >= 0 ? "#3fb950" : "#f85149"}">NW $${postNw} (${signed(nwDelta)})</span></td>
-        </tr>
-      `);
-    }
-
-    const header = t.event_type === "event:end_game" ? "END GAME" : `END OF ROUND ${t.turn}`;
-    const pwrStr = pwrPrice !== null ? `PWR @ $${pwrPrice}` : "";
-    return `
-      <h3 style="color:#58a6ff; margin-top:16px">${header} <span style="color:#8b949e; font-weight:normal; font-size:0.8rem">${pwrStr} · turn ${t.turn}</span></h3>
-      <div class="table-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>Player</th>
-              <th>Pre-event $ / debt / credit / NW</th>
-              <th>Rates at scoring</th>
-              <th>Power Bill</th>
-              <th>Futures Settlement</th>
-              <th>Post $ / debt / credit / NW (Δ)</th>
-            </tr>
-          </thead>
-          <tbody>${rows.join("")}</tbody>
-        </table>
-      </div>
-    `;
-  });
-
-  container.innerHTML = sections.join("");
-}
-
 function renderTurnLog() {
   const container = document.getElementById("turn-log");
   const numPlayers = gameData.players.length;
@@ -584,48 +438,26 @@ function renderTurnLog() {
   const fmtState = (s) => s
     ? `$${s.money || 0} · debt $${s.debt || 0} · credit $${s.credit || 0} · NW $${nwOf(s)}`
     : "—";
+  const marketLine = (mkt) => Object.entries(mkt || {})
+    .filter(([k]) => k !== "PWR")
+    .map(([r, pos]) => `${r}: $${positionToPrice(pos)}`)
+    .join(" · ") || "—";
+  const pwrLine = (mkt) => mkt && mkt.PWR !== undefined
+    ? `PWR @ $${positionToPrice(mkt.PWR)}`
+    : "";
+  const nameToPidx = (name) => {
+    // Engine players are "Player_1" / "Player_2" / ...; parse the index.
+    const m = /_(\d+)$/.exec(name || "");
+    return m ? parseInt(m[1], 10) - 1 : -1;
+  };
+  const playerLabel = (i) => {
+    const p = gameData.players[i] || {};
+    const color = PLAYER_COLORS[i % PLAYER_COLORS.length];
+    return `<span style="color:${color}; font-weight:600">P${i + 1}</span><span style="color:#8b949e"> (${p.strategy || "?"})</span>`;
+  };
 
-  const controls = `
-    <div style="display:flex; gap:8px; margin-bottom:8px; font-size:0.75rem;">
-      <button id="tl-expand-all" style="background:#21262d; border:1px solid #30363d; color:#c9d1d9; padding:4px 10px; border-radius:4px; cursor:pointer;">Expand all</button>
-      <button id="tl-collapse-all" style="background:#21262d; border:1px solid #30363d; color:#c9d1d9; padding:4px 10px; border-radius:4px; cursor:pointer;">Collapse all</button>
-    </div>`;
-
-  const turnBlocks = turns.map((turn) => {
-    const pidx = turn._player_idx;
-    const color = PLAYER_COLORS[pidx % PLAYER_COLORS.length];
-    const player = gameData.players[pidx] || {};
-    const preActing = (turn.turn_start_state && turn.turn_start_state[pidx]) || {};
-    const postActing = (turn.player_states && turn.player_states[pidx]) || {};
-    const round = Math.floor((turn.turn - 1) / numPlayers) + 1;
-    const nwPre = nwOf(preActing);
-    const nwPost = nwOf(postActing);
-    const nwDelta = nwPost - nwPre;
-    const deltaColor = nwDelta > 0 ? "#3fb950" : nwDelta < 0 ? "#f85149" : "#8b949e";
-
-    // One-line summary shown in the <summary> header while collapsed.
-    const gameplayCount = turn.actions.filter((a) => !["swap"].includes(a.type)).length;
-    const actionsTeaser = gameplayCount
-      ? turn.actions
-          .filter((a) => a.type !== "swap")
-          .map((a) => a.detail.replace(/\s*\([^)]+\)\s*$/, ""))
-          .slice(0, 2)
-          .join(" · ")
-      : "Pass";
-    const eventTeaser = turn.event
-      ? ` <span style="color:#a371f7">⚡ ${turn.event.split(" | ")[0]}</span>`
-      : "";
-
-    const summaryHtml = `
-      <summary style="cursor:pointer; padding:8px 12px; background:#161b22; border-left:3px solid ${color}; font-size:0.82rem; line-height:1.5;">
-        <span style="color:${color}; font-weight:600;">Turn ${turn.turn} · Round ${round} · P${pidx + 1} (${player.strategy || "?"})</span>
-        <span style="color:#8b949e; margin-left:8px;">${actionsTeaser}</span>
-        ${eventTeaser}
-        <span style="color:${deltaColor}; margin-left:8px;">NW ${nwPre} → ${nwPost} (${signed(nwDelta)})</span>
-      </summary>`;
-
-    // Pre-turn state (all players).
-    const preRows = (turn.turn_start_state || []).map((s, i) => {
+  const stateTable = (state) => {
+    const rows = (state || []).map((s, i) => {
       const c = PLAYER_COLORS[i % PLAYER_COLORS.length];
       const p = gameData.players[i] || {};
       return `<tr>
@@ -634,16 +466,252 @@ function renderTurnLog() {
         <td>${ratesSpan(s && s.rates)}</td>
       </tr>`;
     }).join("");
+    return `<table style="width:100%; font-size:0.72rem;"><tbody>${rows}</tbody></table>`;
+  };
 
-    // Market snapshot at start of turn.
-    const marketEntries = Object.entries(turn.turn_start_market || {}).filter(([k]) => k !== "PWR");
-    const marketLine = marketEntries
-      .map(([r, pos]) => `${r}: $${positionToPrice(pos)}`)
-      .join(" · ");
+  const perPlayerDeltaList = (deltas) => {
+    const items = (deltas || []).map((d, i) => {
+      const bits = [];
+      if (d.money) bits.push(signed(d.money));
+      if (d.debt) bits.push(`debt ${d.debt > 0 ? "+" : ""}${d.debt}`);
+      if (d.credit) bits.push(`credit ${d.credit > 0 ? "+" : ""}${d.credit}`);
+      if (!bits.length) return `<li style="color:#484f58">${playerLabel(i)}: no change</li>`;
+      return `<li>${playerLabel(i)}: ${bits.join(" · ")}</li>`;
+    }).join("");
+    return `<ul style="margin:4px 0 0 16px; padding:0; list-style:disc; color:#c9d1d9">${items}</ul>`;
+  };
 
-    // Action list with per-action deltas.
-    const actionRows = turn.actions.length
-      ? turn.actions.map((a) => {
+  // ---- Event-specific detail renderers ----
+
+  const renderPatentAuction = (block) => {
+    const meta = block.metadata;
+    if (!meta || !meta.bids) return "";
+    const winnerIdx = nameToPidx(meta.winner);
+    const rows = Object.entries(meta.bids).map(([name, bid]) => {
+      const i = nameToPidx(name);
+      const isWinner = i === winnerIdx && meta.winner;
+      const c = i >= 0 ? PLAYER_COLORS[i % PLAYER_COLORS.length] : "#c9d1d9";
+      const label = i >= 0 ? `P${i + 1} (${(gameData.players[i] || {}).strategy || "?"})` : name;
+      return `<tr>
+        <td style="color:${c}; font-weight:600">${label}</td>
+        <td>$${bid}</td>
+        <td>${isWinner ? '<span style="color:#3fb950; font-weight:600">WON</span>' : "—"}</td>
+      </tr>`;
+    }).join("");
+    const winnerText = meta.winner
+      ? `<span style="color:#3fb950; font-weight:600">Won by ${meta.winner} for $${meta.price}</span>`
+      : '<span style="color:#8b949e">No winner (auction failed)</span>';
+    return `
+      <div style="margin-top:8px;">
+        <div style="color:#c9d1d9"><strong>Patent:</strong> ${meta.patent || "?"} — ${winnerText}</div>
+        <table style="width:100%; font-size:0.72rem; margin-top:6px;">
+          <thead><tr><th style="text-align:left">Bidder</th><th style="text-align:left">Bid</th><th></th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  };
+
+  const renderPowerBill = (block) => {
+    const meta = block.metadata || {};
+    const perPlayer = Array.isArray(meta.per_player) ? meta.per_player : [];
+    const rows = perPlayer.map((pm) => {
+      const i = nameToPidx(pm.name);
+      const c = i >= 0 ? PLAYER_COLORS[i % PLAYER_COLORS.length] : "#c9d1d9";
+      const label = i >= 0 ? `P${i + 1} (${(gameData.players[i] || {}).strategy || "?"})` : pm.name;
+      let effect;
+      if (pm.shielded) effect = `<span style=\"color:#d2a8ff\">Energy Vault shielded (rate ${pm.rate})</span>`;
+      else if (pm.earning) effect = `<span style=\"color:#3fb950\">+$${pm.earning}</span> (sold ${pm.rate} PWR)`;
+      else if (pm.debt) effect = `<span style=\"color:#f85149\">-$${pm.debt} debt</span> (bought ${Math.abs(pm.rate)} PWR)`;
+      else effect = '<span style="color:#484f58">no change (0 PWR)</span>';
+      const dome = pm.dome_bonus ? ` · <span style=\"color:#a371f7\">+$${pm.dome_bonus} Pleasure Dome</span>` : "";
+      return `<tr><td style="color:${c}; font-weight:600">${label}</td><td>${effect}${dome}</td></tr>`;
+    }).join("");
+    return `
+      <div style="margin-top:8px;">
+        <div style="color:#c9d1d9"><strong>PWR @ $${meta.pwr_price ?? "?"}</strong></div>
+        <table style="width:100%; font-size:0.72rem; margin-top:6px;"><tbody>${rows}</tbody></table>
+      </div>`;
+  };
+
+  const renderDebtCollection = (block) => {
+    const meta = block.metadata || {};
+    const perPlayer = Array.isArray(meta.per_player) ? meta.per_player : [];
+    const rows = perPlayer.map((pm) => {
+      const i = nameToPidx(pm.name);
+      const c = i >= 0 ? PLAYER_COLORS[i % PLAYER_COLORS.length] : "#c9d1d9";
+      const label = i >= 0 ? `P${i + 1} (${(gameData.players[i] || {}).strategy || "?"})` : pm.name;
+      let effect;
+      if (pm.debt_added) effect = `<span style=\"color:#f85149\">+$${pm.debt_added} debt</span> (interest $${pm.interest || 0})`;
+      else effect = '<span style="color:#484f58">no debt</span>';
+      return `<tr><td style="color:${c}; font-weight:600">${label}</td><td>${effect}</td></tr>`;
+    }).join("");
+    return `<div style="margin-top:8px;"><table style="width:100%; font-size:0.72rem;"><tbody>${rows}</tbody></table></div>`;
+  };
+
+  const renderFuturesTrading = (block) => {
+    const meta = block.metadata || {};
+    const mc = Array.isArray(meta.market_changes) ? meta.market_changes : [];
+    const pc = Array.isArray(meta.player_contributions) ? meta.player_contributions : [];
+    const mcLines = mc.map((c) => `${c.resource} +${c.units} units ($${c.price_before} → $${c.price_after})`).join(" · ") || "—";
+    const pcLines = pc.map((p) => {
+      const i = nameToPidx(p.name);
+      const c = i >= 0 ? PLAYER_COLORS[i % PLAYER_COLORS.length] : "#c9d1d9";
+      const label = i >= 0 ? `P${i + 1}` : p.name;
+      const rates = Object.entries(p.rates || {})
+        .map(([k, v]) => `${v > 0 ? "+" : ""}${v} ${k}`).join(" ");
+      return `<li><span style="color:${c}; font-weight:600">${label}</span>: ${rates}</li>`;
+    }).join("");
+    return `
+      <div style="margin-top:8px;">
+        <div><strong>Market pushed:</strong> ${mcLines}</div>
+        ${pc.length ? `<div style="margin-top:4px"><strong>Contributions:</strong></div><ul style="margin:2px 0 0 16px; padding:0; list-style:disc">${pcLines}</ul>` : ""}
+      </div>`;
+  };
+
+  const renderNewsBulletin = (block) => {
+    const meta = block.metadata || {};
+    const mc = Array.isArray(meta.market_changes) ? meta.market_changes : [];
+    const pc = Array.isArray(meta.player_contributions) ? meta.player_contributions : [];
+    const mcLines = mc.length
+      ? mc.map((c) => `${c.resource} +${c.units} units ($${c.price_before} → $${c.price_after})`).join(" · ")
+      : "";
+    const pcLines = pc.map((p) => {
+      const i = nameToPidx(p.name);
+      const c = i >= 0 ? PLAYER_COLORS[i % PLAYER_COLORS.length] : "#c9d1d9";
+      const label = i >= 0 ? `P${i + 1}` : p.name;
+      const rates = Object.entries(p.rates || {})
+        .map(([k, v]) => `${v > 0 ? "+" : ""}${v} ${k}`).join(" ");
+      return `<li><span style="color:${c}; font-weight:600">${label}</span>: ${rates}</li>`;
+    }).join("");
+    let inner = "";
+    if (mcLines) inner += `<div><strong>Market:</strong> ${mcLines}</div>`;
+    if (pcLines) inner += `<div style="margin-top:4px"><strong>Contributions:</strong></div><ul style="margin:2px 0 0 16px; padding:0; list-style:disc">${pcLines}</ul>`;
+    return inner ? `<div style="margin-top:8px;">${inner}</div>` : "";
+  };
+
+  const renderTerminal = (block) => {
+    // END_ROUND / END_GAME: power bill + futures settlement.
+    const meta = block.metadata || {};
+    const preMarket = block.pre_market || {};
+    const preState = block.pre_state || [];
+    const postState = block.post_state || [];
+    const perPlayerMeta = Array.isArray(meta.per_player) ? meta.per_player : [];
+    const pwrPrice = meta.pwr_price ?? (preMarket.PWR !== undefined ? positionToPrice(preMarket.PWR) : null);
+
+    const rows = preState.map((pre, i) => {
+      const post = postState[i] || {};
+      const preRates = pre.rates || {};
+      const pmeta = perPlayerMeta[i] || {};
+      const pwrRate = preRates.PWR || 0;
+      const futures = [];
+      let futuresDebt = 0;
+      for (const [r, rate] of Object.entries(preRates)) {
+        if (r === "PWR" || (rate || 0) >= 0) continue;
+        const units = Math.abs(rate);
+        const pos = preMarket[r];
+        const price = pos !== undefined ? positionToPrice(pos) : null;
+        const cost = price !== null ? units * price : null;
+        futures.push(`${units} ${r} @ ${price !== null ? `$${price}` : "?"} = ${cost !== null ? `$${cost}` : "?"}`);
+        if (cost !== null) futuresDebt += cost;
+      }
+      const pwrBit = pmeta.shielded
+        ? `Energy Vault shielded (${pwrRate > 0 ? "+" : ""}${pwrRate} PWR)`
+        : pwrRate > 0
+          ? `<span style=\"color:#3fb950\">+$${pmeta.earning ?? pwrRate * (pwrPrice || 0)}</span> (sold ${pwrRate} PWR)`
+          : pwrRate < 0
+            ? `<span style=\"color:#f85149\">-$${pmeta.debt ?? Math.abs(pwrRate) * (pwrPrice || 0)} debt</span> (bought ${Math.abs(pwrRate)} PWR)`
+            : '<span style="color:#484f58">0 PWR</span>';
+      const dome = pmeta.dome_bonus ? `<br><span style=\"color:#a371f7\">+$${pmeta.dome_bonus} Pleasure Dome</span>` : "";
+      const preNw = nwOf(pre);
+      const postNw = nwOf(post);
+      const nwDelta = postNw - preNw;
+      const deltaColor = nwDelta > 0 ? "#3fb950" : nwDelta < 0 ? "#f85149" : "#8b949e";
+      return `<tr>
+        <td>${playerLabel(i)}</td>
+        <td>${fmtState(pre)}</td>
+        <td>${ratesSpan(preRates)}</td>
+        <td>${pwrBit}${dome}</td>
+        <td>${futures.length ? futures.join("<br>") + `<br><span style=\"color:#8b949e\">total: $${futuresDebt}</span>` : '<span style="color:#484f58">—</span>'}</td>
+        <td>${fmtState(post)} <span style=\"color:${deltaColor}\">(${signed(nwDelta)})</span></td>
+      </tr>`;
+    }).join("");
+    return `
+      <div style="margin-top:8px;">
+        <div style="color:#c9d1d9"><strong>${pwrPrice !== null ? `PWR @ $${pwrPrice}` : ""}</strong></div>
+        <div class="table-scroll" style="margin-top:6px">
+          <table style="width:100%; font-size:0.7rem;">
+            <thead><tr>
+              <th>Player</th><th>Pre</th><th>Rates</th><th>Power Bill</th><th>Futures</th><th>Post (ΔNW)</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>`;
+  };
+
+  const renderDrawBuildingCard = (block) => {
+    // Draw building card: summary is human-readable, metadata is empty.
+    return `<div style="margin-top:8px; color:#c9d1d9">${block.summary}</div>`;
+  };
+
+  // Dispatch to the right event renderer based on type.
+  const renderEventDetail = (block) => {
+    switch (block.type) {
+      case "event:patent_auction": return renderPatentAuction(block);
+      case "event:power_bill": return renderPowerBill(block);
+      case "event:debt_collection": return renderDebtCollection(block);
+      case "event:futures_trading": return renderFuturesTrading(block);
+      case "event:news_bulletin": return renderNewsBulletin(block);
+      case "event:end_round":
+      case "event:end_game": return renderTerminal(block);
+      case "event:draw_building_card": return renderDrawBuildingCard(block);
+      default: return "";
+    }
+  };
+
+  const prettyEventName = (type) => {
+    const map = {
+      "event:patent_auction": "Patent Auction",
+      "event:power_bill": "Power Bill",
+      "event:debt_collection": "Debt Collection",
+      "event:futures_trading": "Futures Trading",
+      "event:news_bulletin": "News Bulletin",
+      "event:end_round": "End of Round",
+      "event:end_game": "End of Game",
+      "event:draw_building_card": "Draw Building Card",
+    };
+    return map[type] || type.replace(/^event:/, "");
+  };
+
+  const controls = `
+    <div style="display:flex; gap:8px; margin-bottom:8px; font-size:0.75rem;">
+      <button id="tl-expand-all" style="background:#21262d; border:1px solid #30363d; color:#c9d1d9; padding:4px 10px; border-radius:4px; cursor:pointer;">Expand all</button>
+      <button id="tl-collapse-all" style="background:#21262d; border:1px solid #30363d; color:#c9d1d9; padding:4px 10px; border-radius:4px; cursor:pointer;">Collapse all</button>
+    </div>`;
+
+  const renderTurnBlock = (b) => {
+    const pidx = b.player_idx;
+    const color = PLAYER_COLORS[pidx % PLAYER_COLORS.length];
+    const player = gameData.players[pidx] || {};
+    const round = Math.floor((b.turn_num - 1) / numPlayers) + 1;
+    const actingPre = (b.pre_state && b.pre_state[pidx]) || {};
+    const actingPost = (b.post_state && b.post_state[pidx]) || {};
+    const nwDelta = nwOf(actingPost) - nwOf(actingPre);
+    const deltaColor = nwDelta > 0 ? "#3fb950" : nwDelta < 0 ? "#f85149" : "#8b949e";
+    const gameplay = b.actions.filter((a) => a.type !== "swap");
+    const teaser = gameplay.length
+      ? gameplay.slice(0, 2).map((a) => a.detail.replace(/\s*\([^)]+\)\s*$/, "")).join(" · ")
+      : "Pass";
+
+    const summaryHtml = `
+      <summary style="cursor:pointer; padding:8px 12px; background:#161b22; border-left:3px solid ${color}; font-size:0.82rem; line-height:1.5;">
+        <span style="color:${color}; font-weight:600;">Turn ${b.turn_num} · Round ${round} · P${pidx + 1} (${player.strategy || "?"})</span>
+        <span style="color:#8b949e; margin-left:8px;">${teaser}</span>
+        <span style="color:${deltaColor}; margin-left:8px;">NW ${nwOf(actingPre)} → ${nwOf(actingPost)} (${signed(nwDelta)})</span>
+      </summary>`;
+
+    const actionRows = b.actions.length
+      ? b.actions.map((a) => {
           const cl = colorFor(a.type);
           const deltaBits = [];
           if (a.money_delta) deltaBits.push(signed(a.money_delta));
@@ -654,54 +722,53 @@ function renderTurnLog() {
         }).join("")
       : '<li style="color:#484f58">Pass — no actions</li>';
 
-    // Event block with per-player impact.
-    const eventPerPlayer = (turn.event_player_deltas || []).map((d, i) => {
-      const bits = [];
-      if (d.money) bits.push(signed(d.money));
-      if (d.debt) bits.push(`debt ${d.debt > 0 ? "+" : ""}${d.debt}`);
-      if (d.credit) bits.push(`credit ${d.credit > 0 ? "+" : ""}${d.credit}`);
-      if (!bits.length) return null;
-      const c = PLAYER_COLORS[i % PLAYER_COLORS.length];
-      return `<li><span style="color:${c}">P${i + 1}:</span> ${bits.join(" · ")}</li>`;
-    }).filter(Boolean).join("");
-    const eventHtml = turn.event
-      ? `<div style="margin-top:8px;">
-           <div style="color:#a371f7">⚡ ${turn.event}</div>
-           ${eventPerPlayer ? `<ul style="margin:4px 0 0 16px; padding:0; list-style:disc; color:#c9d1d9">${eventPerPlayer}</ul>` : ""}
-         </div>`
-      : "";
-
-    // Post-turn state (all players).
-    const postRows = (turn.player_states || []).map((s, i) => {
-      const c = PLAYER_COLORS[i % PLAYER_COLORS.length];
-      const p = gameData.players[i] || {};
-      return `<tr>
-        <td style="color:${c}; font-weight:600">P${i + 1} (${p.strategy || "?"})</td>
-        <td>${fmtState(s)}</td>
-        <td>${ratesSpan(s && s.rates)}</td>
-      </tr>`;
-    }).join("");
-
-    const bodyHtml = `
+    return `<details style="margin-bottom:4px;">${summaryHtml}
       <div style="padding:12px 16px; background:#0d1117; border-left:3px solid ${color}; font-size:0.78rem; line-height:1.6;">
-        <div style="color:#8b949e; margin-bottom:8px;">Market at start: ${marketLine || "—"}</div>
-
+        <div style="color:#8b949e; margin-bottom:8px;">Market at start: ${marketLine(b.pre_market)} · ${pwrLine(b.pre_market)}</div>
         <h4 style="color:#58a6ff; margin:8px 0 4px; font-size:0.8rem;">Pre-turn state</h4>
-        <table style="width:100%; font-size:0.72rem;"><tbody>${preRows}</tbody></table>
-
+        ${stateTable(b.pre_state)}
         <h4 style="color:#58a6ff; margin:12px 0 4px; font-size:0.8rem;">Actions by P${pidx + 1}</h4>
         <ul style="margin:4px 0 0 16px; padding:0; list-style:disc;">${actionRows}</ul>
+        <h4 style="color:#58a6ff; margin:12px 0 4px; font-size:0.8rem;">State after actions</h4>
+        ${stateTable(b.post_state)}
+      </div>
+    </details>`;
+  };
 
-        ${eventHtml}
+  const renderEventBlock = (b) => {
+    const name = prettyEventName(b.type);
+    const anyImpact = (b.player_deltas || []).some((d) => d.money || d.debt || d.credit);
+    const summaryBits = [];
+    if (b.type === "event:patent_auction" && b.metadata && b.metadata.winner) {
+      const wi = nameToPidx(b.metadata.winner);
+      summaryBits.push(`${b.metadata.patent || ""} → P${wi + 1} for $${b.metadata.price}`);
+    } else if (b.type === "event:power_bill" && b.metadata && b.metadata.pwr_price !== undefined) {
+      summaryBits.push(`PWR @ $${b.metadata.pwr_price}`);
+    } else {
+      summaryBits.push(b.summary.replace(/^Event: /, ""));
+    }
 
-        <h4 style="color:#58a6ff; margin:12px 0 4px; font-size:0.8rem;">Post-turn state</h4>
-        <table style="width:100%; font-size:0.72rem;"><tbody>${postRows}</tbody></table>
-      </div>`;
+    const summaryHtml = `
+      <summary style="cursor:pointer; padding:6px 12px; background:#1f1b2a; border-left:3px solid #a371f7; font-size:0.8rem; line-height:1.5;">
+        <span style="color:#a371f7; font-weight:600;">⚡ ${name}</span>
+        <span style="color:#c9d1d9; margin-left:8px;">${summaryBits.join(" · ")}</span>
+        ${anyImpact ? '<span style="color:#8b949e; margin-left:8px; font-size:0.7rem">(multi-player impact)</span>' : ""}
+      </summary>`;
 
-    return `<details style="margin-bottom:4px; border-radius:4px; overflow:hidden;">${summaryHtml}${bodyHtml}</details>`;
-  }).join("");
+    const detail = renderEventDetail(b);
+    return `<details style="margin-bottom:4px; margin-left:16px;">${summaryHtml}
+      <div style="padding:10px 16px; background:#0d1117; border-left:3px solid #a371f7; font-size:0.76rem; line-height:1.6;">
+        <div style="color:#8b949e; margin-bottom:6px;">Market before event: ${marketLine(b.pre_market)} · ${pwrLine(b.pre_market)}</div>
+        ${detail}
+        ${anyImpact
+          ? `<h4 style="color:#58a6ff; margin:10px 0 4px; font-size:0.8rem;">Net impact per player</h4>${perPlayerDeltaList(b.player_deltas)}`
+          : ""}
+      </div>
+    </details>`;
+  };
 
-  container.innerHTML = controls + turnBlocks;
+  const html = blocks.map((b) => b.kind === "turn" ? renderTurnBlock(b) : renderEventBlock(b)).join("");
+  container.innerHTML = controls + html;
 
   const expandBtn = document.getElementById("tl-expand-all");
   const collapseBtn = document.getElementById("tl-collapse-all");
