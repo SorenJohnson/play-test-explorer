@@ -33,9 +33,17 @@ def analyze_sim_contracts(sim_files: list[Path]) -> dict:
         with open(f) as fh:
             data = json.load(fh)
 
-        strats = data.get("config", {}).get("player_strategies") or [data.get("config", {}).get("strategy", "unknown")]
+        config_strats = data.get("config", {}).get("player_strategies") or [data.get("config", {}).get("strategy", "unknown")]
 
         for game in data["games"]:
+            # Per-game seat→strategy mapping (random per game due to
+            # run_monte_carlo shuffling). Fall back to config for pre-shuffle
+            # historical sim files that don't have per-player strategies.
+            game_strats = [
+                (p.get("strategy") or (config_strats[i] if i < len(config_strats) else "unknown"))
+                for i, p in enumerate(game.get("players", []))
+            ] or list(config_strats)
+
             # Per-player tracking
             player_state: dict[str, dict] = {}
 
@@ -48,8 +56,8 @@ def analyze_sim_contracts(sim_files: list[Path]) -> dict:
                         "strategy": "unknown",
                     }
                     idx = int(player.split("_")[1]) - 1 if "_" in player else 0
-                    if idx < len(strats):
-                        player_state[player]["strategy"] = strats[idx]
+                    if idx < len(game_strats):
+                        player_state[player]["strategy"] = game_strats[idx]
 
                 ps = player_state[player]
 

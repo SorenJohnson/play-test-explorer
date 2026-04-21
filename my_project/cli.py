@@ -120,7 +120,9 @@ def cmd_simulate_all(args: argparse.Namespace) -> None:
 
 def cmd_analyze() -> None:
     """Analyze simulation data and export analysis.json."""
+    from datetime import datetime, timezone
     data = export_analysis()
+    data["generated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     # Look for full data first, fall back to publish data
     full_files = list(FULL_DIR.glob("sim_*.json"))
@@ -194,7 +196,14 @@ def cmd_sync_play() -> None:
 
 
 def cmd_publish(args: argparse.Namespace) -> None:
-    """Create trimmed simulation files for GitHub Pages deployment."""
+    """Create trimmed simulation files for GitHub Pages deployment.
+
+    Splits output into:
+      - PUBLISH_DIR/sim_<name>.json — summary stats + per-game summary (no
+        action_log / action_history). Loaded upfront by compare.html.
+      - PUBLISH_DIR/games/sim_<name>/<id>.json — full mutation log for one
+        game, fetched on-demand by the inspector when the user clicks Inspect.
+    """
     full_files = list(FULL_DIR.glob("sim_*.json"))
     if not full_files:
         print(f"No full data found in {FULL_DIR}/. Run 'simulate-all' first.")
@@ -202,6 +211,7 @@ def cmd_publish(args: argparse.Namespace) -> None:
 
     keep = args.games
     PUBLISH_DIR.mkdir(parents=True, exist_ok=True)
+    games_root = PUBLISH_DIR / "games"
 
     for f in full_files:
         with open(f) as fh:
@@ -211,7 +221,6 @@ def cmd_publish(args: argparse.Namespace) -> None:
         n = len(games)
 
         if n > keep:
-            # Sort by player 0 net worth to sample across the distribution
             games.sort(key=lambda g: g["players"][0]["net_worth"])
             indices = [int(i * (n - 1) / (keep - 1)) for i in range(keep)]
             sampled = [games[i] for i in indices]
@@ -219,13 +228,41 @@ def cmd_publish(args: argparse.Namespace) -> None:
                 g["game_id"] = i
             data["games"] = sampled
 
+        # Split per-game detail files (one per game). Keep the inspector
+        # fetchable at a stable path keyed by scenario stem + game_id.
+        detail_dir = games_root / f.stem
+        if detail_dir.exists():
+            for old in detail_dir.glob("*.json"):
+                old.unlink()
+        detail_dir.mkdir(parents=True, exist_ok=True)
+
+        for g in data["games"]:
+            detail = {
+                "scenario": f.stem,
+                "game_id": g["game_id"],
+                "players": g["players"],
+                "initial_market": g.get("initial_market", {}),
+                "final_market": g.get("final_market", {}),
+                "turn_count": g.get("turn_count", 0),
+                "action_log": g.get("action_log", []),
+            }
+            with open(detail_dir / f"{g['game_id']}.json", "w") as fh:
+                json.dump(detail, fh)
+            # Strip heavy fields from the summary file.
+            g.pop("action_log", None)
+            g.pop("action_history", None)
+
         out = PUBLISH_DIR / f.name
         with open(out, "w") as fh:
             json.dump(data, fh)
 
         orig_mb = f.stat().st_size / 1024 / 1024
         new_mb = out.stat().st_size / 1024 / 1024
-        print(f"  {f.name}: {orig_mb:.1f}MB → {out.name}: {new_mb:.1f}MB ({len(data['games'])} games)")
+        detail_mb = sum(p.stat().st_size for p in detail_dir.glob("*.json")) / 1024 / 1024
+        print(
+            f"  {f.name}: {orig_mb:.1f}MB → {out.name}: {new_mb:.1f}MB "
+            f"+ {detail_mb:.1f}MB across {len(data['games'])} detail files"
+        )
 
     print(f"\nPublish-ready files in {PUBLISH_DIR}/")
     print("Commit and push to deploy.")

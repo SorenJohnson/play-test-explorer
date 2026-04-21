@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 from my_project.models import Card, Contract, Resource
@@ -50,6 +51,11 @@ class GameSummary:
     final_market: dict[str, int]
     turn_count: int
     action_history: list[dict]  # condensed history
+    action_log: list[dict] = field(default_factory=list)  # full GameLog mutation stream (inspector)
+    # Strategy that played at each seat in THIS specific game. Needed because
+    # run_monte_carlo shuffles the config's strategy list per game to remove
+    # seat bias — seat 0 is not always the first strategy in the config.
+    seat_strategies: list[str] = field(default_factory=list)
     corporations: list[str] = field(default_factory=list)
     starting_rates: list[dict[str, int]] = field(default_factory=list)
     pwr_total_earned: int = 0
@@ -79,7 +85,7 @@ class MonteCarloResults:
     market_price_history: list[dict[str, int]] = field(default_factory=list)
 
 
-def _summarize_game(state: GameState) -> GameSummary:
+def _summarize_game(state: GameState, seat_strategies: list[str] | None = None) -> GameSummary:
     final_money = [p.money for p in state.players]
     final_debt = [p.debt for p in state.players]
     final_net_worth = [p.net_worth() for p in state.players]
@@ -106,6 +112,25 @@ def _summarize_game(state: GameState) -> GameSummary:
     # A state tracker replays mutations for per-turn snapshots.
     actions = _build_action_history(state)
 
+    # Full mutation stream for the game inspector. Only kept per-game and
+    # emitted into the split detail file by cmd_publish — the top-level
+    # sim_*.json strips this out so compare.html stays small.
+    full_log = [
+        {
+            "id": e.action_id,
+            "type": e.type,
+            "player": e.player_name,
+            "player_idx": e.player_idx,
+            "summary": e.summary,
+            "mutations": [
+                {"field": m.field, "old": m.old_value, "new": m.new_value}
+                for m in e.mutations
+            ],
+            "metadata": e.metadata if e.metadata else {},
+        }
+        for e in state.log.entries
+    ]
+
     initial_market = getattr(state, "_initial_market", final_market)
 
     return GameSummary(
@@ -118,6 +143,8 @@ def _summarize_game(state: GameState) -> GameSummary:
         final_market=final_market,
         turn_count=state.turn,
         action_history=actions,
+        action_log=full_log,
+        seat_strategies=list(seat_strategies) if seat_strategies else [],
         corporations=corporations,
         starting_rates=starting_rates,
         initial_market=initial_market,
@@ -315,16 +342,25 @@ def run_monte_carlo(
     all_contracts: list[Contract],
     config: SimulationConfig,
 ) -> MonteCarloResults:
-    """Run N simulations and aggregate results."""
-    # Build per-player strategy list if specified
+    """Run N simulations and aggregate results.
+
+    Seat-strategy mapping is shuffled per game to remove seat-order bias from
+    the aggregate. Each game records the actual seat→strategy mapping so
+    downstream aggregation can group by strategy instead of seat.
+    """
+    import random as _random
+
     if config.player_strategies:
-        strategies_list = [STRATEGIES[s] for s in config.player_strategies]
+        base_strategy_names = list(config.player_strategies)
     else:
-        strategies_list = [STRATEGIES[config.strategy]] * config.num_players
+        base_strategy_names = [config.strategy] * config.num_players
 
     games: list[GameSummary] = []
 
     for _ in range(config.num_simulations):
+        seat_names = list(base_strategy_names)
+        _random.shuffle(seat_names)
+        strategies_list = [STRATEGIES[s] for s in seat_names]
         state = run_game(
             all_cards=all_cards,
             all_contracts=all_contracts,
@@ -336,7 +372,7 @@ def run_monte_carlo(
             max_turns=config.max_turns,
             num_rounds=config.num_rounds,
         )
-        games.append(_summarize_game(state))
+        games.append(_summarize_game(state, seat_strategies=seat_names))
 
     results = MonteCarloResults(config=config, games=games)
     _aggregate(results)
@@ -384,15 +420,18 @@ def results_to_dict(results: MonteCarloResults) -> dict:
     contracts = [g.contracts_fulfilled[0] for g in results.games]
 
     num_players = results.config.num_players
-    player_strats = results.config.player_strategies or [results.config.strategy] * num_players
+    config_strats = results.config.player_strategies or [results.config.strategy] * num_players
 
     # Per-game summaries with all players
     game_summaries = []
     for i, g in enumerate(results.games):
+        # Prefer the per-game seat→strategy mapping (records actual shuffled
+        # assignment). Fall back to config for backwards compat with old games.
+        game_strats = g.seat_strategies if g.seat_strategies else config_strats
         players_data = []
         for p in range(num_players):
             players_data.append({
-                "strategy": player_strats[p] if p < len(player_strats) else "unknown",
+                "strategy": game_strats[p] if p < len(game_strats) else "unknown",
                 "corporation": g.corporations[p] if p < len(g.corporations) else "",
                 "starting_rates": g.starting_rates[p] if p < len(g.starting_rates) else {},
                 "net_worth": g.final_net_worth[p] if p < len(g.final_net_worth) else 0,
@@ -410,6 +449,7 @@ def results_to_dict(results: MonteCarloResults) -> dict:
             "final_market": g.final_market,
             "turn_count": g.turn_count,
             "action_history": g.action_history,
+            "action_log": g.action_log,
             "pwr_total_earned": g.pwr_total_earned,
             "pwr_total_debt": g.pwr_total_debt,
             "futures_total_debt": g.futures_total_debt,
@@ -456,6 +496,7 @@ def results_to_dict(results: MonteCarloResults) -> dict:
         }
 
     return {
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "config": {
             "num_simulations": results.config.num_simulations,
             "num_players": results.config.num_players,

@@ -59,6 +59,7 @@ async function init() {
   allData = scenarioResults;
   analysisData = analysis;
 
+  renderDataRefreshedAt();
   renderStrategyChart();
   if (analysisData) {
     populateScenarioSelector();
@@ -66,6 +67,21 @@ async function init() {
     renderFlowNetwork(); // not scenario-filtered
   }
   renderGameBrowser(); // not scenario-filtered
+}
+
+function renderDataRefreshedAt() {
+  const el = document.getElementById("data-refreshed-at");
+  if (!el) return;
+  const stamps = allData
+    .map((s) => s.data && s.data.generated_at)
+    .filter(Boolean);
+  if (analysisData && analysisData.generated_at) stamps.push(analysisData.generated_at);
+  if (!stamps.length) return;
+  const oldest = stamps.sort()[0];
+  const d = new Date(oldest);
+  if (Number.isNaN(d.getTime())) return;
+  const pad = (n) => String(n).padStart(2, "0");
+  el.textContent = `Data refreshed ${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} UTC`;
 }
 
 function populateScenarioSelector() {
@@ -176,7 +192,7 @@ function renderStrategyChart() {
   });
 }
 
-// --- Contract Economics (sortable + expandable) ---
+// --- Game Economics (sortable + expandable) ---
 
 function renderStrategyContractTable() {
   const contracts = getSource("sim_contract_costs");
@@ -524,7 +540,12 @@ function renderGameBrowser() {
     const scenario = allData[scenarioIdx];
     const sortBy = sortSelect.value;
 
-    let games = scenario.data.games.map((g, i) => ({ ...g, _idx: i, _file: scenario.file }));
+    // Carry the scenario stem (e.g., "sim_3optimal") so Inspect links
+    // resolve to the per-game detail file written by cmd_publish.
+    const stem = (scenario.file.split("/").pop() || "").replace(/\.json$/, "");
+    let games = scenario.data.games.map((g, i) => ({
+      ...g, _idx: i, _file: scenario.file, _stem: stem,
+    }));
 
     // Sort
     if (sortBy === "nw_desc") games.sort((a, b) => b.players[0].net_worth - a.players[0].net_worth);
@@ -559,11 +580,14 @@ function renderGameBrowser() {
           })
           .join("");
 
+        const gameId = g.game_id !== undefined ? g.game_id : g._idx;
+        const inspectHref = `game.html?scenario=${encodeURIComponent(g._stem)}&game=${gameId}`;
         return `<tr>
           <td>#${g._idx + 1}</td>
           ${nwCells}
           <td>${totalContracts}</td>
           <td>${g.turn_count}</td>
+          <td><a href="${inspectHref}" style="color:#58a6ff; text-decoration:none;">Inspect →</a></td>
         </tr>`;
       })
       .join("");

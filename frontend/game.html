@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Game Inspector</title>
+  <link rel="stylesheet" href="report.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <div id="app">
+    <nav class="site-nav">
+      <a href="index.html">Home</a>
+      <a href="multiplayer.html">Play</a>
+      <a href="compare.html">Analytics</a>
+      <a href="research.html">Research</a>
+    </nav>
+    <header>
+      <h1 id="game-title">Game Inspector</h1>
+      <p id="game-info" class="subtitle">Loading…</p>
+      <p style="margin-top:8px;"><a href="compare.html" style="color:#58a6ff; text-decoration:none; font-size:0.85rem;">← Back to Analytics</a></p>
+    </header>
+
+    <section>
+      <h2>Net Worth over Turns</h2>
+      <div class="chart-container" style="min-height:280px;">
+        <canvas id="networth-chart"></canvas>
+      </div>
+    </section>
+
+    <section>
+      <h2>Market Prices over Turns</h2>
+      <div class="chart-container" style="min-height:280px;">
+        <canvas id="market-chart"></canvas>
+      </div>
+    </section>
+
+    <section>
+      <h2>Per-Player Rates</h2>
+      <div id="rate-charts"></div>
+    </section>
+
+    <section>
+      <h2>Turn Log</h2>
+      <div id="turn-log"></div>
+    </section>
+  </div>
+  <script src="game.js"></script>
+</body>
+</html>
