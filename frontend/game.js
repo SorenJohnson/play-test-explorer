@@ -856,11 +856,11 @@ function renderTurnLog() {
 
   const renderEventsChain = (b) => {
     // One chain = all consecutive events with no player action between them.
-    // Summary teases the chain (primary event name + count); body has a
-    // sub-block per event using the same type-specific renderer.
+    // Summary title = all event types in sequence (e.g., "Patent Auction →
+    // Draw Building Card"). Body has a sub-block per event using the same
+    // type-specific renderer.
     const first = b.events[0];
-    const count = b.events.length;
-    const primaryName = prettyEventName(first.type);
+    const title = b.events.map((e) => prettyEventName(e.type)).join(" → ");
     let teaser = "";
     if (first.type === "event:patent_auction" && first.metadata && first.metadata.winner) {
       const wi = nameToPidx(first.metadata.winner);
@@ -870,7 +870,6 @@ function renderTurnLog() {
     } else {
       teaser = first.summary.replace(/^Event: /, "");
     }
-    const chainNote = count > 1 ? ` + ${count - 1} chained` : "";
 
     const subBlocks = b.events.map((e) => {
       const detail = renderEventDetail(e);
@@ -886,7 +885,7 @@ function renderTurnLog() {
 
     const summaryHtml = `
       <summary style="cursor:pointer; padding:6px 12px; background:#1f1b2a; border-left:3px solid #a371f7; font-size:0.8rem; line-height:1.5;">
-        <span style="color:#a371f7; font-weight:600;">⚡ ${primaryName}${chainNote}</span>
+        <span style="color:#a371f7; font-weight:600;">⚡ ${title}</span>
         <span style="color:#c9d1d9; margin-left:8px;">${teaser}</span>
       </summary>`;
 
