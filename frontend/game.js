@@ -16,7 +16,6 @@ const RESOURCE_COLORS = {
   SI: "#f1c40f", O2: "#bdc3c7", FOOD: "#27ae60", GLS: "#5dade2", ELX: "#e67e22",
 };
 const PLAYER_COLORS = ["#3fb950", "#58a6ff", "#f85149", "#f0883e"];
-const CONTRACT_REWARD = 50;
 
 let gameData = null;
 let turns = [];  // turn-grouped view built from action_log
@@ -169,37 +168,74 @@ function buildTurns(data) {
       const pidx = (turnNum - 1) % numPlayers;
       const turnPlayer = data.players[pidx];
 
+      // actions = every log entry that belongs to this player-turn, excluding
+      // the terminating event. Includes free:* (teleportation, OC, etc.) and
+      // swaps so the turn log shows the full sequence. Also captures the
+      // acting player's money delta per entry so we can render a
+      // per-source money flow ($X sell, -$Y build, etc.).
       const actions = [];
+      const moneyField = `player.${pidx}.money`;
+      const debtField = `player.${pidx}.debt`;
+      const creditField = `player.${pidx}.credit`;
       let moneyBefore = null;
-      for (const e of pending) {
-        if (["build", "sell", "contract"].includes(e.type)) {
-          const action = { type: e.type, detail: e.summary };
-          const meta = e.metadata || {};
-          if (e.type === "build") {
-            action.buildings = meta.buildings || [];
-            action.costs_paid = meta.costs_paid || {};
-            action.money_spent = meta.money_spent || 0;
-            action.rates_gained = meta.rates_gained || {};
-          } else if (e.type === "sell") {
-            action.resource = meta.sell_resource || "";
-            action.amount = meta.sell_amount || 0;
-            action.revenue = meta.sell_revenue || 0;
-          } else if (e.type === "contract") {
-            action.label = meta.contract_label || "";
-            action.reward = meta.reward || 0;
-            action.true_cost = meta.true_cost || 0;
-          }
-          actions.push(action);
+
+      const sumDelta = (muts, field) => {
+        // Net change across mutations for `field` in this entry, using each
+        // mutation's own old→new delta so chained mutations of the same
+        // field inside one action don't cancel each other out.
+        let d = 0;
+        for (const m of muts || []) {
+          if (m.field !== field) continue;
+          const a = typeof m.old === "number" ? m.old : 0;
+          const b = typeof m.new === "number" ? m.new : a;
+          d += b - a;
         }
+        return d;
+      };
+
+      for (const e of pending) {
+        if (["setup", "market_roll", "corp_assigned"].includes(e.type)) continue;
+        const meta = e.metadata || {};
+        const moneyDelta = sumDelta(e.mutations, moneyField);
+        const debtDelta = sumDelta(e.mutations, debtField);
+        const creditDelta = sumDelta(e.mutations, creditField);
+        // For sells, detect Hacker Array target mutations — any market.* move
+        // on a resource OTHER than the sold one is a hacker array shift.
+        let hackerNote = "";
+        if (e.type === "sell") {
+          const sold = (meta.sell_resource || "").toUpperCase();
+          for (const m of e.mutations || []) {
+            const mm = /^market\.(\w+)$/.exec(m.field);
+            if (!mm || mm[1] === sold) continue;
+            if (typeof m.old !== "number" || typeof m.new !== "number") continue;
+            const delta = m.new - m.old;
+            if (delta === 0) continue;
+            hackerNote += ` · Hacker ${mm[1]} ${delta > 0 ? "+" : ""}${delta}`;
+          }
+        }
+        actions.push({
+          type: e.type,
+          detail: e.summary + hackerNote,
+          money_delta: moneyDelta,
+          debt_delta: debtDelta,
+          credit_delta: creditDelta,
+          meta,
+        });
         if (moneyBefore === null && e.player_idx === pidx) {
           for (const m of e.mutations || []) {
-            if (m.field === `player.${pidx}.money`) { moneyBefore = m.old; break; }
+            if (m.field === moneyField) { moneyBefore = m.old; break; }
           }
         }
       }
+
+      // Event's effect on the acting player's money/debt/credit.
+      const eventMoneyDelta = sumDelta(entry.mutations, moneyField);
+      const eventDebtDelta = sumDelta(entry.mutations, debtField);
+      const eventCreditDelta = sumDelta(entry.mutations, creditField);
+
       if (moneyBefore === null) {
         for (const m of entry.mutations || []) {
-          if (m.field === `player.${pidx}.money`) { moneyBefore = m.old; break; }
+          if (m.field === moneyField) { moneyBefore = m.old; break; }
         }
       }
 
@@ -212,9 +248,14 @@ function buildTurns(data) {
           : `P${pidx + 1}`,
         actions,
         event: entry.summary,
+        event_type: entry.type,
+        event_money_delta: eventMoneyDelta,
+        event_debt_delta: eventDebtDelta,
+        event_credit_delta: eventCreditDelta,
         money_before: moneyBefore !== null ? moneyBefore : snap.money,
         money_after: snap.money,
         debt: snap.debt,
+        credit: snap.credit,
         contracts: snap.contracts,
         market: snap.market,
         rates: snap.rates,
@@ -275,7 +316,7 @@ function renderNetWorthChart() {
       label: `P${i + 1} — Net Worth`,
       data: series.map((s) => ({
         x: s.x,
-        y: s.money - s.debt + s.credit + s.contracts * CONTRACT_REWARD,
+        y: s.money - s.debt + s.credit,
       })),
       borderColor: color, backgroundColor: color + "22",
       tension: 0.2, borderWidth: 3, fill: true, pointRadius: 0,
@@ -399,21 +440,52 @@ function renderTurnLog() {
   }
   html += "</tr></thead><tbody>";
 
+  const signed = (n) => (n > 0 ? `+$${n}` : n < 0 ? `-$${Math.abs(n)}` : "$0");
+  const colorFor = (type) => {
+    if (type === "build") return "#58a6ff";
+    if (type === "sell") return "#3fb950";
+    if (type === "contract") return "#f0883e";
+    if (type === "swap") return "#8b949e";
+    if (type.startsWith("free:")) return "#d2a8ff";
+    return "#c9d1d9";
+  };
+
   rounds.forEach((round, r) => {
     html += `<tr><td style="vertical-align:top; font-weight:600; color:#58a6ff">${r + 1}</td>`;
     for (let p = 0; p < numPlayers; p++) {
       const turn = round[p];
       if (!turn) { html += "<td>-</td>"; continue; }
       let cellHtml = "";
+      const gameplayActions = turn.actions.filter((a) => a.type !== "swap");
+      if (!gameplayActions.length) cellHtml += '<div style="color:#484f58">Pass</div>';
       for (const a of turn.actions) {
-        const cls = a.type === "build" ? "build" : a.type === "sell" ? "sell" : "contract";
-        cellHtml += `<div class="action-log ${cls}">${a.detail}</div>`;
+        const color = colorFor(a.type);
+        const hasDelta = a.money_delta || a.debt_delta || a.credit_delta;
+        let deltaStr = "";
+        if (hasDelta) {
+          const parts = [];
+          if (a.money_delta) parts.push(signed(a.money_delta));
+          if (a.debt_delta) parts.push(`debt ${a.debt_delta > 0 ? "+" : ""}${a.debt_delta}`);
+          if (a.credit_delta) parts.push(`credit ${a.credit_delta > 0 ? "+" : ""}${a.credit_delta}`);
+          deltaStr = ` <span style="color:#484f58">(${parts.join(", ")})</span>`;
+        }
+        cellHtml += `<div style="color:${color}">${a.detail}${deltaStr}</div>`;
       }
-      if (!turn.actions.length) cellHtml += '<div style="color:#484f58">Pass</div>';
-      if (turn.event) cellHtml += `<div style="color:#a371f7; font-size:0.7rem">⚡ ${turn.event}</div>`;
-      const nw = turn.money_after - (turn.debt || 0) + (turn.contracts || 0) * CONTRACT_REWARD;
+      if (turn.event) {
+        const parts = [];
+        if (turn.event_money_delta) parts.push(signed(turn.event_money_delta));
+        if (turn.event_debt_delta) parts.push(`debt ${turn.event_debt_delta > 0 ? "+" : ""}${turn.event_debt_delta}`);
+        if (turn.event_credit_delta) parts.push(`credit ${turn.event_credit_delta > 0 ? "+" : ""}${turn.event_credit_delta}`);
+        const eventDelta = parts.length
+          ? ` <span style="color:#484f58">(${parts.join(", ")})</span>`
+          : "";
+        cellHtml += `<div style="color:#a371f7; font-size:0.7rem">⚡ ${turn.event}${eventDelta}</div>`;
+      }
+      const credit = turn.credit || 0;
+      const nw = turn.money_after - (turn.debt || 0) + credit;
       cellHtml += `<div style="color:#8b949e; font-size:0.7rem">$${turn.money_before} → $${turn.money_after}`;
       if (turn.debt > 0) cellHtml += ` | <span style="color:#f85149">debt $${turn.debt}</span>`;
+      if (credit > 0) cellHtml += ` | <span style="color:#3fb950">credit $${credit}</span>`;
       if (turn.contracts > 0) cellHtml += ` | <span style="color:#f0883e">${turn.contracts}×📋</span>`;
       cellHtml += ` | NW $${nw}</div>`;
       html += `<td style="vertical-align:top; font-size:0.75rem; line-height:1.6">${cellHtml}</td>`;
