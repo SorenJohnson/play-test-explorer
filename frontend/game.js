@@ -232,6 +232,18 @@ function buildTurns(data) {
       const eventMoneyDelta = sumDelta(entry.mutations, moneyField);
       const eventDebtDelta = sumDelta(entry.mutations, debtField);
       const eventCreditDelta = sumDelta(entry.mutations, creditField);
+      // Per-player breakdown — power bill / futures settlement / debt
+      // collection / news rate_all all fire on one player's turn but mutate
+      // every player. Computing delta per player lets the turn log show
+      // "⚡ POWER BILL — P1 +$3, P2 -$4 debt, P3 -$0".
+      const eventPlayerDeltas = [];
+      for (let pi = 0; pi < numPlayers; pi++) {
+        eventPlayerDeltas.push({
+          money: sumDelta(entry.mutations, `player.${pi}.money`),
+          debt: sumDelta(entry.mutations, `player.${pi}.debt`),
+          credit: sumDelta(entry.mutations, `player.${pi}.credit`),
+        });
+      }
 
       if (moneyBefore === null) {
         for (const m of entry.mutations || []) {
@@ -252,6 +264,7 @@ function buildTurns(data) {
         event_money_delta: eventMoneyDelta,
         event_debt_delta: eventDebtDelta,
         event_credit_delta: eventCreditDelta,
+        event_player_deltas: eventPlayerDeltas,
         money_before: moneyBefore !== null ? moneyBefore : snap.money,
         money_after: snap.money,
         debt: snap.debt,
@@ -472,14 +485,23 @@ function renderTurnLog() {
         cellHtml += `<div style="color:${color}">${a.detail}${deltaStr}</div>`;
       }
       if (turn.event) {
-        const parts = [];
-        if (turn.event_money_delta) parts.push(signed(turn.event_money_delta));
-        if (turn.event_debt_delta) parts.push(`debt ${turn.event_debt_delta > 0 ? "+" : ""}${turn.event_debt_delta}`);
-        if (turn.event_credit_delta) parts.push(`credit ${turn.event_credit_delta > 0 ? "+" : ""}${turn.event_credit_delta}`);
-        const eventDelta = parts.length
-          ? ` <span style="color:#484f58">(${parts.join(", ")})</span>`
+        // Per-player breakdown: for events that mutate multiple players
+        // (power bill, futures settlement, debt collection, news rate_all),
+        // show each player's delta inline. Otherwise fall back to the
+        // acting player's delta only.
+        const perPlayer = (turn.event_player_deltas || []).map((d, i) => {
+          const bits = [];
+          if (d.money) bits.push(signed(d.money));
+          if (d.debt) bits.push(`debt ${d.debt > 0 ? "+" : ""}${d.debt}`);
+          if (d.credit) bits.push(`credit ${d.credit > 0 ? "+" : ""}${d.credit}`);
+          if (!bits.length) return null;
+          const color = PLAYER_COLORS[i % PLAYER_COLORS.length];
+          return `<span style="color:${color}">P${i + 1}:</span> ${bits.join(" ")}`;
+        }).filter(Boolean);
+        const eventDelta = perPlayer.length
+          ? `<div style="color:#484f58; font-size:0.68rem; padding-left:10px">${perPlayer.join(" · ")}</div>`
           : "";
-        cellHtml += `<div style="color:#a371f7; font-size:0.7rem">⚡ ${turn.event}${eventDelta}</div>`;
+        cellHtml += `<div style="color:#a371f7; font-size:0.7rem">⚡ ${turn.event}</div>${eventDelta}`;
       }
       const credit = turn.credit || 0;
       const nw = turn.money_after - (turn.debt || 0) + credit;
