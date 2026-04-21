@@ -312,42 +312,22 @@ function renderNetWorthChart() {
   for (let i = 0; i < numPlayers; i++) {
     const color = PLAYER_COLORS[i % PLAYER_COLORS.length];
     const strategy = gameData.players[i]?.strategy || "?";
-    // One point per turn for THIS player, using the all-players snapshot
-    // captured at the end of each turn. That way END_GAME debt settlement
-    // (which fires on the last turn-taker) shows up on every player's line.
     const series = turns
       .map((t) => {
         const ps = t.player_states && t.player_states[i];
         if (!ps) return null;
         return {
           x: t.turn,
-          money: ps.money,
-          debt: ps.debt || 0,
-          contracts: ps.contracts || 0,
-          credit: ps.credit || 0,
+          y: (ps.money || 0) - (ps.debt || 0) + (ps.credit || 0),
         };
       })
       .filter(Boolean);
     datasets.push({
-      label: `P${i + 1} (${strategy}) — Money`,
-      data: series.map((s) => ({ x: s.x, y: s.money })),
-      borderColor: color, backgroundColor: "transparent",
-      tension: 0.2, borderWidth: 2, pointRadius: 0,
-    });
-    datasets.push({
-      label: `P${i + 1} — Debt`,
-      data: series.map((s) => ({ x: s.x, y: -s.debt })),
-      borderColor: color, backgroundColor: "transparent",
-      tension: 0.2, borderWidth: 1, borderDash: [5, 5], pointRadius: 0,
-    });
-    datasets.push({
-      label: `P${i + 1} — Net Worth`,
-      data: series.map((s) => ({
-        x: s.x,
-        y: s.money - s.debt + s.credit,
-      })),
-      borderColor: color, backgroundColor: color + "22",
-      tension: 0.2, borderWidth: 3, fill: true, pointRadius: 0,
+      label: `P${i + 1} (${strategy})`,
+      data: series,
+      borderColor: color,
+      backgroundColor: color + "22",
+      tension: 0.2, borderWidth: 3, pointRadius: 0, fill: false,
     });
   }
 
