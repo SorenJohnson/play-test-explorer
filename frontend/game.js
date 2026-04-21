@@ -47,6 +47,7 @@ async function init() {
   renderNetWorthChart();
   renderMarketChart();
   renderRateCharts();
+  renderEndGameBreakdown();
   renderTurnLog();
 }
 
@@ -135,6 +136,17 @@ function buildTurns(data) {
   let turnNum = 0;
 
   for (const entry of data.action_log || []) {
+    // For terminal events (END_GAME / END_ROUND), snapshot pre-event state
+    // BEFORE applying mutations so the End-Game Scoring breakdown can show
+    // each player's starting rates / market prices / money at the moment
+    // scoring began.
+    let preState = null;
+    let preMarket = null;
+    const isTerminal = entry.type === "event:end_game" || entry.type === "event:end_round";
+    if (isTerminal) {
+      preState = allPlayerStates();
+      preMarket = { ...market };
+    }
     // Apply this entry's mutations first so post-entry snapshots reflect its effect.
     for (const m of entry.mutations || []) applyMutation(m);
 
@@ -261,10 +273,13 @@ function buildTurns(data) {
         actions,
         event: entry.summary,
         event_type: entry.type,
+        event_metadata: entry.metadata || {},
         event_money_delta: eventMoneyDelta,
         event_debt_delta: eventDebtDelta,
         event_credit_delta: eventCreditDelta,
         event_player_deltas: eventPlayerDeltas,
+        event_pre_state: preState,
+        event_pre_market: preMarket,
         money_before: moneyBefore !== null ? moneyBefore : snap.money,
         money_after: snap.money,
         debt: snap.debt,
@@ -427,6 +442,132 @@ function renderRateCharts() {
       },
     });
   }
+}
+
+// Translate the current market POSITION (what the engine mutates) into a
+// dollar price using the same tiered track used in simulation.py. Kept in
+// sync with PRICE_TRACK there; if that constant drifts, update this too.
+const PRICE_TRACK = [1, 1, 1, 2, 2, 2, 3, 3, 4, 4, 5, 5, 6, 7, 8, 9, 10];
+function positionToPrice(pos) {
+  const clamped = Math.max(0, Math.min(pos, PRICE_TRACK.length - 1));
+  return PRICE_TRACK[clamped];
+}
+
+function renderEndGameBreakdown() {
+  const container = document.getElementById("end-game-breakdown");
+  if (!container) return;
+
+  // Look at every terminal turn (END_GAME and the END_ROUND one in a 2-round
+  // game) so the user can see both power-bill/futures settlements.
+  const terminals = turns.filter(
+    (t) => (t.event_type === "event:end_game" || t.event_type === "event:end_round")
+         && t.event_pre_state
+  );
+  if (!terminals.length) {
+    container.innerHTML = '<p class="subtitle">No terminal events found in this game.</p>';
+    return;
+  }
+
+  const numPlayers = gameData.players.length;
+  const signed = (n) => (n > 0 ? `+$${n}` : n < 0 ? `-$${Math.abs(n)}` : "$0");
+
+  const sections = terminals.map((t) => {
+    const meta = t.event_metadata || {};
+    const preState = t.event_pre_state;
+    const preMarket = t.event_pre_market || {};
+    const postState = t.player_states;
+    const perPlayerMeta = Array.isArray(meta.per_player) ? meta.per_player : [];
+    const pwrPrice = meta.pwr_price !== undefined
+      ? meta.pwr_price
+      : (preMarket.PWR !== undefined ? positionToPrice(preMarket.PWR) : null);
+
+    const rows = [];
+    for (let i = 0; i < numPlayers; i++) {
+      const player = gameData.players[i] || {};
+      const color = PLAYER_COLORS[i % PLAYER_COLORS.length];
+      const pre = preState[i] || {};
+      const post = (postState && postState[i]) || {};
+      const preRates = pre.rates || {};
+      const pmeta = perPlayerMeta[i] || {};
+
+      // Power bill: PWR rate × pwr_price (metadata.per_player confirms).
+      const pwrRate = preRates.PWR || 0;
+      const pwrShielded = !!pmeta.shielded;
+      const pwrEarning = pmeta.earning;
+      const pwrDebt = pmeta.debt;
+      const domeBonus = pmeta.dome_bonus || 0;
+
+      // Futures settlements: each negative non-PWR rate × current market price.
+      const futuresLines = [];
+      let futuresDebt = 0;
+      for (const [r, rate] of Object.entries(preRates)) {
+        if (r === "PWR") continue;
+        if ((rate || 0) >= 0) continue;
+        const units = Math.abs(rate);
+        const pos = preMarket[r];
+        const price = pos !== undefined ? positionToPrice(pos) : null;
+        const cost = price !== null ? units * price : null;
+        futuresLines.push(
+          `${units} ${r} @ ${price !== null ? `$${price}` : "?"} = ${cost !== null ? `$${cost}` : "?"}`
+        );
+        if (cost !== null) futuresDebt += cost;
+      }
+
+      const preNw = (pre.money || 0) - (pre.debt || 0) + (pre.credit || 0);
+      const postNw = (post.money || 0) - (post.debt || 0) + (post.credit || 0);
+      const nwDelta = postNw - preNw;
+
+      const pwrLine = pwrShielded
+        ? `Energy Vault shielded (${pwrRate > 0 ? "+" : ""}${pwrRate} PWR)`
+        : pwrRate > 0
+          ? `+$${pwrEarning !== undefined ? pwrEarning : pwrRate * (pwrPrice || 0)} (sold ${pwrRate} PWR @ $${pwrPrice || "?"})`
+          : pwrRate < 0
+            ? `-$${pwrDebt !== undefined ? pwrDebt : Math.abs(pwrRate) * (pwrPrice || 0)} debt (bought ${Math.abs(pwrRate)} PWR @ $${pwrPrice || "?"})`
+            : "no change (0 PWR)";
+
+      rows.push(`
+        <tr>
+          <td><span style="color:${color}; font-weight:600">P${i + 1}</span><br>
+              <span style="color:#8b949e; font-size:0.7rem">${player.strategy || "?"}${player.corporation ? ` · ${player.corporation}` : ""}</span></td>
+          <td style="font-size:0.72rem">money $${pre.money || 0} · debt $${pre.debt || 0} · credit $${pre.credit || 0}<br>
+              <span style="color:#8b949e">NW $${preNw}</span></td>
+          <td style="font-size:0.72rem">${
+            Object.entries(preRates)
+              .filter(([, v]) => v)
+              .map(([k, v]) => `<span style="color:${v > 0 ? "#3fb950" : "#f85149"}">${v > 0 ? "+" : ""}${v} ${k}</span>`)
+              .join(" ") || "<span style=\"color:#484f58\">no rates</span>"
+          }</td>
+          <td style="font-size:0.72rem">${pwrLine}${domeBonus ? `<br><span style=\"color:#a371f7\">+$${domeBonus} Pleasure Dome bonus</span>` : ""}</td>
+          <td style="font-size:0.72rem">${futuresLines.length ? futuresLines.join("<br>") + `<br><span style=\"color:#8b949e\">total: $${futuresDebt} debt</span>` : "<span style=\"color:#484f58\">no negative rates</span>"}</td>
+          <td style="font-size:0.72rem">money $${post.money || 0} · debt $${post.debt || 0} · credit $${post.credit || 0}<br>
+              <span style="color:${nwDelta >= 0 ? "#3fb950" : "#f85149"}">NW $${postNw} (${signed(nwDelta)})</span></td>
+        </tr>
+      `);
+    }
+
+    const header = t.event_type === "event:end_game" ? "END GAME" : `END OF ROUND ${t.turn}`;
+    const pwrStr = pwrPrice !== null ? `PWR @ $${pwrPrice}` : "";
+    return `
+      <h3 style="color:#58a6ff; margin-top:16px">${header} <span style="color:#8b949e; font-weight:normal; font-size:0.8rem">${pwrStr} · turn ${t.turn}</span></h3>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Player</th>
+              <th>Pre-event $ / debt / credit / NW</th>
+              <th>Rates at scoring</th>
+              <th>Power Bill</th>
+              <th>Futures Settlement</th>
+              <th>Post $ / debt / credit / NW (Δ)</th>
+            </tr>
+          </thead>
+          <tbody>${rows.join("")}</tbody>
+        </table>
+      </div>
+    `;
+  });
+
+  container.innerHTML = sections.join("");
 }
 
 function renderTurnLog() {
