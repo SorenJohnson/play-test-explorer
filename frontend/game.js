@@ -130,8 +130,14 @@ function buildTurns(data) {
   let pending = [];
   let turnNum = 0;
   let eventNum = 0;
-  let turnStartState = allPlayerStates();
-  let turnStartMarket = { ...market };
+  // Buffer pre-game entries (setup, market_roll, corp_assigned) so we can
+  // emit them as a single Turn 0 block.
+  const setupEntries = [];
+  let setupEmitted = false;
+  // Current event chain — consecutive events with no player actions between
+  // them. A redraw-chain patent_auction → draw_building_card becomes one
+  // collapsible block. Closed out when the next player action arrives.
+  let currentChain = null;
 
   const sumDelta = (muts, field) => {
     let d = 0;
@@ -156,9 +162,29 @@ function buildTurns(data) {
     return out;
   };
 
+  // Merge per-player deltas across an array of events into a single list.
+  const mergeDeltas = (events) => {
+    const out = Array.from({ length: numPlayers }, () => ({ money: 0, debt: 0, credit: 0 }));
+    for (const e of events) {
+      (e.player_deltas || []).forEach((d, i) => {
+        out[i].money += d.money || 0;
+        out[i].debt += d.debt || 0;
+        out[i].credit += d.credit || 0;
+      });
+    }
+    return out;
+  };
+
+  const closeChain = (post_state, post_market) => {
+    if (!currentChain || !currentChain.events.length) return;
+    currentChain.post_state = post_state;
+    currentChain.post_market = post_market;
+    currentChain.player_deltas = mergeDeltas(currentChain.events);
+    blocksOut.push(currentChain);
+    currentChain = null;
+  };
+
   for (const entry of data.action_log || []) {
-    // Snapshot state BEFORE applying this entry's mutations so each block
-    // can show an accurate "pre" side of its own waterfall.
     const preState = allPlayerStates();
     const preMarket = { ...market };
 
@@ -167,7 +193,21 @@ function buildTurns(data) {
       players[entry.player_idx].contracts += 1;
     }
 
-    if (["setup", "market_roll", "corp_assigned"].includes(entry.type)) continue;
+    // Turn 0 setup: buffer setup/market_roll/corp_assigned and emit one
+    // Setup block when the first real gameplay entry arrives.
+    if (["setup", "market_roll", "corp_assigned"].includes(entry.type)) {
+      setupEntries.push(entry);
+      continue;
+    }
+    if (!setupEmitted) {
+      blocksOut.push({
+        kind: "setup",
+        entries: setupEntries.slice(),
+        initial_state: allPlayerStates(),
+        initial_market: { ...market },
+      });
+      setupEmitted = true;
+    }
 
     if (entry.type.startsWith("event:")) {
       const hasPlayerActions = pending.some(
@@ -175,9 +215,8 @@ function buildTurns(data) {
              || e.type.startsWith("free:")
       );
 
-      // If there were player actions buffered since the last event, close
-      // out a Turn block now — the player's actions are done and the event
-      // is about to fire.
+      // A fresh event arriving after player actions closes the pending turn
+      // block AND opens a new event chain.
       if (hasPlayerActions) {
         turnNum += 1;
         const actor = pending.find((e) => e.player_idx >= 0);
@@ -188,12 +227,13 @@ function buildTurns(data) {
 
         const actions = [];
         for (const e of pending) {
+          // Hide "unscoped" bookkeeping entries (auto hand-draws etc.) from
+          // the action list — they have no summary and aren't player moves.
+          if (e.type === "unscoped") continue;
           const meta = e.metadata || {};
           const moneyDelta = sumDelta(e.mutations, moneyField);
           const debtDelta = sumDelta(e.mutations, debtField);
           const creditDelta = sumDelta(e.mutations, creditField);
-          // Hacker Array: any market.* change on a resource other than the
-          // one being sold indicates the HA pushed a target price.
           let hackerNote = "";
           if (e.type === "sell") {
             const sold = (meta.sell_resource || "").toUpperCase();
@@ -216,43 +256,45 @@ function buildTurns(data) {
           });
         }
 
-        // pre-event state = what just came in preState (before THIS event
-        // entry fired). turnStartState = snapshot taken when the previous
-        // turn closed, so it's the true "start" of this turn.
         blocksOut.push({
           kind: "turn",
           turn_num: turnNum,
           player_idx: pidx,
           actions,
-          pre_state: turnStartState,
-          pre_market: turnStartMarket,
-          post_state: preState,
+          post_state: preState,   // state just before the event fires
           post_market: preMarket,
         });
-
-        // Start a chart record for this player-turn. Its player_states /
-        // market will be updated each time an event fires within this turn.
         turnsOut.push({
           turn: turnNum,
           _player_idx: pidx,
           player_states: null,
           market: null,
         });
-
         pending = [];
+
+        // Start a fresh event chain for this turn's events.
+        currentChain = {
+          kind: "events",
+          turn_num: turnNum,
+          events: [],
+        };
+      }
+
+      if (!currentChain) {
+        // Safety: an event fires with no prior turn context (pre-setup shouldn't hit here).
+        currentChain = { kind: "events", turn_num: turnNum, events: [] };
       }
 
       eventNum += 1;
       const postState = allPlayerStates();
       const postMarket = { ...market };
 
-      blocksOut.push({
-        kind: "event",
+      currentChain.events.push({
         event_num: eventNum,
-        turn_num: turnNum,
         type: entry.type,
         summary: entry.summary,
         metadata: entry.metadata || {},
+        mutations: entry.mutations || [],
         pre_state: preState,
         pre_market: preMarket,
         post_state: postState,
@@ -260,25 +302,22 @@ function buildTurns(data) {
         player_deltas: perPlayerDeltas(entry.mutations),
       });
 
-      // Keep the current player-turn's chart row updated to this event's
-      // post-state — final row per turn will reflect the state after the
-      // last chained event fires.
       if (turnsOut.length) {
         const last = turnsOut[turnsOut.length - 1];
         last.player_states = postState;
         last.market = postMarket;
       }
-
-      // After each event chain step, future pending actions start from the
-      // new post-event state. (If the next entry is another chained event
-      // with no actions, this snapshot is fine — it won't be used as a
-      // turn-start.)
-      turnStartState = postState;
-      turnStartMarket = postMarket;
     } else {
+      // Player action (build / sell / contract / swap / free:* / unscoped).
+      // Closing the current chain here means "the events after the last
+      // player's turn are done" — emit the chain block.
+      if (currentChain) closeChain(preState, preMarket);
       pending.push(entry);
     }
   }
+
+  // End of log: flush any pending chain.
+  if (currentChain) closeChain(allPlayerStates(), { ...market });
 
   return { turns: turnsOut, blocks: blocksOut };
 }
@@ -650,8 +689,22 @@ function renderTurnLog() {
   };
 
   const renderDrawBuildingCard = (block) => {
-    // Draw building card: summary is human-readable, metadata is empty.
-    return `<div style="margin-top:8px; color:#c9d1d9">${block.summary}</div>`;
+    // Metadata is empty on these entries — reconstruct from the pool
+    // mutation instead, which records old/new cards + slot index.
+    const poolMut = (block.mutations || []).find((m) => m.field === "pool");
+    let drawn = "?", evicted = null, slot = null;
+    if (poolMut) {
+      const slotMatch = /^swap\[(\d+)\]$/.exec(typeof poolMut.old === "string" ? poolMut.old : "");
+      if (slotMatch) slot = parseInt(slotMatch[1], 10);
+      const newVal = poolMut.new && typeof poolMut.new === "object" ? poolMut.new : null;
+      if (newVal) {
+        drawn = (newVal.new && newVal.new.name) || drawn;
+        evicted = (newVal.old && newVal.old.name) || null;
+      }
+    }
+    const slotStr = slot !== null ? ` @ pool slot ${slot}` : "";
+    const evictStr = evicted ? ` — replaced <span style="color:#8b949e">${evicted}</span>` : "";
+    return `<div style="margin-top:8px; color:#c9d1d9">Drew <strong>${drawn}</strong>${slotStr}${evictStr}</div>`;
   };
 
   // Dispatch to the right event renderer based on type.
@@ -689,25 +742,93 @@ function renderTurnLog() {
       <button id="tl-collapse-all" style="background:#21262d; border:1px solid #30363d; color:#c9d1d9; padding:4px 10px; border-radius:4px; cursor:pointer;">Collapse all</button>
     </div>`;
 
+  const renderSetupBlock = (b) => {
+    const corpEntries = (b.entries || []).filter((e) => e.type === "corp_assigned");
+    const corpRows = corpEntries.map((e) => {
+      const i = e.player_idx;
+      const c = i >= 0 ? PLAYER_COLORS[i % PLAYER_COLORS.length] : "#c9d1d9";
+      const rateBits = (e.mutations || [])
+        .filter((m) => /^player\.\d+\.rates\.\w+$/.test(m.field))
+        .map((m) => {
+          const r = m.field.split(".").pop();
+          const v = m.new;
+          return `<span style="color:${v > 0 ? "#3fb950" : "#f85149"}">${v > 0 ? "+" : ""}${v} ${r}</span>`;
+        }).join(" ");
+      return `<tr>
+        <td style="color:${c}; font-weight:600">P${i + 1}</td>
+        <td><strong>${e.summary}</strong></td>
+        <td>${rateBits || '<span style="color:#484f58">—</span>'}</td>
+      </tr>`;
+    }).join("");
+
+    // Initial hands — pulled from the setup entry's player.N.hand mutations.
+    const handRows = [];
+    for (let i = 0; i < numPlayers; i++) {
+      const cards = [];
+      for (const e of (b.entries || [])) {
+        for (const m of (e.mutations || [])) {
+          if (m.field !== `player.${i}.hand`) continue;
+          // The initial setup records player.N.hand as old=[] new=[{name,...}...].
+          if (Array.isArray(m.new)) {
+            for (const card of m.new) if (card && card.name) cards.push(card.name);
+          }
+        }
+      }
+      const c = PLAYER_COLORS[i % PLAYER_COLORS.length];
+      handRows.push(`<tr>
+        <td style="color:${c}; font-weight:600">P${i + 1}</td>
+        <td>${cards.length ? cards.join(" · ") : '<span style="color:#484f58">—</span>'}</td>
+      </tr>`);
+    }
+
+    // Initial pool from the setup's pool mutation.
+    let poolCards = [];
+    for (const e of (b.entries || [])) {
+      for (const m of (e.mutations || [])) {
+        if (m.field !== "pool") continue;
+        if (Array.isArray(m.new)) poolCards = m.new.map((c) => c && c.name).filter(Boolean);
+      }
+    }
+
+    const summaryHtml = `
+      <summary style="cursor:pointer; padding:8px 12px; background:#161b22; border-left:3px solid #f0883e; font-size:0.82rem; line-height:1.5;">
+        <span style="color:#f0883e; font-weight:600;">Turn 0 · Setup</span>
+        <span style="color:#8b949e; margin-left:8px;">Initial market, corporations, hands</span>
+      </summary>`;
+
+    return `<details open style="margin-bottom:4px;">${summaryHtml}
+      <div style="padding:12px 16px; background:#0d1117; border-left:3px solid #f0883e; font-size:0.78rem; line-height:1.6;">
+        <h4 style="color:#58a6ff; margin:4px 0 4px; font-size:0.8rem;">Initial Market</h4>
+        <div style="color:#c9d1d9">${marketLine(b.initial_market)} · ${pwrLine(b.initial_market)}</div>
+
+        <h4 style="color:#58a6ff; margin:12px 0 4px; font-size:0.8rem;">Corporations</h4>
+        <table style="width:100%; font-size:0.72rem;"><tbody>${corpRows || '<tr><td colspan="3" style="color:#484f58">none</td></tr>'}</tbody></table>
+
+        <h4 style="color:#58a6ff; margin:12px 0 4px; font-size:0.8rem;">Initial Hands</h4>
+        <table style="width:100%; font-size:0.72rem;"><tbody>${handRows.join("")}</tbody></table>
+
+        <h4 style="color:#58a6ff; margin:12px 0 4px; font-size:0.8rem;">Initial Pool</h4>
+        <div style="color:#c9d1d9">${poolCards.join(" · ") || '<span style="color:#484f58">—</span>'}</div>
+      </div>
+    </details>`;
+  };
+
   const renderTurnBlock = (b) => {
     const pidx = b.player_idx;
     const color = PLAYER_COLORS[pidx % PLAYER_COLORS.length];
     const player = gameData.players[pidx] || {};
     const round = Math.floor((b.turn_num - 1) / numPlayers) + 1;
-    const actingPre = (b.pre_state && b.pre_state[pidx]) || {};
-    const actingPost = (b.post_state && b.post_state[pidx]) || {};
-    const nwDelta = nwOf(actingPost) - nwOf(actingPre);
-    const deltaColor = nwDelta > 0 ? "#3fb950" : nwDelta < 0 ? "#f85149" : "#8b949e";
     const gameplay = b.actions.filter((a) => a.type !== "swap");
     const teaser = gameplay.length
       ? gameplay.slice(0, 2).map((a) => a.detail.replace(/\s*\([^)]+\)\s*$/, "")).join(" · ")
       : "Pass";
+    const acting = (b.post_state && b.post_state[pidx]) || {};
 
     const summaryHtml = `
       <summary style="cursor:pointer; padding:8px 12px; background:#161b22; border-left:3px solid ${color}; font-size:0.82rem; line-height:1.5;">
         <span style="color:${color}; font-weight:600;">Turn ${b.turn_num} · Round ${round} · P${pidx + 1} (${player.strategy || "?"})</span>
         <span style="color:#8b949e; margin-left:8px;">${teaser}</span>
-        <span style="color:${deltaColor}; margin-left:8px;">NW ${nwOf(actingPre)} → ${nwOf(actingPost)} (${signed(nwDelta)})</span>
+        <span style="color:#8b949e; margin-left:8px;">NW $${nwOf(acting)}</span>
       </summary>`;
 
     const actionRows = b.actions.length
@@ -724,10 +845,8 @@ function renderTurnLog() {
 
     return `<details style="margin-bottom:4px;">${summaryHtml}
       <div style="padding:12px 16px; background:#0d1117; border-left:3px solid ${color}; font-size:0.78rem; line-height:1.6;">
-        <div style="color:#8b949e; margin-bottom:8px;">Market at start: ${marketLine(b.pre_market)} · ${pwrLine(b.pre_market)}</div>
-        <h4 style="color:#58a6ff; margin:8px 0 4px; font-size:0.8rem;">Pre-turn state</h4>
-        ${stateTable(b.pre_state)}
-        <h4 style="color:#58a6ff; margin:12px 0 4px; font-size:0.8rem;">Actions by P${pidx + 1}</h4>
+        <div style="color:#8b949e; margin-bottom:8px;">Market: ${marketLine(b.post_market)} · ${pwrLine(b.post_market)}</div>
+        <h4 style="color:#58a6ff; margin:4px 0 4px; font-size:0.8rem;">Actions by P${pidx + 1}</h4>
         <ul style="margin:4px 0 0 16px; padding:0; list-style:disc;">${actionRows}</ul>
         <h4 style="color:#58a6ff; margin:12px 0 4px; font-size:0.8rem;">State after actions</h4>
         ${stateTable(b.post_state)}
@@ -735,39 +854,59 @@ function renderTurnLog() {
     </details>`;
   };
 
-  const renderEventBlock = (b) => {
-    const name = prettyEventName(b.type);
-    const anyImpact = (b.player_deltas || []).some((d) => d.money || d.debt || d.credit);
-    const summaryBits = [];
-    if (b.type === "event:patent_auction" && b.metadata && b.metadata.winner) {
-      const wi = nameToPidx(b.metadata.winner);
-      summaryBits.push(`${b.metadata.patent || ""} → P${wi + 1} for $${b.metadata.price}`);
-    } else if (b.type === "event:power_bill" && b.metadata && b.metadata.pwr_price !== undefined) {
-      summaryBits.push(`PWR @ $${b.metadata.pwr_price}`);
+  const renderEventsChain = (b) => {
+    // One chain = all consecutive events with no player action between them.
+    // Summary teases the chain (primary event name + count); body has a
+    // sub-block per event using the same type-specific renderer.
+    const first = b.events[0];
+    const count = b.events.length;
+    const primaryName = prettyEventName(first.type);
+    let teaser = "";
+    if (first.type === "event:patent_auction" && first.metadata && first.metadata.winner) {
+      const wi = nameToPidx(first.metadata.winner);
+      teaser = `${first.metadata.patent || ""} → P${wi + 1} for $${first.metadata.price}`;
+    } else if (first.type === "event:power_bill" && first.metadata && first.metadata.pwr_price !== undefined) {
+      teaser = `PWR @ $${first.metadata.pwr_price}`;
     } else {
-      summaryBits.push(b.summary.replace(/^Event: /, ""));
+      teaser = first.summary.replace(/^Event: /, "");
     }
+    const chainNote = count > 1 ? ` + ${count - 1} chained` : "";
+
+    const subBlocks = b.events.map((e) => {
+      const detail = renderEventDetail(e);
+      const name = prettyEventName(e.type);
+      return `
+        <div style="margin:8px 0; padding:8px 10px; background:#0d1117; border-left:2px solid #a371f7;">
+          <div style="color:#a371f7; font-weight:600; font-size:0.78rem;">⚡ ${name}</div>
+          ${detail}
+        </div>`;
+    }).join("");
+
+    const anyImpact = (b.player_deltas || []).some((d) => d.money || d.debt || d.credit);
 
     const summaryHtml = `
       <summary style="cursor:pointer; padding:6px 12px; background:#1f1b2a; border-left:3px solid #a371f7; font-size:0.8rem; line-height:1.5;">
-        <span style="color:#a371f7; font-weight:600;">⚡ ${name}</span>
-        <span style="color:#c9d1d9; margin-left:8px;">${summaryBits.join(" · ")}</span>
-        ${anyImpact ? '<span style="color:#8b949e; margin-left:8px; font-size:0.7rem">(multi-player impact)</span>' : ""}
+        <span style="color:#a371f7; font-weight:600;">⚡ ${primaryName}${chainNote}</span>
+        <span style="color:#c9d1d9; margin-left:8px;">${teaser}</span>
       </summary>`;
 
-    const detail = renderEventDetail(b);
     return `<details style="margin-bottom:4px; margin-left:16px;">${summaryHtml}
-      <div style="padding:10px 16px; background:#0d1117; border-left:3px solid #a371f7; font-size:0.76rem; line-height:1.6;">
-        <div style="color:#8b949e; margin-bottom:6px;">Market before event: ${marketLine(b.pre_market)} · ${pwrLine(b.pre_market)}</div>
-        ${detail}
-        ${anyImpact
-          ? `<h4 style="color:#58a6ff; margin:10px 0 4px; font-size:0.8rem;">Net impact per player</h4>${perPlayerDeltaList(b.player_deltas)}`
-          : ""}
+      <div style="padding:10px 16px; background:#161b22; border-left:3px solid #a371f7; font-size:0.76rem; line-height:1.6;">
+        ${subBlocks}
+        <h4 style="color:#58a6ff; margin:10px 0 4px; font-size:0.8rem;">Net impact per player (whole chain)</h4>
+        ${anyImpact ? perPlayerDeltaList(b.player_deltas) : '<div style="color:#484f58">no money / debt / credit change</div>'}
+        <h4 style="color:#58a6ff; margin:10px 0 4px; font-size:0.8rem;">State after events</h4>
+        ${stateTable(b.post_state)}
       </div>
     </details>`;
   };
 
-  const html = blocks.map((b) => b.kind === "turn" ? renderTurnBlock(b) : renderEventBlock(b)).join("");
+  const html = blocks.map((b) => {
+    if (b.kind === "setup") return renderSetupBlock(b);
+    if (b.kind === "turn") return renderTurnBlock(b);
+    if (b.kind === "events") return renderEventsChain(b);
+    return "";
+  }).join("");
   container.innerHTML = controls + html;
 
   const expandBtn = document.getElementById("tl-expand-all");
